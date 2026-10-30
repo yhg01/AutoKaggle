@@ -2,9 +2,25 @@
 
 The standalone source snapshot was checked on 30 October 2026. These results describe the tested behavior. They do not establish scientific validity for a new challenge.
 
+## Model response recovery — 30 October 2026
+
+The response schema now declares the same text and array limits as the server. Invalid question formatting is replaced with an open checklist question after factual validation. Invalid structure or evidence gets one automatic repair call per action, within the existing call budget. Rejected facts remain unapplied. Private diagnostics retain fixed failure codes only.
+
+The final automated checks passed 1,030 Python tests and 122 Node tests. Three expected warnings came from invalid class and numeric inputs. Live OpenRouter verification used GPT-6.1 Sol with medium reasoning. A three-turn SPOCK interview recovered from one deliberately invalid evidence excerpt in four model calls. Repeating each request ID added no messages or calls. Three additional calls verified that scope acceptance survives new information and that a correction reopens only the affected decision.
+
+A live browser test changed one real model response to contain an oversized question and an invalid checklist reference. The interview continued after one model call, kept the valid facts, and showed the next checklist question. No browser warnings or errors were observed. These checks establish response recovery; they do not establish the scientific validity of the challenge. The old failure handler did not retain its validation reason, so the exact cause of the earlier reported error is unknown.
+
+To repeat the live evidence-recovery check, place the private OpenRouter key in `.env` and run:
+
+```sh
+python -m autokaggle.scripts.live_response_verify --inject-evidence-error
+```
+
+The fault is applied only in the isolated verification script. Production never changes provider replies in this way. Reports are saved under ignored `autokaggle/test-results/`.
+
 ## Automated checks
 
-- 1,003 Python tests passed from the standalone checkout.
+- 1,030 Python tests passed from the standalone checkout.
 - 122 Node client tests passed.
 - Three expected warnings came from tests for unknown prediction classes and numeric overflow.
 

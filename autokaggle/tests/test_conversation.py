@@ -782,17 +782,17 @@ def test_existing_draft_gains_interview_fields_without_losing_evidence_or_retry(
     scope([update("question", "Predict stability"), update("question", "Predict stability")]),
     scope([update("unknown-field", "Predict stability")]),
     scope([update("question", "Predict stability", operation="correct", supersedes=["old"])]),
-    scope(field="task", question=""),
     SimpleNamespace(status="incomplete", output_text="{}"),
 ])
 def test_bad_output_preserves_message_and_facts_and_exposes_retry(monkeypatch, project, bad):
-    provider(monkeypatch, [bad])
+    provider(monkeypatch, [bad, bad])
     c.submit_message(project, "Predict stability", "first")
     state = c.ensure_conversation(project)
     assert state["status"] == "error" and state["can_retry"]
     assert len(users(state)) == 1
     assert all(item["status"] == "missing" for item in state["items"].values())
-    assert project["_model_calls"] == 1
+    assert project["_model_calls"] == 2
+    assert state["error_code"] != "model_service_failure"
 
 
 def test_error_retry_uses_saved_message_and_new_request_id(monkeypatch, project):
@@ -892,7 +892,7 @@ def test_bad_correction_spans_cannot_remove_previous_facts(monkeypatch, project,
     original = "Alice owns the work. Compute costs USD 20."
     correction = "Correction: compute is USD 40."
     new = update("plan", [correction] * max(1, len(supersedes)), operation="correct", supersedes=supersedes)
-    provider(monkeypatch, [scope([update("plan", original)]), scope([new])])
+    provider(monkeypatch, [scope([update("plan", original)]), scope([new]), scope([new])])
     c.submit_message(project, original, "first")
     c.submit_message(project, correction, "correct")
     state = c.ensure_conversation(project)
@@ -1428,7 +1428,8 @@ def test_model_extracts_specific_requirements_and_reuses_prior_researcher_eviden
 def test_invalid_requirement_response_is_atomic_and_retryable(monkeypatch, project, bad):
     state = c.ensure_conversation(project)
     before = copy.deepcopy(state["items"])
-    provider(monkeypatch, [scope([update("question", "Predict stability.")], requirements=[bad])])
+    invalid = scope([update("question", "Predict stability.")], requirements=[bad])
+    provider(monkeypatch, [invalid, invalid])
     c.submit_message(project, "Predict stability. The labels are unknown.", "invalid-requirement")
     assert state["status"] == "error" and state["can_retry"]
     assert state["items"] == before
@@ -1438,7 +1439,8 @@ def test_invalid_requirement_response_is_atomic_and_retryable(monkeypatch, proje
 
 def test_duplicate_requirement_response_is_rejected_without_partial_completion(monkeypatch, project):
     value = requirement("question", "scope", "Predict stability.")
-    provider(monkeypatch, [scope([update("question", "Predict stability.")], requirements=[value, value])])
+    invalid = scope([update("question", "Predict stability.")], requirements=[value, value])
+    provider(monkeypatch, [invalid, invalid])
     c.submit_message(project, "Predict stability.", "duplicate-requirement")
     state = c.ensure_conversation(project)
     assert state["status"] == "error"
@@ -1451,6 +1453,8 @@ def test_requirement_cannot_cite_a_fact_removed_by_the_same_correction(monkeypat
     correction = "Correction: labels are not available yet."
     provider(monkeypatch, [
         scope([update("data", original)], requirements=[requirement("data", "outcomes", "with lifetime labels.")]),
+        scope([update("data", "labels are not available yet.", "partial", "Which labels will exist?", "correct", ["with lifetime labels."])],
+              requirements=[requirement("data", "outcomes", "with lifetime labels.")]),
         scope([update("data", "labels are not available yet.", "partial", "Which labels will exist?", "correct", ["with lifetime labels."])],
               requirements=[requirement("data", "outcomes", "with lifetime labels.")]),
     ])
@@ -1660,6 +1664,7 @@ def test_corrected_quote_copied_to_another_item_cannot_restore_completion(monkey
         scope([update("data", original)], "data", "Which simulation source provides these labels?", requirements=[requirement("data", "outcomes", original), requirement("task", "outputs", original)]),
         scope([update("data", replacement, operation="correct", supersedes=[original])], "task", "What format should each prediction use?", requirements=[requirement("data", "outcomes", replacement)]),
         scope([], requirements=[requirement("task", "outputs", original)]),
+        scope([], requirements=[requirement("task", "outputs", original)]),
     ])
     c.submit_message(project, original, "original-horizon")
     c.submit_message(project, "Correction: " + replacement, "correct-horizon")
@@ -1696,6 +1701,8 @@ def test_retired_budget_in_correction_sentence_is_not_the_new_budget(monkeypatch
     provider(monkeypatch, [
         scope([update("plan", original)], "task", "What output should an attempt produce?", requirements=[
             requirement("plan", "compute_budget", original), requirement("deployment", "limits", "$20")]),
+        scope([update("plan", correction, operation="correct", supersedes=["$20"])], requirements=[
+            requirement("plan", "compute_budget", "$20")]),
         scope([update("plan", correction, operation="correct", supersedes=["$20"])], requirements=[
             requirement("plan", "compute_budget", "$20")]),
     ])

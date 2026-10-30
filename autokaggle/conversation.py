@@ -59,6 +59,48 @@ PARTIAL_QUESTIONS = {
 MAX_FOLLOWUPS = 8
 MAX_CALLS = 12
 MAX_REVISION_ROUNDS = 20
+
+
+class ModelResponseError(ValueError):
+    """A fixed validation message, never raw provider or researcher content."""
+
+    def __init__(self, message):
+        super().__init__(message)
+        self.code = re.sub(r"[^a-z0-9]+", "_", message.lower()).strip("_")
+        self.feedback = message + ". Return a complete replacement JSON response. Use one update per field and one assessment per field/id pair. Update evidence must be copied exactly from current_message. Requirement evidence must be copied exactly from permitted researcher sources. Correction supersedes spans must match the prior value or active confirmed scope detail exactly. Keep supported changes and preserve unrelated facts."
+
+
+def _record_response_issue(state, kind, code, attempt):
+    # Only application-owned identifiers cross the diagnostics boundary.
+    issues = state.setdefault("_response_diagnostics", [])
+    issues.append({"kind": kind, "code": code, "attempt": attempt})
+    del issues[:-20]
+
+
+def _validated_response(project, kind, context, reserve, validate):
+    """Repair one invalid model response without applying partial evidence."""
+    state = ensure_conversation(project)
+    request_context = copy.deepcopy(context)
+    previous = state.get("_last_response_failure")
+    if previous and previous.get("kind") == kind:
+        request_context["response_repair"] = copy.deepcopy(previous)
+    for attempt in (1, 2):
+        try:
+            parsed = _provider(project, kind, request_context, reserve)
+            result = validate(parsed)
+        except ModelResponseError as exc:
+            feedback = {"kind": kind, "code": exc.code, "instruction": exc.feedback}
+            state["_last_response_failure"] = feedback
+            _record_response_issue(state, kind, exc.code, attempt)
+            if attempt == 2 or state.get("_automatic_repair_used") or _call_count(project) >= MAX_CALLS:
+                raise
+            state["_automatic_repair_used"] = True
+            request_context["response_repair"] = feedback
+        else:
+            state.pop("_last_response_failure", None)
+            return result
+
+
 REVISION_MESSAGE = (
     "What do you want to see changed? Is the issue in the problem definition, "
     "method and deployment, or our attempt to reproduce the baseline?"
@@ -509,16 +551,26 @@ def _request(state, request_id, action, text=""):
     if len(state["_requests"]) >= 200:
         raise ValueError("This conversation has reached its 200-action limit. Save the README and start a new challenge.")
     state["_requests"][request_id] = fingerprint
+    state["_automatic_repair_used"] = False
     return True
 
 
 def _reset_error(state):
     state.update(status="idle", error=None, can_retry=False, _inflight=False)
+    state.pop("error_code", None)
 
 
 def _fail(state, exc, can_retry=True):
     ending = "Retry, or create a draft from the saved answers." if can_retry else "The model call limit was reached. Create a draft from the saved answers."
-    state.update(status="error", error=f"The model response could not be used ({type(exc).__name__}). Your message and recorded answers are saved. " + ending, can_retry=can_retry, _inflight=False)
+    if isinstance(exc, ModelResponseError):
+        cause = ("The model could not match its answer to the recorded evidence. "
+                 if any(word in exc.code for word in ("evidence", "source", "correction", "replacement", "conflict", "superseded"))
+                 else "The model returned an invalid or incomplete response format. ")
+        state["error_code"] = exc.code
+    else:
+        cause = "The model service did not complete the request. "
+        state["error_code"] = "model_service_failure"
+    state.update(status="error", error=cause + "Your message and recorded answers are saved. " + ending, can_retry=can_retry, _inflight=False)
 
 
 def _unknown(text):
@@ -530,24 +582,25 @@ def _draft_command(text):
 
 
 def _scope_schema():
+    quote = {"type": "string", "minLength": 1, "maxLength": 12000}
     return {"type": "object", "additionalProperties": False, "properties": {
-        "updates": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {
+        "updates": {"type": "array", "maxItems": len(ITEMS), "items": {"type": "object", "additionalProperties": False, "properties": {
             "field": {"type": "string", "enum": [key for key in BY_ID if key not in onboarding_setup.ITEM_FIELDS]}, "status": {"type": "string", "enum": ["partial", "answered", "deferred"]},
-            "operation": {"type": "string", "enum": ["append", "correct"]}, "evidence": {"type": "array", "items": {"type": "string"}},
-            "supersedes": {"type": "array", "items": {"type": "string"}}, "remaining_gap": {"type": "string"}},
+            "operation": {"type": "string", "enum": ["append", "correct"]}, "evidence": {"type": "array", "minItems": 1, "maxItems": 8, "items": quote},
+            "supersedes": {"type": "array", "maxItems": 8, "items": quote}, "remaining_gap": {"type": "string", "maxLength": 1000}},
             "required": ["field", "status", "operation", "evidence", "supersedes", "remaining_gap"]}},
-        "requirements": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {
+        "requirements": {"type": "array", "maxItems": sum(map(len, readiness.REQUIREMENTS.values())), "items": {"type": "object", "additionalProperties": False, "properties": {
             "field": {"type": "string", "enum": [key for key in BY_ID if key not in readiness.SERVER_FIELDS and key not in AGENT_OWNED_FIELDS]},
-            "id": {"type": "string"}, "status": {"type": "string", "enum": ["recorded", "missing", "deferred", "not_applicable", "conflicting"]},
-            "evidence": {"type": "array", "items": {"type": "string"}}, "reason": {"type": "string"}},
+            "id": {"type": "string", "enum": sorted({c["id"] for criteria in readiness.REQUIREMENTS.values() for c in criteria})}, "status": {"type": "string", "enum": ["recorded", "missing", "deferred", "not_applicable", "conflicting"]},
+            "evidence": {"type": "array", "maxItems": 8, "items": quote}, "reason": {"type": "string", "maxLength": 1000}},
             "required": ["field", "id", "status", "evidence", "reason"]}},
-        "question_field": {"type": "string", "enum": ["", *BY_ID]}, "question_text": {"type": "string"},
-        "question_requirement_id": {"type": "string"}, "question_why": {"type": "string"}},
+        "question_field": {"type": "string", "enum": ["", *BY_ID]}, "question_text": {"type": "string", "maxLength": 500},
+        "question_requirement_id": {"type": "string", "enum": ["", *sorted({c["id"] for criteria in readiness.REQUIREMENTS.values() for c in criteria})]}, "question_why": {"type": "string", "maxLength": 1000}},
         "required": ["updates", "requirements", "question_field", "question_text", "question_requirement_id", "question_why"]}
 
 
 def _draft_schema():
-    return {"type": "object", "additionalProperties": False, "properties": {"title": {"type": "string"}, "intro": {"type": "string"}, "next_actions": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "intro", "next_actions"]}
+    return {"type": "object", "additionalProperties": False, "properties": {"title": {"type": "string", "minLength": 1, "maxLength": 160}, "intro": {"type": "string", "maxLength": 1200}, "next_actions": {"type": "array", "maxItems": 5, "items": {"type": "string", "minLength": 1, "maxLength": 500}}}, "required": ["title", "intro", "next_actions"]}
 
 
 def _saved_project_context(project):
@@ -630,69 +683,67 @@ def _provider(project, kind, context, reserve):
             max_output_tokens=10000 if kind == "scope" else 1600,
             text={"format": {"type": "json_schema", "name": "onboarding_" + kind, "strict": True, "schema": _scope_schema() if kind == "scope" else _draft_schema()}})
     if response.status != "completed" or not response.output_text:
-        raise ValueError("Incomplete model response")
-    return json.loads(response.output_text)
+        raise ModelResponseError("Incomplete model response")
+    try:
+        return json.loads(response.output_text)
+    except (json.JSONDecodeError, TypeError):
+        raise ModelResponseError("Invalid JSON response") from None
 
 
 def _evidence(text, current):
     if not isinstance(text, str) or not text.strip():
-        raise ValueError("Evidence must be source text")
+        raise ModelResponseError("Evidence must be source text")
     if text in current:
         return text
     if len(text) > 2 and (text[0], text[-1]) in {('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’")} and text[1:-1] in current:
         return text[1:-1]
-    raise ValueError("Evidence was not in the current user message")
+    raise ModelResponseError("Evidence was not in the current user message")
 
 
 def _validate_scope(parsed, current, state):
     # Older saved/test provider responses can be read, but cannot establish
     # requirement completion. The live provider schema requires assessments.
     if not isinstance(parsed, dict) or not {"updates", "question_field", "question_text"} <= set(parsed) or set(parsed) - {"updates", "requirements", "question_field", "question_text", "question_requirement_id", "question_why"}:
-        raise ValueError("Invalid conversation response")
+        raise ModelResponseError("Invalid conversation response")
     if not isinstance(parsed["updates"], list) or len(parsed["updates"]) > len(ITEMS):
-        raise ValueError("Invalid updates")
-    if parsed["question_field"] not in ["", *BY_ID] or not isinstance(parsed["question_text"], str) or len(parsed["question_text"]) > 500:
-        raise ValueError("Invalid question")
-    if bool(parsed["question_field"]) != bool(parsed["question_text"].strip()):
-        raise ValueError("Incomplete question")
-    if not isinstance(parsed.get("question_why", ""), str) or len(parsed.get("question_why", "")) > 1000:
-        raise ValueError("Invalid question rationale")
-    identifier = parsed.get("question_requirement_id", "")
-    if not isinstance(identifier, str) or (identifier and not any(c["id"] == identifier for c in readiness.REQUIREMENTS.get(parsed["question_field"], []))):
-        raise ValueError("Invalid question requirement")
+        raise ModelResponseError("Invalid updates")
+    # Question wording and routing are presentation. Repair them only after
+    # every factual update and requirement passes validation.
     seen, updates = set(), []
     for update in parsed["updates"]:
         if not isinstance(update, dict) or set(update) != {"field", "status", "operation", "evidence", "supersedes", "remaining_gap"}:
-            raise ValueError("Invalid field update")
+            raise ModelResponseError("Invalid field update")
         key, status, operation = update["field"], update["status"], update["operation"]
-        if not isinstance(key, str) or key not in BY_ID or key in onboarding_setup.ITEM_FIELDS or key in seen or status not in {"partial", "answered", "deferred"} or operation not in {"append", "correct"}:
-            raise ValueError("Invalid field or status")
+        if isinstance(key, str) and key in seen:
+            raise ModelResponseError("Duplicate field update")
+        if not isinstance(key, str) or key not in BY_ID or key in onboarding_setup.ITEM_FIELDS or not isinstance(status, str) or status not in {"partial", "answered", "deferred"} or not isinstance(operation, str) or operation not in {"append", "correct"}:
+            raise ModelResponseError("Invalid field or status")
         if not isinstance(update["remaining_gap"], str) or len(update["remaining_gap"]) > 1000:
-            raise ValueError("Invalid remaining gap")
+            raise ModelResponseError("Invalid remaining gap")
         if status == "answered" and update["remaining_gap"].strip():
-            raise ValueError("Answered items cannot retain a gap")
+            raise ModelResponseError("Answered items cannot retain a gap")
         if not isinstance(update["evidence"], list) or not 1 <= len(update["evidence"]) <= 8:
-            raise ValueError("Updates need source evidence")
+            raise ModelResponseError("Updates need source evidence")
         evidence = [_evidence(value, current) for value in update["evidence"]]
         if operation == "append":
             evidence = list(dict.fromkeys(evidence))
         supersedes = update["supersedes"]
         if not isinstance(supersedes, list) or len(supersedes) > 8 or any(not isinstance(x, str) or not x or len(x) > 12000 for x in supersedes):
-            raise ValueError("Invalid correction excerpts")
+            raise ModelResponseError("Invalid correction excerpts")
         if operation == "append" and supersedes:
-            raise ValueError("An append cannot remove previous facts")
+            raise ModelResponseError("An append cannot remove previous facts")
         if operation == "correct" and not re.search(r"\b(correction|correcting|actually|instead|replace|revise|update|change|now|meant|wrong|should be)\b", current, re.IGNORECASE):
-            raise ValueError("A replacement needs an explicit correction")
+            raise ModelResponseError("A replacement needs an explicit correction")
         if operation == "correct":
             old = state["items"][key]["value"]
             confirmations = [resolution["detail"] for criterion in readiness.REQUIREMENTS[key]
                              if (resolution := readiness.scope_resolution(key, state["items"][key], criterion["id"])) and resolution["mode"] == "confirmed"]
             old = "\n".join([old, *dict.fromkeys(text for text in confirmations if text not in old)])
             if not supersedes or len(supersedes) != len(evidence) or any(old.count(x) != 1 for x in supersedes):
-                raise ValueError("Corrections must identify exact, unique prior spans")
+                raise ModelResponseError("Corrections must identify exact, unique prior spans")
             spans = sorted((old.index(x), old.index(x) + len(x)) for x in supersedes)
             if any(first[1] > second[0] for first, second in zip(spans, spans[1:])):
-                raise ValueError("Correction spans overlap")
+                raise ModelResponseError("Correction spans overlap")
         seen.add(key)
         updates.append({**update, "evidence": evidence})
     return updates
@@ -701,7 +752,7 @@ def _validate_scope(parsed, current, state):
 def _validate_requirements(parsed, current, state, updates):
     records = parsed.get("requirements", [])
     if not isinstance(records, list) or len(records) > sum(map(len, readiness.REQUIREMENTS.values())):
-        raise ValueError("Invalid requirement assessments")
+        raise ModelResponseError("Invalid requirement assessments")
     prospective = copy.deepcopy(state)
     _apply(prospective, updates, "assessment-preview")
     fact_sources = [current] + [item.get("value", "") for key, item in prospective["items"].items()
@@ -714,15 +765,17 @@ def _validate_requirements(parsed, current, state, updates):
     seen, clean = set(), []
     for record in records:
         if not isinstance(record, dict) or set(record) != {"field", "id", "status", "evidence", "reason"}:
-            raise ValueError("Invalid requirement record")
+            raise ModelResponseError("Invalid requirement record")
         field, identifier, status = record["field"], record["id"], record["status"]
         if not isinstance(field, str) or field not in readiness.REQUIREMENTS or field in readiness.SERVER_FIELDS or field in AGENT_OWNED_FIELDS:
-            raise ValueError("Requirement is not model-owned")
+            raise ModelResponseError("Requirement is not model-owned")
         criterion = next((c for c in readiness.REQUIREMENTS[field] if c["id"] == identifier), None)
-        if not criterion or (field, identifier) in seen or status not in {"recorded", "missing", "deferred", "not_applicable", "conflicting"}:
-            raise ValueError("Invalid requirement identifier or status")
+        if isinstance(identifier, str) and (field, identifier) in seen:
+            raise ModelResponseError("Duplicate requirement assessment")
+        if not isinstance(identifier, str) or not criterion or not isinstance(status, str) or status not in {"recorded", "missing", "deferred", "not_applicable", "conflicting"}:
+            raise ModelResponseError("Invalid requirement identifier or status")
         if not isinstance(record["reason"], str) or len(record["reason"]) > 1000:
-            raise ValueError("Invalid requirement reason")
+            raise ModelResponseError("Invalid requirement reason")
         accepted = readiness.scope_resolution(field, state["items"][field], identifier)
         if accepted and accepted["mode"] in {"delegated", "exception"} and status in {"recorded", "not_applicable"}:
             # A redundant model assessment cannot promote a bounded delegation
@@ -731,21 +784,21 @@ def _validate_requirements(parsed, current, state, updates):
             continue
         evidence = record["evidence"]
         if not isinstance(evidence, list) or len(evidence) > 8 or any(not isinstance(q, str) or not q.strip() or not any(q in source for source in sources) for q in evidence):
-            raise ValueError("Requirement evidence was not in the recorded research statements")
+            raise ModelResponseError("Requirement evidence was not in the recorded research statements")
         if status in {"recorded", "not_applicable"} and not evidence:
-            raise ValueError("Completed requirements need source evidence")
+            raise ModelResponseError("Completed requirements need source evidence")
         if status in {"recorded", "not_applicable"} and not _has_recorded_facts("\n".join(evidence)):
-            raise ValueError("Unknown answers cannot complete a requirement")
+            raise ModelResponseError("Unknown answers cannot complete a requirement")
         retired = prospective.get("_superseded_evidence", [])
         replacements = [_replacement_text(span, quote) for update in updates if update["operation"] == "correct"
                         for span, quote in zip(update["supersedes"], update["evidence"])]
         if any(any(old in quote or quote in old for old in retired) and not any(quote in replacement for replacement in replacements)
                for quote in evidence):
-            raise ValueError("Superseded evidence cannot complete a requirement")
+            raise ModelResponseError("Superseded evidence cannot complete a requirement")
         if status == "not_applicable" and (not criterion["allow_not_applicable"] or not record["reason"].strip()):
-            raise ValueError("This requirement cannot be omitted without an allowed reason")
+            raise ModelResponseError("This requirement cannot be omitted without an allowed reason")
         if status in {"missing", "deferred"} and not record["reason"].strip():
-            raise ValueError("Open requirements need a specific gap")
+            raise ModelResponseError("Open requirements need a specific gap")
         previous = state["items"][field].get("requirements", {}).get(identifier, {})
         explicit_correction = bool(accepted and accepted["mode"] == "confirmed" and status in {"missing", "deferred"}
             and any(quote in current for quote in evidence)
@@ -759,7 +812,7 @@ def _validate_requirements(parsed, current, state, updates):
             old = [quote for quote in evidence if any(quote in source for source in prior) and quote not in current]
             new = [quote for quote in evidence if quote in current and not any(quote in source for source in prior) and _has_recorded_facts(quote)]
             if not record["reason"].strip() or not old or not new:
-                raise ValueError("A conflict needs prior and new source evidence for this requirement")
+                raise ModelResponseError("A conflict needs prior and new source evidence for this requirement")
         if previous.get("status") == "conflicting" and status in {"recorded", "not_applicable"} and not any(q in current for q in evidence):
             continue
         seen.add((field, identifier))
@@ -767,6 +820,53 @@ def _validate_requirements(parsed, current, state, updates):
         clean.append({**record, "evidence": list(dict.fromkeys(evidence)), "value": "\n".join(dict.fromkeys(evidence)),
                       "scope_sources": dependencies, "explicit_correction": explicit_correction})
     return clean
+
+
+def _repair_question(parsed, state, updates, requirements):
+    """Replace invalid presentation with an exact, server-owned open criterion."""
+    field, text = parsed["question_field"], parsed["question_text"]
+    identifier, why = parsed.get("question_requirement_id", ""), parsed.get("question_why", "")
+    prospective = copy.deepcopy(state)
+    _apply(prospective, updates, "question-preview")
+    if "requirements" in parsed:
+        _apply_requirements(prospective, requirements)
+    valid_field = isinstance(field, str) and field in BY_ID and field not in AGENT_OWNED_FIELDS
+    valid_strings = all(isinstance(value, str) for value in (text, identifier, why))
+    empty = field == "" and valid_strings and not any(value.strip() for value in (text, identifier, why))
+    criterion = _target_criterion(prospective, field, parsed) if valid_field else None
+    valid = (valid_field and valid_strings and bool(text.strip()) and len(text) <= 500
+             and len(why) <= 1000 and text.count("?") <= 1 and "\n" not in text
+             and ("question_requirement_id" not in parsed or bool(criterion and criterion["id"] == identifier))
+             and ("question_why" not in parsed or bool(why.strip())))
+    if empty or valid:
+        return parsed
+    revision = _revision(prospective)
+    if revision:
+        candidates = [field] if valid_field else []
+        active = state.get("current_question") or state.get("scope_checkpoint") or {}
+        candidates += [active.get("field"), *revision["changed_fields"]]
+        candidates = [key for key in candidates if key in BY_ID and key not in AGENT_OWNED_FIELDS
+                      and key not in revision["deferred_fields"]]
+    else:
+        candidates = _eligible(prospective)
+        if valid_field and field in candidates:
+            candidates = [field, *[key for key in candidates if key != field]]
+    target = next(((key, _target_criterion(prospective, key)) for key in candidates
+                   if _target_criterion(prospective, key)), None)
+    repaired = {**parsed, "question_field": "", "question_requirement_id": "", "question_text": "", "question_why": ""}
+    if target:
+        key, criterion = target
+        repaired.update(question_field=key, question_requirement_id=criterion["id"],
+                        question_text=f"Please define {criterion['label'].lower()} for this challenge. {criterion['description']}",
+                        question_why=criterion["description"])
+    _record_response_issue(state, "scope", "question_presentation_repaired", 0)
+    return repaired
+
+
+def _validated_scope(parsed, text, state):
+    updates = _validate_scope(parsed, text, state)
+    requirements = _validate_requirements(parsed, text, state, updates)
+    return _repair_question(parsed, state, updates, requirements), updates, requirements
 
 
 def _apply_requirements(state, records):
@@ -1208,13 +1308,7 @@ def _draft(project, reserve):
         context = {"recorded_items": public_items, "title": onboarding_setup.redact_private(project, project.get("title", "")), "instruction": "Suggest framing and next actions only. The server renders the answers and decision. Artifact preparation, private organizer review, and first-trial feedback are requirements; do not claim they happened."}
         if _revision(state):
             context["revision_context"] = _revision_context(project)
-        parsed = _provider(project, "draft", context, reserve)
-        if not isinstance(parsed, dict) or set(parsed) != {"title", "intro", "next_actions"}:
-            raise ValueError("Invalid draft metadata")
-        if not isinstance(parsed["title"], str) or not parsed["title"].strip() or len(parsed["title"]) > 160 or not isinstance(parsed["intro"], str) or len(parsed["intro"]) > 1200:
-            raise ValueError("Invalid draft framing")
-        if not isinstance(parsed["next_actions"], list) or len(parsed["next_actions"]) > 5 or any(not isinstance(x, str) or not x.strip() or len(x) > 500 for x in parsed["next_actions"]):
-            raise ValueError("Invalid next actions")
+        parsed = _validated_response(project, "draft", context, reserve, _validate_draft)
         state["_draft_meta"] = parsed
         if project.get("title") in DEFAULT_TITLES or project.get("title") == state.get("_generated_title"):
             project["title"] = parsed["title"].replace("\n", " ").strip()
@@ -1233,6 +1327,16 @@ def _draft(project, reserve):
                       f"{len(definition['blockers'])} required details remain open. Select Continue interview to work through them, or send a correction. A reference baseline is optional."))
     except Exception as exc:
         _fail(state, exc, _call_count(project) < MAX_CALLS)
+
+
+def _validate_draft(parsed):
+    if not isinstance(parsed, dict) or set(parsed) != {"title", "intro", "next_actions"}:
+        raise ModelResponseError("Invalid draft metadata")
+    if not isinstance(parsed["title"], str) or not parsed["title"].strip() or len(parsed["title"]) > 160 or not isinstance(parsed["intro"], str) or len(parsed["intro"]) > 1200:
+        raise ModelResponseError("Invalid draft framing")
+    if not isinstance(parsed["next_actions"], list) or len(parsed["next_actions"]) > 5 or any(not isinstance(x, str) or not x.strip() or len(x) > 500 for x in parsed["next_actions"]):
+        raise ModelResponseError("Invalid next actions")
+    return parsed
 
 
 def _revision_context(project):
@@ -1366,9 +1470,8 @@ def _process_message(project, reserve):
                            followups_remaining=MAX_FOLLOWUPS - revision["followups"],
                            questions_this_round=revision["asked_questions"], deferred_this_round=revision["deferred_fields"],
                            question_policy="Clarify the organizer's requested changes and necessary consequences only. The previous interview is context. Ask one targeted question if the change is not yet precise or supported. Do not revisit unrelated old gaps. A checklist field can be clarified again with a distinct question, unless deferred this round. Return empty question fields when the change is ready to draft.")
-        parsed = _provider(project, "scope", context, reserve)
-        updates = _validate_scope(parsed, text, state)
-        requirements = _validate_requirements(parsed, text, state, updates)
+        parsed, updates, requirements = _validated_response(project, "scope", context, reserve,
+                                                            lambda response: _validated_scope(response, text, state))
         _apply(state, updates, message_id)
         if "requirements" in parsed:
             _apply_requirements(state, requirements)
