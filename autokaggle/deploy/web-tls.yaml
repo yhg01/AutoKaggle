@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: autokaggle-web
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.35
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: v1.35
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: v1.35
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: autokaggle-letsencrypt
+  namespace: autokaggle-web
+spec:
+  acme:
+    email: boldcoscientist@gmail.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: autokaggle-letsencrypt-account
+    solvers:
+      - http01:
+          ingress:
+            class: traefik
+            serviceType: ClusterIP
+            ingressTemplate:
+              metadata:
+                annotations:
+                  traefik.ingress.kubernetes.io/router.entrypoints: web
+            podTemplate:
+              metadata:
+                labels:
+                  app.kubernetes.io/component: autokaggle-acme-solver
+              spec:
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 1001
+                  runAsGroup: 1001
+                  seccompProfile:
+                    type: RuntimeDefault
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 32Mi
+                  limits:
+                    cpu: 100m
+                    memory: 64Mi
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: autokaggle-web-tls
+  namespace: autokaggle-web
+spec:
+  secretName: autokaggle-web-tls
+  issuerRef:
+    name: autokaggle-letsencrypt
+    kind: Issuer
+  dnsNames:
+    - ecc962fa-2f4c-4a3f-96c4-179af273fb7a.k8s.civo.com
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  renewBefore: 360h

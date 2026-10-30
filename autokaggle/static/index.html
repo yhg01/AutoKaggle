@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#193b3a">
+  <link rel="icon" type="image/svg+xml" href="/static/bold-butterfly.svg"><title>BOLD AutoKaggle — Challenge workbench</title>
+  <link rel="stylesheet" href="/static/app.css?v=bold-20261030">
+  <script src="/static/app.js?v=upload-200mb-20261030" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div id="organizer-app">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="BOLD AutoKaggle home"><img class="brand-mark" src="/static/bold-butterfly.svg" width="40" height="40" alt="" aria-hidden="true"><span><span class="brand-bold">BOLD</span> AutoKaggle<small>CHALLENGE WORKBENCH</small></span></a>
+      <div class="workspace-controls">
+        <label class="sr-only" for="project-switch">Recent challenges</label>
+        <select id="project-switch" aria-label="Recent challenges"><option value="">Recent challenges</option></select>
+        <button class="button button-secondary button-small" id="new-project">＋ New challenge</button>
+      </div>
+    </header>
+
+    <div class="notice-region" id="notice-region" aria-live="polite"></div>
+    <div class="app-layout">
+      <aside class="sidebar" aria-label="Challenge progress">
+        <div class="sidebar-intro"><span class="eyebrow">YOUR WORKFLOW</span><p>A good challenge starts<br>with a clear question.</p></div>
+        <nav aria-label="Workflow stages">
+          <a href="#problem" class="stage-link"><span class="stage-number">01</span><span>Frame the problem<small>Purpose &amp; evidence</small></span></a>
+          <a href="#data" class="stage-link"><span class="stage-number">02</span><span>Understand the data<small>Source &amp; structure</small></span></a>
+          <a href="#evaluation" class="stage-link"><span class="stage-number">03</span><span>Design the evaluation<small>Metric &amp; holdout</small></span></a>
+          <a href="#trial" class="stage-link"><span class="stage-number">04</span><span>Run a trial<small>Checks &amp; baselines</small></span></a>
+          <a href="#review" class="stage-link"><span class="stage-number">05</span><span>Review &amp; package<small>Ready for a researcher</small></span></a>
+        </nav>
+        <details class="readiness" open><summary class="readiness-heading"><span>Readiness checklist</span><span id="checklist-count">0 complete</span></summary><div class="progress-track"><div id="checklist-progress"></div></div><ul id="checklist"><li class="empty-checklist">Create a challenge to start.</li></ul></details>
+        <a class="source-link" href="https://data.mlr.press/assets/pdf/v02-10.pdf" target="_blank" rel="noopener noreferrer">Based on the Challenge<br>design roadmap <span aria-hidden="true">↗</span></a>
+      </aside>
+
+      <main id="main" tabindex="-1">
+        <section id="welcome" class="welcome">
+          <div class="eyebrow">FROM RESEARCH QUESTION TO RESEARCH CHALLENGE</div>
+          <h1>Make the problem clear.<br>Make the test meaningful.</h1>
+          <p class="lead">Turn a scientific question and a dataset into a challenge with a training set, a private holdout, and a reviewable evaluation plan.</p>
+          <button class="button button-primary" id="start-project">Create a challenge <span aria-hidden="true">↗</span></button>
+          <div class="welcome-diagram" aria-label="Question, data, evaluation, trial, challenge"><span>Research question</span><span aria-hidden="true">→</span><span>Data &amp; evaluation</span><span aria-hidden="true">→</span><span>Reviewed challenge</span></div>
+          <div class="examples-intro"><span class="eyebrow">TRY A SYNTHETIC EXAMPLE</span><p>Three starting points. Three different things to find.</p></div>
+          <div class="example-grid">
+            <button class="example-card" data-example="materials"><span class="example-icon" aria-hidden="true">◇</span><strong>Materials discovery</strong><span>A prediction task with a useful signal. Build a baseline and inspect the split.</span><small>START WITH SIGNAL <span aria-hidden="true">↗</span></small></button>
+            <button class="example-card" data-example="leakage"><span class="example-icon" aria-hidden="true">⌁</span><strong>A misleading shortcut</strong><span>A dataset with a suspicious feature. See which checks need attention.</span><small>FIND THE LEAKAGE <span aria-hidden="true">↗</span></small></button>
+            <button class="example-card" data-example="noise"><span class="example-icon" aria-hidden="true">∷</span><strong>No signal, by design</strong><span>Independent random labels. Test a claim against a chance baseline.</span><small>QUESTION THE SIGNAL <span aria-hidden="true">↗</span></small></button>
+          </div>
+        </section>
+
+        <div id="workspace" hidden>
+          <div class="workspace-heading"><div><div class="eyebrow">ORGANIZER WORKSPACE</div><h1 id="workspace-title">Untitled challenge</h1><p>Scope, test, and review before you release.</p></div><div class="save-controls"><span id="save-state" class="save-state" role="status">Saved</span><button id="save-project" class="button button-secondary button-small">Save changes</button></div></div>
+          <section class="agent-run-panel" aria-labelledby="agent-run-heading"><div class="agent-run-intro"><span class="adviser-symbol" aria-hidden="true">✳</span><div><h2 id="agent-run-heading">Let the onboarding agent take a first pass</h2><p>It scopes the brief, checks the data, runs a trial, and prepares a review. You make the release decision.</p></div><button id="run-agent" class="button button-primary">Run onboarding agent <span aria-hidden="true">→</span></button></div><div id="agent-progress" hidden><div class="agent-progress-heading"><strong id="agent-stage">Preparing…</strong><span id="agent-status" class="status-badge">Running</span></div><ol id="agent-events" class="agent-events" aria-label="Agent activity"></ol></div></section>
+          <div class="workbench-grid">
+            <div class="workbench-main">
+              <form id="challenge-form">
+                <section class="panel section-panel" id="problem" aria-labelledby="problem-heading">
+                  <div class="section-heading"><span class="section-index">01</span><div><h2 id="problem-heading">Frame the problem</h2><p>Describe the decision that better predictions would support.</p></div></div>
+                  <label for="title">Challenge title</label><input id="title" name="title" maxlength="200" placeholder="e.g. Predict the strength of a new material">
+                  <label for="brief">Research brief</label><textarea id="brief" name="brief" rows="4" placeholder="What is the scientific question? What data do you have, and what should a useful result establish?"></textarea>
+                  <div class="field-grid"><div><label for="objective">Scientific objective</label><textarea id="objective" name="objective" rows="3" placeholder="What should this research make possible?"></textarea></div><div><label for="prediction-unit">One prediction represents…</label><textarea id="prediction-unit" name="prediction_unit" rows="3" placeholder="A material sample, a patient, a future observation…"></textarea></div></div>
+                  <label for="success-criterion">What would count as a useful result?</label><textarea id="success-criterion" name="success_criterion" rows="2" placeholder="Describe a meaningful improvement and how you would use it."></textarea>
+                  <div class="field-divider"></div><h3>Budget for one credible attempt</h3><p class="field-help">Include experiments and final evaluation. Give a US dollar amount or range. “Unknown” is a valid starting point.</p>
+                  <div class="field-grid"><div><label for="compute-budget">Compute estimate (USD)</label><input id="compute-budget" name="compute_budget" placeholder="e.g. $500–$1,000, or unknown"></div><div><label for="token-budget">Model token estimate (USD)</label><input id="token-budget" name="token_budget" placeholder="e.g. $50, $0, or unknown"></div></div>
+                </section>
+
+                <section class="panel section-panel" id="data" aria-labelledby="data-heading">
+                  <div class="section-heading"><span class="section-index">02</span><div><h2 id="data-heading">Understand the data</h2><p>Establish where the data came from and who can use it.</p></div></div>
+                  <div class="field-grid"><div><label for="data-origin">Dataset source</label><select id="data-origin" name="data_origin"><option value="unknown">Not established</option><option value="private">Private data</option><option value="public">Public data</option><option value="synthetic">Synthetic data</option></select></div><div><label for="labels-public">Are the answer labels public?</label><select id="labels-public" name="labels_public"><option value="unknown">Not established</option><option value="no">No</option><option value="yes">Yes</option></select></div></div>
+                  <label for="rights">Do you have permission to use and share the training data?</label><select id="rights" name="rights"><option value="unknown">Not established</option><option value="yes">Yes, permission is confirmed</option></select>
+                  <div class="upload-box" id="upload-box"><div class="upload-icon" aria-hidden="true">↑</div><div><h3 id="upload-heading">Add a dataset</h3><p id="upload-help">CSV format · up to 200 MB</p><p id="upload-drive-help">For larger files, paste a Google Drive link in the interview. Set General access to &ldquo;Anyone with the link&rdquo; and the role to &ldquo;Viewer&rdquo;. Drive links are saved for review; automatic import is not yet available.</p><label for="dataset-file" class="button button-secondary button-small upload-label">Choose CSV file</label><input type="file" id="dataset-file" accept=".csv,text/csv" aria-describedby="upload-help upload-drive-help" class="file-input"></div></div>
+                  <div id="upload-progress-wrap" hidden><div class="upload-status"><span id="upload-status">Uploading…</span><span id="upload-percent">0%</span></div><progress id="upload-progress" max="100" value="0" aria-label="Dataset upload progress"></progress></div>
+                  <div id="dataset-summary" hidden></div>
+                  <details class="sample-details"><summary>Or load a synthetic example</summary><p>Each example starts a new challenge. Your current draft is saved.</p><div class="button-row"><button type="button" class="button button-quiet button-small" data-example="materials">Materials discovery</button><button type="button" class="button button-quiet button-small" data-example="leakage">Misleading shortcut</button><button type="button" class="button button-quiet button-small" data-example="noise">Random labels</button></div></details>
+                </section>
+
+                <section class="panel section-panel" id="evaluation" aria-labelledby="evaluation-heading">
+                  <div class="section-heading"><span class="section-index">03</span><div><h2 id="evaluation-heading">Design the evaluation</h2><p>Choose the prediction target and the conditions the model must handle.</p></div></div>
+                  <div class="field-grid"><div><label for="target">Target column</label><select id="target" name="target"><option value="">Add a dataset first</option></select></div><div><label for="task">Prediction task</label><select id="task" name="task"><option value="classification">Classification</option><option value="regression">Regression</option></select></div></div>
+                  <div class="field-grid"><div><label for="metric">Evaluation metric</label><select id="metric" name="metric"><option value="accuracy">Accuracy</option><option value="balanced_accuracy">Balanced accuracy</option><option value="roc_auc">ROC AUC</option></select></div><div><label for="split">Holdout strategy</label><select id="split" name="split"><option value="random">Random rows</option><option value="group">Separate groups</option><option value="time">Future observations</option></select></div></div>
+                  <p class="field-help" id="split-help">Use random rows only when observations are independent.</p>
+                  <div id="group-field" hidden><label for="group-column">Group column</label><select id="group-column" name="group_column"><option value="">Select a column</option></select><p class="field-help">Keep observations from the same patient, site, or source together.</p></div>
+                  <div id="time-field" hidden><label for="time-column">Time column</label><select id="time-column" name="time_column"><option value="">Select a column</option></select><p class="field-help">Use later observations as the held-out test set.</p></div>
+                  <div class="split-visual"><div class="split-bar"><span class="training-bar"></span><span class="test-bar"></span></div><div class="split-labels"><span><i class="dot training-dot"></i><strong>80% training</strong><small>Shared with the researcher</small></span><span><i class="dot test-dot"></i><strong>20% hidden test</strong><small>Organizer access only</small></span></div></div>
+                  <fieldset class="exclude-fieldset"><legend>Exclude columns from model inputs</legend><p class="field-help">Remove identifiers, answer proxies, and information unavailable at prediction time.</p><div id="exclude-columns" class="column-options"><span class="muted">Add a dataset to select columns.</span></div></fieldset>
+                  <p class="subtle-note">Group splits can be approximate. Final test rows are kept out of the baseline trial.</p>
+                </section>
+              </form>
+
+              <section class="panel section-panel" id="trial" aria-labelledby="trial-heading">
+                <div class="section-heading"><span class="section-index">04</span><div><h2 id="trial-heading">Run a trial</h2><p>Check for data problems and compare a baseline with a simple reference.</p></div></div>
+                <button id="analyze-project" class="button button-primary">Run checks &amp; baseline <span aria-hidden="true">→</span></button>
+                <div id="analysis-empty" class="empty-state"><span class="empty-state-icon" aria-hidden="true">◎</span><h3>Evidence goes here</h3><p>Add your data and evaluation design, then run the trial. Results are calculated from your dataset.</p></div>
+                <div id="analysis-results" hidden><div id="audit-summary" class="audit-summary"></div><div id="baseline-result"></div><div id="split-result"></div><div id="audit-checks"></div><div id="analysis-limitations"></div></div>
+              </section>
+
+              <section class="panel section-panel" id="review" aria-labelledby="review-heading">
+                <div class="section-heading"><span class="section-index">05</span><div><h2 id="review-heading">Review &amp; package</h2><p>Make an explicit decision before sharing the challenge.</p></div></div>
+                <div class="review-actions"><button id="review-project" class="button button-secondary">Request a design review</button><a id="brief-download" class="text-link" href="#">Download challenge brief <span aria-hidden="true">↓</span></a></div>
+                <div class="release-note"><strong>A passed check is evidence, not a guarantee.</strong><p>Review the scientific task, permissions, split, and remaining warnings. Public answers require fresh private evaluation labels before release.</p></div>
+                <label class="approval-label" for="acknowledge-review"><input type="checkbox" id="acknowledge-review"><span>I have reviewed this design and its warnings. I understand this is a local prototype, and a production challenge needs an isolated evaluation service.</span></label>
+                <button id="prepare-project" class="button button-primary" disabled>Prepare challenge packages <span aria-hidden="true">→</span></button><p id="prepare-help" class="field-help">Complete the review checkbox to prepare. Blocking checks must pass.</p>
+                <div id="packages" hidden><div class="prepared-banner"><span aria-hidden="true">✓</span><div><strong>Challenge packages are ready</strong><p>Any edit requires a fresh review and new packages.</p></div></div><div class="package-grid"><div class="package-card researcher-package"><span class="eyebrow">FOR THE RESEARCHER</span><h3>Training package</h3><p>Training data and the challenge instructions.</p><a id="researcher-download" class="button button-secondary" href="#">Download training ZIP <span aria-hidden="true">↓</span></a></div><div class="package-card organizer-package"><span class="eyebrow">PRIVATE · ORGANIZER ONLY</span><h3>Held-out test package</h3><p>Test data and the reference scorer. Keep this private.</p><a id="organizer-download" class="button button-secondary" href="#">Download private ZIP <span aria-hidden="true">↓</span></a></div></div><p class="subtle-note">Includes an AIRS-inspired adapter. Compatibility with AIRS has not been validated.</p><div class="participant-preview"><div><strong>See the researcher’s view</strong><p>A separate page with the approved training package.</p></div><button id="participant-link" class="button button-quiet button-small">Open participant preview <span aria-hidden="true">↗</span></button></div></div>
+              </section>
+            </div>
+
+            <aside class="adviser-column" aria-label="Design adviser"><div class="adviser-panel"><div class="adviser-heading"><span class="adviser-symbol" aria-hidden="true">✳</span><div><h2>Design adviser</h2><span id="adviser-mode" class="mode-label">Checking availability…</span></div></div><p class="adviser-intro">Get a short set of questions tied to missing evidence. Answer in the form, then move on.</p><button id="advise-project" class="button button-secondary adviser-button">Suggest the next step <span aria-hidden="true">→</span></button><div id="advice-content"><div class="advice-empty"><span class="eyebrow">A USEFUL STARTING POINT</span><p>What must a model predict, and what would that prediction change for a scientist?</p><span>Write the problem in your own words. The adviser can help make it precise.</span></div></div></div><div class="boundary-note"><span class="eyebrow">A CLEAR BOUNDARY</span><p>The adviser receives the brief and data summaries. It does not receive your CSV cells or held-out rows.</p></div></aside>
+          </div>
+        </div>
+        <footer class="app-footer"><span>BOLD AutoKaggle · Research prototype</span><p>Local sessions and separate packages demonstrate the workflow. Use an isolated, access-controlled evaluation service before running a public challenge.</p></footer>
+      </main>
+    </div>
+  </div>
+  <main id="participant-app" class="participant-app" hidden tabindex="-1"></main>
+  <div id="busy-status" class="busy-status" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span id="busy-text">Working…</span></div>
+</body>
+</html>

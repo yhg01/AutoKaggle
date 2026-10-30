@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f9f4">
+  <link rel="icon" type="image/svg+xml" href="/static/bold-butterfly.svg"><title>BOLD AutoKaggle — Shape a research challenge</title>
+  <link rel="stylesheet" href="/static/chat.css?v=scope-email-login-upload-200mb-20261030">
+  <script src="/static/chat.js?v=scope-email-login-access-state-20261030" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#conversation">Skip to conversation</a>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><img class="brand-mark" src="/static/bold-butterfly.svg" width="40" height="40" alt="" aria-hidden="true"><span><span class="brand-bold">BOLD</span> AutoKaggle<small>FROM QUESTION TO CHALLENGE</small></span></div>
+      <div class="project-controls"><button id="sign-out" class="button button-quiet" type="button" hidden>Sign out</button><button id="new-project" class="button button-quiet" type="button"><span aria-hidden="true">＋</span> New<span class="desktop-word"> challenge</span></button></div>
+    </header>
+
+    <main class="main-pane" id="conversation" tabindex="-1">
+      <div class="conversation-toolbar">
+        <div class="challenge-heading"><span id="workspace-label" class="eyebrow">RESEARCH INTERVIEW</span><h1 id="project-title">New challenge</h1><span id="mode-label" class="mode-label">Connecting…</span></div>
+        <div class="view-controls"><button id="checklist-toggle" class="button button-quiet" type="button" aria-haspopup="dialog">Collected notes</button><div class="view-tabs" role="tablist" aria-label="Workspace view"><button id="chat-tab" type="button" role="tab" aria-selected="true" aria-controls="chat-view">Conversation</button><button id="readme-tab" type="button" role="tab" aria-selected="false" aria-controls="readme-view" disabled>Draft &amp; package<span id="readme-dot" hidden aria-hidden="true"></span></button><button id="review-tab" type="button" role="tab" aria-selected="false" aria-controls="review-view" disabled>Review</button></div></div>
+      </div>
+      <nav id="interview-topics" class="interview-topics" aria-label="Interview topics"></nav>
+
+      <div id="error-banner" class="error-banner" role="alert" hidden><div><strong id="error-heading">Something needs attention</strong><p id="error-text"></p></div><button id="retry-action" class="button button-small button-secondary" type="button" hidden>Retry</button><button id="dismiss-error" class="icon-button" type="button" aria-label="Dismiss notice">×</button></div>
+
+      <section id="email-gate" class="email-gate" aria-labelledby="email-heading" hidden>
+        <form id="organizer-email-form" class="email-card">
+          <img src="/static/bold-butterfly.svg" width="48" height="48" alt="" aria-hidden="true">
+          <span class="eyebrow">YOUR PRIVATE WORKSPACE</span>
+          <h2 id="email-heading">Where should we send your challenge?</h2>
+          <p>Enter your email first. We use this address for private review links to the website, research ZIP, and submission test. You can then ask the agent for changes.</p>
+          <label for="organizer-email">Organizer email</label>
+          <input id="organizer-email" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@university.edu" required aria-describedby="email-privacy email-error">
+          <p id="email-privacy" class="email-privacy">Your email stays private. It will not appear in participant files.</p>
+          <p id="email-error" class="field-notice error" role="alert" hidden></p>
+          <button id="save-organizer-email" class="button button-primary" type="submit">Continue to interview <span aria-hidden="true">→</span></button>
+          <p id="email-existing-note" class="email-existing-note" hidden>Your earlier answers are saved. Add your email to continue.</p>
+        </form>
+      </section>
+
+      <section id="chat-view" class="chat-view" role="tabpanel" aria-labelledby="chat-tab">
+        <div class="chat-main">
+        <div id="revision-banner" class="revision-banner" hidden><div><strong id="revision-heading">Review changes</strong><p id="revision-detail">Your earlier answers are kept. Describe what you want to change.</p></div><button id="revision-outputs" class="text-button" type="button">Review outputs</button></div>
+        <div id="transcript" class="transcript" tabindex="0" aria-label="Conversation messages">
+          <div id="welcome" class="welcome">
+            <div class="welcome-kicker"><img class="assistant-mark" src="/static/bold-butterfly.svg" width="24" height="24" alt="" aria-hidden="true"> BOLD AutoKaggle · Your challenge interviewer</div>
+            <h2>First, let’s define<br>the research problem.</h2>
+            <p>Then we can frame a clear, testable research question.</p>
+            <div class="opening-question"><span class="eyebrow">START WITH THE PROBLEM</span><p id="opening-question">Describe the situation, the current difficulty, and what you want to predict, explain, improve, or optimize.</p></div>
+            <p class="welcome-detail">If you have relevant data, papers, an example, or anything that you think can help explain your intuition, mention it too. I will ask targeted questions to scope out the question in greater detail</p>
+          </div>
+          <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+          <section id="scope-checkpoint" class="scope-checkpoint" aria-label="Decision checkpoint" hidden></section>
+          <div id="thinking-message" class="thinking-message" role="status" hidden><span class="thinking-dot"></span><span id="thinking-text">Thinking through your challenge…</span></div>
+        </div>
+
+        <div class="composer-area">
+          <p id="question-hint" class="question-hint" hidden><span id="question-text"></span></p>
+          <form id="message-form" class="message-form"><label class="sr-only" for="message-input">Describe your problem or answer the question</label><textarea id="message-input" rows="3" maxlength="12000" placeholder="We are studying… The difficulty is… We want to find out…" aria-describedby="composer-help"></textarea><div class="composer-bottom"><span id="composer-help">Enter to send · Shift + Enter for a new line</span><button id="send-message" class="send-button" type="submit" aria-label="Send message" disabled><span aria-hidden="true">↑</span></button></div></form>
+          <div class="composer-actions"><div class="action-group"><button id="open-data" class="text-button" type="button" aria-haspopup="dialog">Data &amp; checks</button><button id="skip-question" class="text-button" type="button" hidden>Not sure yet</button><button id="continue-interview" class="text-button" type="button" hidden>Continue interview</button></div><button id="draft-readme" class="draft-button" type="button" disabled>Working draft <span aria-hidden="true">↗</span></button></div>
+          <p class="prototype-note">A working draft can contain gaps. All required details must be resolved before the challenge is ready for review.</p>
+        </div>
+        </div>
+        <aside id="knowledge-panel" class="knowledge-panel" aria-labelledby="knowledge-heading">
+          <div class="knowledge-header"><div><h2 id="knowledge-heading">Challenge requirements</h2><p id="knowledge-topic">Problem</p></div></div>
+          <div id="readiness-summary" class="readiness-summary"><strong id="readiness-status">Assessment pending</strong><span id="readiness-count">Checking required details…</span><button id="readiness-details" class="text-button" type="button" aria-haspopup="dialog">View missing details</button></div>
+          <p id="knowledge-note" class="knowledge-note">Counts show resolved details. Manual bypasses stay visible.</p>
+          <div id="knowledge-items" class="knowledge-items" aria-label="Interview checklist" tabindex="0"></div>
+          <p class="knowledge-scale">All details are required. A reference baseline is optional.</p>
+          <p id="knowledge-update" class="sr-only" role="status" aria-live="polite"></p>
+        </aside>
+      </section>
+
+      <section id="review-view" class="review-view" role="tabpanel" aria-labelledby="review-tab" hidden>
+        <div class="review-scroll" tabindex="0" aria-label="Organizer review">
+          <div class="review-heading"><div><span class="eyebrow">ORGANIZER REVIEW</span><h2>Try your challenge. Shape the next version.</h2></div><span id="review-version" class="review-version">No package yet</span></div>
+          <p id="review-summary" class="review-summary">Inspect the draft website, download the research package, and test a submission before you request changes.</p>
+          <div class="review-deliverables">
+            <article class="review-deliverable"><span class="deliverable-letter" aria-hidden="true">A</span><h3>Challenge website</h3><p>Check the problem, rules, and evaluation details.</p><a id="review-website" class="button button-secondary" target="_blank" rel="noopener noreferrer" hidden>Open website <span aria-hidden="true">↗</span></a><span id="review-website-status" class="deliverable-status">Build the package first.</span></article>
+            <article class="review-deliverable"><span class="deliverable-letter" aria-hidden="true">B</span><h3>Research package</h3><p>Review the README, agent instructions, data, and starter files.</p><a id="review-package" class="button button-secondary" hidden>Download ZIP <span aria-hidden="true">↓</span></a><span id="review-package-status" class="deliverable-status">Build the package first.</span></article>
+            <article class="review-deliverable"><span class="deliverable-letter" aria-hidden="true">C</span><h3>Submission test</h3><p>Try the submission process and inspect measured results.</p><a id="review-submission" class="button button-secondary" target="_blank" rel="noopener noreferrer" hidden>Try a submission <span aria-hidden="true">↗</span></a><span id="review-submission-status" class="deliverable-status">Build the package first.</span></article>
+          </div>
+          <div class="review-feedback"><div><h3>What would you like to change?</h3><p id="review-feedback-detail">Start a review conversation about the problem definition, method and deployment, or baseline reproduction. The agent keeps the earlier context and asks for specific details where needed.</p></div><button id="start-revision" class="button button-primary" type="button">Request changes <span aria-hidden="true">→</span></button></div>
+          <div id="review-change-summary" class="review-change-summary" hidden><h3>Current review round</h3><p id="review-changes"></p></div>
+          <p id="review-pending" class="review-pending">This is a private draft. Review does not publish the challenge.</p>
+        </div>
+        <div class="readme-footer"><button id="review-back-to-chat" class="button button-secondary" type="button"><span aria-hidden="true">←</span> Conversation</button><button id="review-build" class="text-button" type="button">Draft &amp; package details <span aria-hidden="true">→</span></button></div>
+      </section>
+
+      <section id="readme-view" class="readme-view" role="tabpanel" aria-labelledby="readme-tab" hidden>
+        <div class="readme-toolbar"><div><span class="eyebrow">YOUR CHALLENGE BRIEF</span><p>Review the draft. Return to the conversation to make changes.</p></div><button id="download-readme" class="button button-primary" type="button">Download README <span aria-hidden="true">↓</span></button></div>
+        <div id="readme-scroll" class="readme-scroll" tabindex="0" aria-label="Challenge README and review package">
+          <section class="workflow-card" aria-labelledby="workflow-heading">
+            <div class="workflow-heading"><h2 id="workflow-heading">Review package</h2><span id="workflow-status" class="workflow-status">Not built</span></div>
+            <p id="workflow-summary">Build draft files and check what is ready for organizer review.</p>
+            <div class="workflow-actions"><button id="build-workflow" class="button button-secondary" type="button">Build review package</button><a id="download-package" class="button button-primary" hidden>Download ZIP <span aria-hidden="true">↓</span></a><a id="review-link" class="text-button" hidden>Open review <span aria-hidden="true">↗</span></a><button id="refresh-workflow" class="text-button" type="button">Check status</button></div>
+            <p id="workflow-error" class="field-notice error" role="alert" hidden></p>
+            <details id="workflow-details" class="workflow-details"><summary>Checks and files</summary><div id="workflow-checks" class="workflow-checks"></div><div id="workflow-artifacts" class="workflow-artifacts"></div><div class="workflow-notification"><strong id="notification-status">Email not sent</strong><p id="notification-detail">Build the draft first.</p><button id="retry-notification" class="text-button" type="button" hidden>Retry email delivery</button></div><button id="data-workbench" class="workflow-data-link text-button" type="button" aria-haspopup="dialog">Data and baseline checks <span aria-hidden="true">→</span></button><p class="workflow-limitation">Draft files need review. A package does not confirm that secure evaluation is running.</p></details>
+          </section>
+          <section id="draft-readiness" class="draft-readiness" aria-labelledby="draft-readiness-status"><strong id="draft-readiness-status">Working draft · assessment pending</strong><p id="draft-readiness-detail">Review the required details before building the challenge.</p><button id="draft-readiness-details" class="text-button" type="button" aria-haspopup="dialog">View requirements and gaps</button><button id="draft-continue-interview" class="button button-secondary continue-interview" type="button" hidden>Continue interview →</button></section>
+          <article id="readme-content" class="readme-content"></article>
+        </div>
+        <div class="readme-footer"><button id="back-to-chat" class="button button-secondary" type="button"><span aria-hidden="true">←</span> Back to conversation</button><span>Corrections are welcome at any point.</span></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="summary-dialog" class="summary-dialog" aria-labelledby="summary-title">
+    <div class="dialog-header"><div><span class="eyebrow">COLLECTED IN THIS INTERVIEW</span><h2 id="summary-title">Your challenge so far</h2></div><button class="icon-button" id="close-summary" type="button" aria-label="Close collected notes">×</button></div>
+    <p class="dialog-intro">Review the recorded answers and remaining gaps. Accept a clear scope, set limits for an agent choice, or record an exception. Evaluation checks remain separate.</p>
+    <div id="summary-content" class="summary-content"></div>
+    <button id="answer-in-chat" type="button" class="button button-secondary">Add a correction in chat <span aria-hidden="true">→</span></button>
+  </dialog>
+  <dialog id="data-dialog" class="data-dialog" aria-labelledby="data-dialog-title">
+    <div class="dialog-header data-dialog-header"><div><span class="eyebrow">CHECK THE EVIDENCE</span><h2 id="data-dialog-title">Data and baseline checks</h2></div><button id="close-data" class="icon-button" type="button" aria-label="Close data checks">×</button></div>
+    <div class="data-dialog-body">
+      <p id="data-notice" class="field-notice" role="status" hidden></p><p id="data-error" class="field-notice error" role="alert" hidden></p><button id="reload-data" class="text-button" type="button" hidden>Retry loading</button>
+      <section class="data-section" aria-labelledby="data-file-heading"><h3 id="data-file-heading">1. Add a CSV</h3><p id="data-upload-help" class="data-help">CSV format · up to 200 MB.</p><p id="data-drive-help" class="data-help">For larger files, paste a Google Drive link in the conversation. Set General access to &ldquo;Anyone with the link&rdquo; and the role to &ldquo;Viewer&rdquo;. Drive links are saved for review; automatic import is not yet available.</p><label for="data-file" class="sr-only">CSV dataset</label><input id="data-file" type="file" accept=".csv,text/csv" aria-describedby="data-upload-help data-drive-help"><div id="data-progress-wrap" class="data-progress-wrap" hidden><div><span id="data-upload-state">Uploading…</span><span id="data-upload-percent">0%</span></div><progress id="data-upload-progress" value="0" max="100" aria-label="Dataset upload progress"></progress></div><div id="data-profile" class="data-profile"></div>
+        <details id="data-example" class="data-example"><summary>Try synthetic materials data</summary><p>This is demonstration data. It loads a synthetic CSV and replaces this challenge's title, research brief, and data metadata with the materials example.</p><label id="data-example-confirm-label" class="data-checkbox"><input id="data-example-confirm" type="checkbox"><span>Use the demo metadata in this challenge.</span></label><button id="load-data-example" class="button button-secondary" type="button">Load synthetic example</button></details>
+      </section>
+      <form id="data-form">
+        <section class="data-section" aria-labelledby="data-design-heading"><h3 id="data-design-heading">2. Define the evaluation</h3><div class="data-grid"><div><label for="data-target">Target column</label><select id="data-target" required><option value="">Add a CSV first</option></select></div><div><label for="data-task">Task</label><select id="data-task"><option value="classification">Classification</option><option value="regression">Regression</option></select></div><div><label for="data-metric">Metric</label><select id="data-metric"><option value="accuracy">Accuracy</option><option value="balanced_accuracy">Balanced accuracy</option><option value="roc_auc">ROC AUC</option></select></div><div><label for="data-split">Split</label><select id="data-split"><option value="random">Random rows</option><option value="group">Separate groups</option><option value="time">Future observations</option></select></div><div id="data-group-field" hidden><label for="data-group-column">Group column</label><select id="data-group-column"><option value="">Select a column</option></select></div><div id="data-time-field" hidden><label for="data-time-column">Time column</label><select id="data-time-column"><option value="">Select a column</option></select></div></div><p id="data-split-help" class="data-help">Random rows require independent observations.</p><div class="data-split-note"><strong>80% training / 20% hidden test</strong><span>Group splits can be approximate. The baseline uses training-derived validation.</span></div><details class="data-exclusions"><summary>Exclude columns from model inputs</summary><p class="data-help">Remove identifiers, answer proxies, and information unavailable at prediction time.</p><div id="data-exclude-columns" class="data-exclude-columns"></div></details></section>
+        <section class="data-section" aria-labelledby="data-permissions-heading"><h3 id="data-permissions-heading">3. Record data access</h3><div class="data-grid"><div><label for="data-origin-choice">Source</label><select id="data-origin-choice"><option value="unknown">Not established</option><option value="private">Private data</option><option value="public">Public data</option><option value="synthetic">Synthetic data</option></select></div><div><label for="data-labels-public">Are answer labels public?</label><select id="data-labels-public"><option value="unknown">Not established</option><option value="no">No</option><option value="yes">Yes</option></select></div></div><label for="data-rights">Permission to use and share the training data</label><select id="data-rights"><option value="unknown">Not established</option><option value="yes">Yes, permission is confirmed</option></select><details class="data-budget"><summary>Optional budget estimates</summary><div class="data-grid"><div><label for="data-compute-budget">Compute (USD)</label><input id="data-compute-budget" maxlength="2000" placeholder="e.g. $20, or unknown"></div><div><label for="data-token-budget">Model tokens (USD)</label><input id="data-token-budget" maxlength="2000" placeholder="e.g. $5, or unknown"></div></div></details></section>
+      </form>
+      <section class="data-section data-results" aria-labelledby="data-results-heading"><div class="data-result-heading"><h3 id="data-results-heading">4. Audit and baseline</h3><span id="data-result-status">Not run</span></div><p id="data-audit-summary" class="data-help">Add a dataset, then run the checks.</p><div id="data-baseline"></div><div id="data-audit-checks"></div><div id="data-audit-limitations"></div></section>
+    </div>
+    <div class="data-dialog-footer"><span id="data-save-state">No changes</span><div><button id="save-data" class="button button-secondary" type="button">Save details</button><button id="analyze-data" class="button button-primary" type="button">Run checks</button></div></div>
+  </dialog>
+</body>
+</html>

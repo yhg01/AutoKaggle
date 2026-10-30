@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>BOLD blue butterfly</title>
+  <defs>
+    <linearGradient id="upper" x1="8" y1="8" x2="48" y2="42" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#62B5FF"/>
+      <stop offset="1" stop-color="#2472DA"/>
+    </linearGradient>
+    <linearGradient id="lower" x1="15" y1="32" x2="45" y2="57" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3589ED"/>
+      <stop offset="1" stop-color="#1855B5"/>
+    </linearGradient>
+  </defs>
+  <path d="M30.5 34C25 19 13 7 6.5 10.5C1 13.5 5 30 12.5 35C18 38.5 25 37.5 30.5 34Z" fill="url(#upper)"/>
+  <path d="M33.5 34C39 19 51 7 57.5 10.5C63 13.5 59 30 51.5 35C46 38.5 39 37.5 33.5 34Z" fill="url(#upper)"/>
+  <path d="M30.5 36C21 32 10 36 12 46C14 57 25 56 30.5 39Z" fill="url(#lower)"/>
+  <path d="M33.5 36C43 32 54 36 52 46C50 57 39 56 33.5 39Z" fill="url(#lower)"/>
+  <path d="M30.5 25C29.5 21 27.5 18.5 25.5 17M33.5 25C34.5 21 36.5 18.5 38.5 17" stroke="#184C96" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M32 24C29 24 29 30 29.7 36.5C30.3 42 31.2 46 32 46C32.8 46 33.7 42 34.3 36.5C35 30 35 24 32 24Z" fill="#184C96"/>
+</svg>

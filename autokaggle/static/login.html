@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f9f4">
+  <title>Sign in — BOLD AutoKaggle</title>
+  <link rel="icon" type="image/svg+xml" href="/static/bold-butterfly.svg">
+  <link rel="stylesheet" href="/static/chat.css?v=email-login-20261030">
+  <link rel="stylesheet" href="/static/login.css?v=email-login-20261030">
+  <script src="/static/login.js?v=email-login-20261030" defer></script>
+</head>
+<body>
+  <main class="invitation-page">
+    <section class="email-card login-card" aria-labelledby="login-title">
+      <img src="/static/bold-butterfly.svg" width="48" height="48" alt="" aria-hidden="true">
+      <span class="eyebrow">BOLD AUTOKAGGLE</span>
+      <h1 id="login-title">Your next research challenge starts here.</h1>
+      <p id="login-intro">Sign in with your email to create a challenge or return to your work.</p>
+      <form id="email-request-form">
+        <label for="login-email">Email address</label>
+        <input id="login-email" name="email" type="email" autocomplete="email" inputmode="email" required maxlength="254" aria-describedby="email-login-help" spellcheck="false" autocapitalize="off" disabled>
+        <p class="email-privacy" id="email-login-help">We will email you a six-digit sign-in code. No password is needed.</p>
+        <button id="send-code" class="button button-primary" type="submit" disabled>Email me a code <span aria-hidden="true">→</span></button>
+      </form>
+      <form id="email-code-form" hidden>
+        <p class="delivery-note" id="email-delivery-note">Code sent to <strong id="login-email-sent"></strong></p>
+        <label for="email-code">Six-digit code</label>
+        <input id="email-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required spellcheck="false" aria-describedby="code-help">
+        <p class="email-privacy" id="code-help">The code expires in 10 minutes. Check your spam folder if it does not arrive.</p>
+        <button id="verify-code" class="button button-primary" type="submit" disabled>Sign in <span aria-hidden="true">→</span></button>
+        <div class="code-actions"><button id="resend-code" class="text-button" type="button" disabled>Send a new code</button><button id="change-email" class="text-button" type="button">Change email</button></div>
+      </form>
+      <p id="email-unavailable" class="unavailable-note" hidden>Email sign-in is not available. Please try again later. You can still use an existing review link or administrator access.</p>
+      <p id="login-status" role="status" aria-live="polite">Loading sign-in…</p>
+      <details id="admin-access" class="admin-access">
+        <summary>Administrator access</summary>
+        <form id="login-form">
+          <label for="access-code">Administrator access code</label>
+          <input id="access-code" name="access_code" type="password" autocomplete="current-password" required maxlength="1024" spellcheck="false" autocapitalize="off">
+          <button id="sign-in" class="button button-secondary" type="submit" disabled>Sign in as administrator</button>
+        </form>
+      </details>
+      <p class="email-existing-note">Have a private review link? Open it to review that challenge.</p>
+      <noscript><p>Enable JavaScript to sign in.</p></noscript>
+    </section>
+  </main>
+</body>
+</html>

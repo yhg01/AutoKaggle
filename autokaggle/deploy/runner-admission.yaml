@@ -1,0 +1,43 @@
+# Apply only to the new AutoKaggle cluster. Namespace selection is exact.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: autokaggle-fixed-runner
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: autokaggle-runs
+    resourceRules:
+      - apiGroups: ['']
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers]
+  validations:
+    - expression: "object.spec.containers.all(c, c.image == 'docker.io/library/python@sha256:5789aa194f757888f41fa3d48e14b6feaa1b57c0af0b56fcb1372d6474d3bff0')"
+      message: The reviewed Python image digest is required.
+    - expression: "has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'autokaggle-gvisor'"
+      message: A verified AutoKaggle gVisor runtime is required.
+    - expression: "has(object.spec.automountServiceAccountToken) && !object.spec.automountServiceAccountToken"
+      message: A runner cannot receive a service account token.
+    - expression: "object.spec.serviceAccountName == 'runner-no-access'"
+      message: The runner service account is fixed.
+    - expression: "(!has(object.spec.hostNetwork) || !object.spec.hostNetwork) && (!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
+      message: Host namespaces are not permitted.
+    - expression: "object.spec.containers.size() == 1 && (!has(object.spec.initContainers) || object.spec.initContainers.size() == 0) && (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0)"
+      message: Only the fixed prediction container is permitted.
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.configMap) || has(v.persistentVolumeClaim) || has(v.emptyDir))"
+      message: Host paths, secrets and projected tokens are not permitted.
+    - expression: "object.spec.containers.all(c, has(c.securityContext) && c.securityContext.readOnlyRootFilesystem == true && c.securityContext.allowPrivilegeEscalation == false)"
+      message: The root filesystem must be read-only and privileges cannot increase.
+    - expression: "object.spec.containers.all(c, !has(c.envFrom) && (!has(c.env) || c.env.all(e, !has(e.valueFrom))))"
+      message: Credential references are not permitted in the worker environment.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: autokaggle-fixed-runner
+spec:
+  policyName: autokaggle-fixed-runner
+  validationActions: [Deny]
