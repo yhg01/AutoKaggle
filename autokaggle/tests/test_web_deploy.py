@@ -14,7 +14,12 @@ def test_release_bundle_contains_prompts_and_excludes_local_state():
         names = set(archive.getnames())
     assert {"autokaggle/prompts/conversation.md", "autokaggle/prompts/revision.md",
             "autokaggle/prompts/organizer.md", "autokaggle/static/login.html",
-            "autokaggle/access.py", "autokaggle/deploy/web-requirements.lock"} <= names
+            "autokaggle/access.py", "autokaggle/observability.py", "autokaggle/static/internal.html",
+            "autokaggle/static/internal.js", "autokaggle/static/internal.css",
+            "autokaggle/static/internal-data.js",
+            "autokaggle/static/interface-switch.js", "autokaggle/static/interface-switch.css",
+            "autokaggle/deploy/web-requirements.lock"} <= names
+    assert "autokaggle/scripts/review_internal.py" not in names
     assert not any("/.env" in n or "/data/" in n or "/tests/" in n or "/test-results/" in n for n in names)
     assert not any(n.endswith("verification.json") for n in names)
 

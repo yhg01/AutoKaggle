@@ -81,7 +81,9 @@ class AccessGate:
         return hmac.compare_digest(expected.encode(), signature.encode())
 
     def is_admin(self, request: Request) -> bool:
-        return self.enabled and not self.user(request) and self._valid(request.cookies.get(ADMIN_COOKIE, ""), "admin", SESSION_SECONDS)
+        identity = self.user(request)
+        return bool(self.enabled and identity and self._valid(
+            request.cookies.get(ADMIN_COOKIE, ""), "admin:" + identity["owner"], SESSION_SECONDS))
 
     def can_create(self, request: Request) -> bool:
         return not self.enabled or bool(self.user(request)) or self.is_admin(request)
@@ -90,9 +92,9 @@ class AccessGate:
         identity = self.user(request)
         if identity:
             return identity["owner"]
-        if self.is_admin(request):
-            return hmac.new(self._key, b"administrator-project-owner", hashlib.sha256).hexdigest()
         value = request.cookies.get("autokaggle_owner", "")
+        if self.enabled and value == hmac.new(self._key, b"administrator-project-owner", hashlib.sha256).hexdigest():
+            return ""
         # Stable account IDs are identifiers, never owner capabilities. An expired
         # email session must not fall back to a leftover administrator/review cookie.
         if self.enabled and (USER_COOKIE in request.cookies or value.startswith("account_")):
@@ -130,7 +132,7 @@ class AccessGate:
         if not self._valid(token, "login-csrf", CSRF_SECONDS) or not hmac.compare_digest(token.encode(), request.headers.get("x-csrf-token", "").encode()):
             raise HTTPException(403, "The sign-in form expired. Reload this page, then try again.")
 
-    async def _body(self, request, fields):
+    async def _body(self, request, fields, optional=()):
         body = bytearray()
         async for part in request.stream():
             body.extend(part)
@@ -140,7 +142,7 @@ class AccessGate:
             values = json.loads(body)
         except (ValueError, UnicodeDecodeError, RecursionError):
             raise HTTPException(400, "The sign-in request is not valid.") from None
-        if not isinstance(values, dict) or set(values) != set(fields):
+        if not isinstance(values, dict) or not set(fields) <= set(values) or not set(values) <= set(fields) | set(optional):
             raise HTTPException(400, "The sign-in request is not valid.")
         return values
 
@@ -182,6 +184,7 @@ class AccessGate:
         def access_state(request: Request, response: Response):
             result = {"private_mode": self.enabled, "can_create_projects": self.can_create(request),
                       "auth_kind": self.auth_kind(request),
+                      "is_admin": self.is_admin(request),
                       "email_login_available": self.enabled and self.email_auth.available()}
             if self.enabled:
                 token = self._sign("login-csrf", CSRF_SECONDS)
@@ -205,17 +208,15 @@ class AccessGate:
             if not hmac.compare_digest(supplied_digest, self._code_digest):
                 raise HTTPException(401, "The access code is not valid.")
             secure = self.secure_cookie(request)
-            self.email_auth.revoke(request.cookies.get(USER_COOKIE, ""))
-            self._clear_identity_cookies(response, request, (ADMIN_COOKIE, "autokaggle_owner"))
-            response.set_cookie(ADMIN_COOKIE, self._sign("admin", SESSION_SECONDS), httponly=True,
+            identity = self.user(request)
+            if not identity:
+                raise HTTPException(401, "Verify your email to add administrator access.")
+            self._clear_identity_cookies(response, request, (ADMIN_COOKIE, USER_COOKIE))
+            purpose = "admin:" + identity["owner"]
+            response.set_cookie(ADMIN_COOKIE, self._sign(purpose, SESSION_SECONDS), httponly=True,
                                 secure=secure, samesite="lax", path="/", max_age=SESSION_SECONDS)
-            # A stable private owner capability keeps administrator projects
-            # available after a later sign-in from another browser.
-            owner = hmac.new(self._key, b"administrator-project-owner", hashlib.sha256).hexdigest()
-            response.set_cookie("autokaggle_owner", owner, httponly=True, secure=secure,
-                                samesite="lax", path="/", max_age=60 * 60 * 24 * 90)
             response.delete_cookie(CSRF_COOKIE, path="/api/access", httponly=True, secure=secure, samesite="strict")
-            return {"redirect": "/"}
+            return {"redirect": "/", "workspace_preserved": bool(identity)}
 
         @app.post("/api/access/email/request")
         async def request_email_code(request: Request):
@@ -226,15 +227,35 @@ class AccessGate:
         @app.post("/api/access/email/verify")
         async def verify_email_code(request: Request, response: Response):
             self._require_csrf(request)
-            values = await self._body(request, {"challenge_id", "code"})
+            values = await self._body(request, {"challenge_id", "code"}, {"access_code"})
+            administrator = "access_code" in values
+            if administrator:
+                self._record_attempt(request)
+                code = values["access_code"]
+                if not isinstance(code, str) or not 1 <= len(code) <= 1024:
+                    raise HTTPException(400, "Enter a valid administrator access key.")
+                try:
+                    supplied = hashlib.sha256(code.encode()).digest()
+                except UnicodeEncodeError:
+                    raise HTTPException(400, "Enter a valid administrator access key.") from None
+                if not hmac.compare_digest(supplied, self._code_digest):
+                    raise HTTPException(401, "The administrator access key is not valid. Correct it or uncheck administrator access.")
+            previous = self.user(request)
             session = await run_in_threadpool(self.email_auth.verify, values["challenge_id"], values["code"])
+            identity = self.email_auth.identity(session)
+            if not identity:
+                raise HTTPException(503, "Sign-in could not be confirmed. Request a new email code.")
             self.email_auth.revoke(request.cookies.get(USER_COOKIE, ""))
-            self._clear_identity_cookies(response, request, (USER_COOKIE,))
+            self._clear_identity_cookies(response, request, (USER_COOKIE, ADMIN_COOKIE) if administrator else (USER_COOKIE,))
             secure = self.secure_cookie(request)
             response.set_cookie(USER_COOKIE, session, httponly=True, secure=secure,
                                 samesite="lax", path="/", max_age=USER_SESSION_SECONDS)
+            if administrator:
+                response.set_cookie(ADMIN_COOKIE, self._sign("admin:" + identity["owner"], SESSION_SECONDS),
+                                    httponly=True, secure=secure, samesite="lax", path="/", max_age=SESSION_SECONDS)
             response.delete_cookie(CSRF_COOKIE, path="/api/access", httponly=True, secure=secure, samesite="strict")
-            return {"redirect": "/"}
+            return {"redirect": "/", "is_admin": administrator,
+                    "workspace_preserved": bool(previous and previous["owner"] == identity["owner"])}
 
         @app.post("/api/access/logout")
         async def logout(request: Request, response: Response):

@@ -25,7 +25,7 @@ function harness(responses = [], search = "", storageValues = {}) {
   Object.defineProperty(storage, "removeItem", { enumerable: false, value: (key) => { delete storage[key]; } });
   Object.defineProperty(storage, "setItem", { enumerable: false, value: (key, value) => { storage[key] = value; } });
   const sandbox = { document: { getElementById: $ }, URL, URLSearchParams, AbortController, Date: { now: () => now },
-    window: { localStorage: storage, location: { search, origin: "https://intake.example.org", replace: (url) => redirects.push(url) },
+    window: { localStorage: storage, sessionStorage: storage, location: { search, origin: "https://intake.example.org", replace: (url) => redirects.push(url) },
       setTimeout: () => 1, clearTimeout() {}, setInterval: (fn) => intervals.push(fn) },
     fetch: async (url, options) => {
       calls.push({ url, options }); const next = responses.shift();
@@ -42,21 +42,24 @@ function harness(responses = [], search = "", storageValues = {}) {
 }
 async function sent(search = "") {
   const h = harness([access(), access(), challenge()], search); await flush(); h.$("login-email").value = "researcher@example.org";
-  await h.event("email-request-form"); return h;
+  await h.event("send-code", "click"); return h;
 }
 
-test("The email form has one accessible OTP input and a collapsed administrator option", () => {
+test("The single sign-in form has an accessible OTP and optional administrator checkbox", () => {
   assert.match(html, /id="email-code"[^>]*inputmode="numeric"[^>]*autocomplete="one-time-code"/);
   assert.match(html, /id="email-code"[^>]*maxlength="6"/);
   assert.match(html, /id="login-status" role="status" aria-live="polite"/);
-  assert.match(html, /<details id="admin-access" class="admin-access">/);
-  assert.doesNotMatch(source, /sessionStorage|console\./);
+  assert.match(html, /id="admin-enabled" type="checkbox"/);
+  assert.equal((html.match(/type="submit"/g) || []).length, 1);
+  assert.equal((html.match(/<form /g) || []).length, 1);
+  assert.doesNotMatch(source, /console\./);
+  assert.doesNotMatch(source, /sessionStorage\??\.setItem/, "Login may clear navigation contexts but must never store credentials");
   assert.equal((source.match(/setItem\(/g) || []).length, 1, "Only a session-change timestamp is stored; no codes are stored");
 });
 
 test("Email is sent with a fresh CSRF token and same-origin cookies before code entry is shown", async () => {
   const h = await sent();
-  assert.equal(h.$("email-code-form").hidden, false); assert.equal(h.$("email-request-form").hidden, true);
+  assert.equal(h.$("email-code-fields").hidden, false); assert.equal(h.$("email-request-fields").hidden, true);
   assert.equal(h.$("login-email-sent").textContent, "researcher@example.org");
   assert.equal(h.calls[2].url, "/api/access/email/request");
   assert.equal(h.calls[2].options.headers["X-CSRF-Token"], "fresh-csrf");
@@ -68,7 +71,7 @@ test("Email is sent with a fresh CSRF token and same-origin cookies before code 
 test("Successful verification clears the code and preserves a safe project destination", async () => {
   const h = await sent("?next=%2F%3Fproject%3Dmine"); h.responses.push(access({ csrf_token: "verify-csrf" }), { redirect: "/" });
   h.$("email-code").value = "123456"; await h.event("email-code", "input");
-  assert.equal(h.$("verify-code").disabled, false); await h.event("email-code-form");
+  assert.equal(h.$("sign-in").disabled, false); await h.event("login-form");
   assert.deepEqual(h.redirects, ["/?project=mine"]); assert.equal(h.$("email-code").value, "");
   assert.equal(h.calls.at(-1).options.headers["X-CSRF-Token"], "verify-csrf");
   assert.deepEqual(JSON.parse(h.calls.at(-1).options.body), { challenge_id: "challenge-one", code: "123456" });
@@ -76,19 +79,19 @@ test("Successful verification clears the code and preserves a safe project desti
 
 test("Invalid email and incomplete codes make no submission request", async () => {
   const h = harness([access()]); await flush(); h.$("login-email").value = "not-an-email";
-  await h.event("email-request-form"); assert.equal(h.calls.length, 1);
+  await h.event("send-code", "click"); assert.equal(h.calls.length, 1);
   const c = await sent(); c.$("email-code").value = "12x3"; await c.event("email-code", "input");
-  assert.equal(c.$("email-code").value, "123"); assert.equal(c.$("verify-code").disabled, true);
-  await c.event("email-code-form"); assert.equal(c.calls.length, 3);
+  assert.equal(c.$("email-code").value, "123"); assert.equal(c.$("sign-in").disabled, true);
+  await c.event("login-form"); assert.equal(c.calls.length, 3);
 });
 
 test("An incorrect code is cleared and the same challenge can be retried", async () => {
   const h = await sent(); h.responses.push(access(), { status: 401, body: { detail: "The code is not valid." } });
-  h.$("email-code").value = "123456"; await h.event("email-code-form");
-  assert.equal(h.$("email-code").value, ""); assert.equal(h.$("email-code-form").hidden, false);
+  h.$("email-code").value = "123456"; await h.event("login-form");
+  assert.equal(h.$("email-code").value, ""); assert.equal(h.$("email-code-fields").hidden, false);
   assert.equal(h.$("login-status").textContent, "The code is not valid.");
   h.responses.push(access(), { redirect: "/" }); h.$("email-code").value = "654321";
-  await h.event("email-code-form"); assert.deepEqual(h.redirects, ["/"]);
+  await h.event("login-form"); assert.deepEqual(h.redirects, ["/"]);
 });
 
 test("Resend waits for cooldown and uses the new challenge", async () => {
@@ -96,38 +99,38 @@ test("Resend waits for cooldown and uses the new challenge", async () => {
   h.tick(59); assert.equal(h.$("resend-code").disabled, true); h.tick(1);
   assert.equal(h.$("resend-code").disabled, false);
   h.responses.push(access(), challenge({ challenge_id: "challenge-two" })); await h.event("resend-code", "click");
-  h.responses.push(access(), { redirect: "/" }); h.$("email-code").value = "123456"; await h.event("email-code-form");
+  h.responses.push(access(), { redirect: "/" }); h.$("email-code").value = "123456"; await h.event("login-form");
   assert.equal(JSON.parse(h.calls.at(-1).options.body).challenge_id, "challenge-two");
 });
 
 test("Expired codes require a new request and cannot be submitted", async () => {
   const h = await sent(); h.tick(600); h.$("email-code").value = "123456"; await h.event("email-code", "input");
-  assert.equal(h.$("verify-code").disabled, true); assert.equal(h.$("email-code").disabled, true);
-  assert.match(h.$("code-help").textContent, /expired/); await h.event("email-code-form"); assert.equal(h.calls.length, 3);
+  assert.equal(h.$("sign-in").disabled, true); assert.equal(h.$("email-code").disabled, true);
+  assert.match(h.$("code-help").textContent, /expired/); await h.event("login-form"); assert.equal(h.calls.length, 3);
 });
 
 test("A server expiry also disables a code and permits a later resend", async () => {
   const h = await sent(); h.responses.push(access(), { status: 410, body: { detail: "The code has expired." } });
-  h.$("email-code").value = "123456"; await h.event("email-code-form");
+  h.$("email-code").value = "123456"; await h.event("login-form");
   assert.equal(h.$("email-code").disabled, true); h.tick(60); assert.equal(h.$("resend-code").disabled, false);
 });
 
-test("Unavailable email service shows an honest state and leaves administrator sign-in usable", async () => {
+test("Unavailable email service disables all sign-in paths including administrator access", async () => {
   const h = harness([access({ email_login_available: false })]); await flush();
-  assert.equal(h.$("email-unavailable").hidden, false); assert.equal(h.$("email-request-form").hidden, true);
-  assert.equal(h.$("sign-in").disabled, false); assert.doesNotMatch(h.$("login-status").textContent, /sent/);
+  assert.equal(h.$("email-unavailable").hidden, false); assert.equal(h.$("email-request-fields").hidden, false);
+  assert.equal(h.$("sign-in").disabled, true); assert.doesNotMatch(h.$("login-status").textContent, /sent/);
 });
 
 test("Mail failure never shows a sent state", async () => {
   const h = harness([access(), access(), { status: 503, body: { detail: "Email could not be sent." } }]); await flush();
-  h.$("login-email").value = "researcher@example.org"; await h.event("email-request-form");
-  assert.equal(h.$("email-code-form").hidden, true); assert.equal(h.$("email-unavailable").hidden, false);
-  assert.equal(h.$("login-status").textContent, "Email could not be sent."); assert.equal(h.$("sign-in").disabled, false);
+  h.$("login-email").value = "researcher@example.org"; await h.event("send-code", "click");
+  assert.equal(h.$("email-code-fields").hidden, true); assert.equal(h.$("email-unavailable").hidden, false);
+  assert.equal(h.$("login-status").textContent, "Email could not be sent."); assert.equal(h.$("sign-in").disabled, true);
 });
 
 test("Rate limits enforce the server Retry-After before another email request", async () => {
   const h = harness([access(), access(), { status: 429, headers: { "Retry-After": "120" }, body: { detail: "Wait before trying again." } }]); await flush();
-  h.$("login-email").value = "researcher@example.org"; await h.event("email-request-form");
+  h.$("login-email").value = "researcher@example.org"; await h.event("send-code", "click");
   assert.equal(h.$("send-code").disabled, true); h.tick(119); assert.equal(h.$("send-code").disabled, true);
   h.tick(1); assert.equal(h.$("send-code").disabled, false);
 });
@@ -135,7 +138,7 @@ test("Rate limits enforce the server Retry-After before another email request", 
 test("Malformed server data does not open a code form or claim delivery", async () => {
   for (const invalid of [{ malformed: true }, { body: { challenge_id: "x" } }, { body: null }]) {
     const h = harness([access(), access(), invalid]); await flush(); h.$("login-email").value = "researcher@example.org";
-    await h.event("email-request-form"); assert.equal(h.$("email-code-form").hidden, true);
+    await h.event("send-code", "click"); assert.equal(h.$("email-code-fields").hidden, true);
     assert.ok(h.$("login-status").classList.values.has("error")); assert.equal(h.redirects.length, 0);
   }
 });
@@ -148,41 +151,67 @@ test("A missing CSRF token leaves all sign-in submission controls disabled", asy
 
 test("Changing email clears the code and maintains the resend cooldown", async () => {
   const h = await sent(); h.$("email-code").value = "123456"; await h.event("change-email", "click");
-  assert.equal(h.$("email-code").value, ""); assert.equal(h.$("email-request-form").hidden, false);
+  assert.equal(h.$("email-code").value, ""); assert.equal(h.$("email-request-fields").hidden, false);
   assert.equal(h.$("login-email").value, "researcher@example.org"); assert.equal(h.$("send-code").disabled, true);
 });
 
-test("Administrator sign-in stays available and rejects external next URLs", async () => {
-  const h = harness([access({ email_login_available: false }), access({ email_login_available: false }), { redirect: "/" }], "?next=https%3A%2F%2Fother.example.org%2F");
-  await flush(); h.$("access-code").value = "private-code-for-client-test"; await h.event("login-form");
-  assert.deepEqual(h.redirects, ["/"]); assert.equal(h.$("access-code").value, "");
-  assert.equal(h.calls.at(-1).url, "/api/access/login");
+test("Administrator access is sent with the email code in one sign-in request", async () => {
+  const h = await sent("?next=%2Finternal");
+  h.$("admin-enabled").checked = true; await h.event("admin-enabled", "change");
+  assert.equal(h.$("admin-key-fields").hidden, false);
+  h.$("email-code").value = "123456"; h.$("access-code").value = "test-access-key";
+  h.responses.push(access(), {redirect:"/",is_admin:true}); await h.event("login-form");
+  assert.deepEqual(JSON.parse(h.calls.at(-1).options.body), {challenge_id:"challenge-one",code:"123456",access_code:"test-access-key"});
+  assert.equal(h.calls.filter(c=>c.url==="/api/access/login").length,0);
+  assert.deepEqual(h.redirects,["/internal"]); assert.equal(h.$("access-code").value,"");
+});
+
+test("Ordinary users return to Intake even when next requests Internal or another origin", async () => {
+  for (const next of ["%2Finternal","https%3A%2F%2Fother.example.org%2F"]) {
+    const h=await sent("?next="+next); h.$("email-code").value="123456";
+    h.responses.push(access(),{redirect:"/",is_admin:false});await h.event("login-form");
+    assert.deepEqual(h.redirects,["/"]);
+  }
+});
+
+test("An administrator checkbox never bypasses email verification and unchecking clears its key", async () => {
+  const h=harness([access()]);await flush();h.$("admin-enabled").checked=true;await h.event("admin-enabled","change");
+  h.$("access-code").value="test-key";assert.equal(h.$("sign-in").disabled,true);
+  h.$("admin-enabled").checked=false;await h.event("admin-enabled","change");
+  assert.equal(h.$("access-code").value,"");assert.equal(h.$("admin-key-fields").hidden,true);assert.equal(h.$("access-code").required,false);
+});
+
+test("Reauthenticating the same account preserves cached drafts", async () => {
+  const h=await sent();h.storage["autokaggle-chat-compose:own-project"]="Unsaved own draft";
+  h.responses.push(access(),{redirect:"/",workspace_preserved:true,is_admin:true});h.$("email-code").value="123456";
+  await h.event("login-form");assert.equal(h.storage["autokaggle-chat-compose:own-project"],"Unsaved own draft");
 });
 
 test("An interrupted request keeps the email and lets the researcher try again", async () => {
   const h = harness([access(), access(), new Error("Connection interrupted")]); await flush();
-  h.$("login-email").value = "researcher@example.org"; await h.event("email-request-form");
-  assert.equal(h.$("email-code-form").hidden, true); assert.equal(h.$("login-email").value, "researcher@example.org");
+  h.$("login-email").value = "researcher@example.org"; await h.event("send-code", "click");
+  assert.equal(h.$("email-code-fields").hidden, true); assert.equal(h.$("login-email").value, "researcher@example.org");
   assert.equal(h.$("send-code").disabled, false); assert.equal(h.$("login-status").textContent, "Connection interrupted");
-  h.responses.push(access(), challenge()); await h.event("email-request-form"); assert.equal(h.$("email-code-form").hidden, false);
+  h.responses.push(access(), challenge()); await h.event("send-code", "click"); assert.equal(h.$("email-code-fields").hidden, false);
 });
 
 test("Repeated clicks cannot send duplicate emails while a request is pending", async () => {
   let finish;
   const h = harness([access(), access(), () => new Promise((resolve) => { finish = resolve; })]); await flush();
-  h.$("login-email").value = "researcher@example.org"; await h.event("email-request-form");
-  assert.equal(h.$("send-code").disabled, true); await h.event("email-request-form"); assert.equal(h.calls.length, 3);
+  h.$("login-email").value = "researcher@example.org"; await h.event("send-code", "click");
+  assert.equal(h.$("send-code").disabled, true); await h.event("send-code", "click"); assert.equal(h.calls.length, 3);
   finish({ ok: true, status: 200, headers: { get: () => null }, json: async () => challenge() }); await flush();
-  assert.equal(h.$("email-code-form").hidden, false); assert.equal(h.calls.length, 3);
+  assert.equal(h.$("email-code-fields").hidden, false); assert.equal(h.calls.length, 3);
 });
 
 test("Successful sign-in clears prior account drafts and tells other tabs to sign in again", async () => {
   const h = harness([access(), access(), challenge(), access(), { redirect: "/" }], "", {
     "autokaggle-chat-last-project": "previous-project", "autokaggle-chat-compose:previous-project": "private draft",
     "autokaggle-chat-pending:previous-project": "private pending request", "autokaggle-chat-pending:previous-project:scope-drafts": "private scope", preference: "keep",
+    "autokaggle-interface-context:intake": "/?project=previous-project", "autokaggle-interface-context:internal": "/internal?project=previous-project",
   }); await flush();
-  h.$("login-email").value = "another@example.org"; await h.event("email-request-form");
+  h.$("login-email").value = "another@example.org"; await h.event("send-code", "click");
   assert.equal(h.storage["autokaggle-chat-compose:previous-project"], "private draft", "Do not delete work before authentication succeeds");
-  h.$("email-code").value = "123456"; await h.event("email-code-form");
+  h.$("email-code").value = "123456"; await h.event("login-form");
   assert.deepEqual(h.storage, { preference: "keep", "autokaggle-session-ended": "1000000" });
 });

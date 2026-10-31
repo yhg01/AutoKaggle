@@ -84,6 +84,10 @@ The row-based policy below applies to prediction tasks with a fixed labeled test
 
 Use short, direct sentences. Preserve existing work. Report what was actually tested and identify dependencies that still prevent a complete run.
 
+## Branch and commit naming
+
+Use descriptive branch names without AI product or model names. Keep those names out of commit messages as well. Do not add attribution signatures, generated-by footers, or co-author trailers. Do not commit or push changes until explicitly requested.
+
 ## Live API testing
 
 Added at the project owner's request on 29 October 2026.

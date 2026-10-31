@@ -7,13 +7,14 @@
   <link rel="icon" type="image/svg+xml" href="/static/bold-butterfly.svg"><title>BOLD AutoKaggle — Shape a research challenge</title>
   <link rel="stylesheet" href="/static/chat.css?v=scope-email-login-upload-200mb-20261030">
   <script src="/static/chat.js?v=scope-email-login-access-state-20261030" defer></script>
+  <link rel="stylesheet" href="/static/interface-switch.css"><script src="/static/interface-switch.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#conversation">Skip to conversation</a>
   <div class="shell">
     <header class="topbar">
       <div class="brand"><img class="brand-mark" src="/static/bold-butterfly.svg" width="40" height="40" alt="" aria-hidden="true"><span><span class="brand-bold">BOLD</span> AutoKaggle<small>FROM QUESTION TO CHALLENGE</small></span></div>
-      <div class="project-controls"><button id="sign-out" class="button button-quiet" type="button" hidden>Sign out</button><button id="new-project" class="button button-quiet" type="button"><span aria-hidden="true">＋</span> New<span class="desktop-word"> challenge</span></button></div>
+      <div class="project-controls"><nav id="interface-switch" class="interface-switch" aria-label="Application interface" hidden><a href="/" data-interface="intake">Problem Intake</a><a href="/internal" data-interface="internal">Internal</a></nav><button id="sign-out" class="button button-quiet" type="button" hidden>Sign out</button><button id="new-project" class="button button-quiet" type="button"><span aria-hidden="true">＋</span> New<span class="desktop-word"> challenge</span></button></div>
     </header>
 
     <main class="main-pane" id="conversation" tabindex="-1">

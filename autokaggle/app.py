@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import advisor, conversation, onboarding_setup, workflow, notifications, submissions
+from . import advisor, conversation, onboarding_setup, workflow, notifications, submissions, observability
 from .access import AccessGate
 from .email_auth import USER_COOKIE
 from .core import datasets
@@ -155,13 +155,14 @@ def create_app(data_dir: Path | None = None):
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
-        if request.url.path.startswith(("/api/", "/challenge/")) or request.url.path in {"/", "/workbench", "/login", "/review"}:
+        if request.url.path.startswith(("/api/", "/challenge/")) or request.url.path in {"/", "/workbench", "/login", "/review", "/internal"}:
             response.headers["Cache-Control"] = "no-store"
         elif request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache"
         return response
 
     access.register(app, HERE / "static")
+    observability.register(app, access, store, HERE / "static")
 
     @app.get("/healthz")
     def health():

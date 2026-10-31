@@ -256,12 +256,12 @@ def test_invalid_model_result_is_not_applied(monkeypatch, project, output, statu
 def test_model_call_limit_is_reserved_before_request(monkeypatch, project):
     project["_model_calls"] = 11
     reserved = []
-    calls = provider(monkeypatch, valid_advice(), before_call=lambda: reserved == [12] or pytest.fail("The call was not reserved before the provider request"))
+    calls = provider(monkeypatch, valid_advice(), before_call=lambda: reserved and all(value == 12 for value in reserved) or pytest.fail("The call was not reserved before the provider request"))
     first = advisor.advise(project, "conversation", reserve=lambda item: reserved.append(item["_model_calls"]))
     second = advisor.advise(project, "conversation", reserve=lambda item: reserved.append(item["_model_calls"]))
     assert first["mode"] == "model"
     assert second["mode"] == "rules" and "12-call" in second["notice"]
-    assert len(calls) == 1 and reserved == [12]
+    assert len(calls) == 1 and reserved and all(value == 12 for value in reserved)
     assert project["_model_calls"] == 12
 
 

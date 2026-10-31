@@ -9,25 +9,29 @@
   }
   function remaining() { return Math.max(0, Math.ceil((state.resend - Date.now()) / 1000)); }
   function render() {
-    const cooldown = remaining(); const codeStep = !!state.challenge;
-    $("email-request-form").hidden = codeStep || !state.available;
-    $("email-code-form").hidden = !codeStep || !state.available;
+    const cooldown = remaining(), codeStep = !!state.challenge, admin = !!$("admin-enabled").checked;
+    $("email-request-fields").hidden = codeStep;
+    $("email-code-fields").hidden = !codeStep;
     $("email-unavailable").hidden = state.available || !state.csrf;
-    $("login-email").disabled = state.busy || !state.available;
+    $("login-email").disabled = state.busy || !state.available || codeStep;
     $("send-code").disabled = state.busy || !state.available || !state.csrf || cooldown > 0;
-    $("send-code").textContent = state.busy && !codeStep ? "Sending…" : cooldown ? `Send code in ${cooldown}s` : "Email me a code →";
-    $("verify-code").disabled = state.busy || !state.challenge || Date.now() >= state.expires || !/^[0-9]{6}$/.test($("email-code").value);
-    $("verify-code").textContent = state.busy && codeStep ? "Please wait…" : "Sign in →";
-    $("email-code").disabled = state.busy || Date.now() >= state.expires;
-    $("resend-code").disabled = state.busy || cooldown > 0;
+    $("send-code").textContent = state.busy && !codeStep ? "Sending…" : cooldown ? `Send code in ${cooldown}s` : "Send code";
+    $("sign-in").disabled = state.busy || !state.available || !state.csrf || !codeStep || Date.now() >= state.expires || !/^[0-9]{6}$/.test($("email-code").value) || (admin && !$("access-code").value);
+    $("sign-in").textContent = state.busy && codeStep ? "Signing in…" : "Sign in";
+    $("email-code").disabled = state.busy || !state.available || !codeStep || Date.now() >= state.expires;
+    $("resend-code").disabled = state.busy || !state.available || cooldown > 0;
     $("resend-code").textContent = cooldown ? `Send a new code in ${cooldown}s` : "Send a new code";
     $("change-email").disabled = state.busy;
-    $("sign-in").disabled = state.busy || !state.csrf;
-    $("access-code").disabled = state.busy;
-    for (const id of ["email-request-form", "email-code-form", "login-form"]) $(id).setAttribute("aria-busy", String(state.busy));
+    $("admin-enabled").disabled = state.busy || !state.available;
+    $("admin-enabled").setAttribute("aria-expanded", String(!!admin));
+    $("admin-key-fields").hidden = !admin;
+    $("access-code").disabled = state.busy || !state.available || !admin;
+    $("access-code").required = !!admin;
+    $("login-form").setAttribute("aria-busy", String(state.busy));
     if (codeStep && Date.now() >= state.expires) $("code-help").textContent = "This code has expired. Request a new code to continue.";
   }
   function clearPreviousAccount() {
+    try {for (const kind of ["internal", "intake"]) window.sessionStorage?.removeItem(`autokaggle-interface-context:${kind}`);} catch (_) {}
     try {
       const storage = window.localStorage;
       for (const key of Object.keys(storage)) {
@@ -36,11 +40,12 @@
       storage.setItem("autokaggle-session-ended", String(Date.now()));
     } catch (_) { /* A new account can sign in when browser storage is unavailable. */ }
   }
-  function destination() {
+  function destination(administrator) {
     const requested = new URLSearchParams(window.location.search).get("next") || "/";
     try {
       const target = new URL(requested, window.location.origin);
-      return target.origin === window.location.origin && ["/", "/workbench"].includes(target.pathname) ? target.pathname + target.search : "/";
+      if (target.pathname === "/internal" && !administrator) return "/";
+      return target.origin === window.location.origin && ["/", "/workbench", "/internal"].includes(target.pathname) ? target.pathname + target.search : "/";
     } catch (_) { return "/"; }
   }
   async function request(path, payload) {
@@ -94,35 +99,26 @@
     } finally { state.busy = false; render(); if (state.challenge && state.available) $("email-code").focus(); }
   }
   async function verifyCode() {
-    const code = $("email-code").value;
-    if (state.busy || !state.challenge || Date.now() >= state.expires || !/^[0-9]{6}$/.test(code)) return;
+    const code = $("email-code").value, administrator = $("admin-enabled").checked;
+    if (state.busy || !state.available || !state.csrf || !state.challenge || Date.now() >= state.expires || !/^[0-9]{6}$/.test(code) || (administrator && !$("access-code").value)) return;
     state.busy = true; status("Checking your code…"); render();
     try {
       if (!await refreshAccess()) return;
-      const result = await request("/api/access/email/verify", { challenge_id: state.challenge, code });
+      if (!state.available) {status("Email sign-in is not available. Please try again later.", true); return;}
+      const result = await request("/api/access/email/verify", { challenge_id: state.challenge, code, ...(administrator ? {access_code: $("access-code").value} : {}) });
       if (result.redirect !== "/") throw new Error("The server returned an unexpected response. Please try again.");
-      $("email-code").value = ""; state.challenge = ""; state.csrf = "";
-      status("Signed in. Opening your workspace…"); clearPreviousAccount(); window.location.replace(destination());
+      $("email-code").value = ""; $("access-code").value = ""; state.challenge = ""; state.csrf = "";
+      status("Signed in. Opening your workspace…"); if (!result.workspace_preserved) clearPreviousAccount(); window.location.replace(destination(result.is_admin === true));
     } catch (error) {
-      $("email-code").value = "";
+      $("email-code").value = ""; $("access-code").value = "";
       if (error.status === 410) state.expires = 0;
       status(error.message, true);
     } finally { state.busy = false; render(); if (state.challenge) $("email-code").focus(); }
   }
-  async function adminLogin() {
-    if (state.busy || !state.csrf) return;
-    state.busy = true; status("Checking your access code…"); render();
-    try {
-      if (!await refreshAccess()) return;
-      const result = await request("/api/access/login", { access_code: $("access-code").value });
-      if (result.redirect !== "/") throw new Error("The server returned an unexpected response. Please try again.");
-      $("access-code").value = ""; state.csrf = ""; clearPreviousAccount(); window.location.replace(destination());
-    } catch (error) { $("access-code").value = ""; status(error.message, true); }
-    finally { state.busy = false; render(); if (state.csrf) $("access-code").focus(); }
-  }
-  $("email-request-form").addEventListener("submit", (event) => { event.preventDefault(); sendCode(); });
-  $("email-code-form").addEventListener("submit", (event) => { event.preventDefault(); verifyCode(); });
-  $("login-form").addEventListener("submit", (event) => { event.preventDefault(); adminLogin(); });
+  $("send-code").addEventListener("click", sendCode);
+  $("login-form").addEventListener("submit", event => {event.preventDefault(); if (state.challenge) verifyCode(); else sendCode();});
+  $("admin-enabled").addEventListener("change", () => {$("access-code").value = ""; render(); if ($("admin-enabled").checked) $("access-code").focus();});
+  $("access-code").addEventListener("input", render);
   $("email-code").addEventListener("input", () => { $("email-code").value = $("email-code").value.replace(/[^0-9]/g, "").slice(0, 6); render(); });
   $("resend-code").addEventListener("click", sendCode);
   $("change-email").addEventListener("click", () => {

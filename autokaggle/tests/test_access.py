@@ -5,11 +5,14 @@ from datetime import datetime, timedelta, timezone
 import json
 import re
 import time
+import hashlib
+import secrets
 
 from fastapi.testclient import TestClient
 import pytest
 
 from autokaggle import access, notifications
+from autokaggle.email_auth import USER_COOKIE, USER_SESSION_SECONDS
 from autokaggle.app import create_app
 from autokaggle.tests.test_workflow_review import review_fixture
 
@@ -44,6 +47,13 @@ def challenge(client):
 
 
 def sign_in(client, code=TEST_CODE):
+    # Seed an email identity for focused access tests; this is not live delivery.
+    if client.app.state.access.email_auth.identity(client.cookies.get(USER_COOKIE, "")) is None:
+        token = secrets.token_urlsafe(32)
+        with client.app.state.store.connection() as con:
+            con.execute("INSERT OR IGNORE INTO email_accounts VALUES (?,?,?)", ("account_access_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "access-test@example.org", time.time()))
+            con.execute("INSERT INTO email_sessions VALUES (?,?,?)", (hashlib.sha256(token.encode()).hexdigest(), "account_access_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", time.time() + USER_SESSION_SECONDS))
+        client.cookies.set(USER_COOKIE, token, domain="testserver.local", path="/")
     return client.post("/api/access/login", json={"access_code": code}, headers=challenge(client))
 
 
