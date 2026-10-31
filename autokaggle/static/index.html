@@ -7,6 +7,7 @@
   <link rel="icon" type="image/svg+xml" href="/static/bold-butterfly.svg"><title>BOLD AutoKaggle — Challenge workbench</title>
   <link rel="stylesheet" href="/static/app.css?v=bold-20261030">
   <script src="/static/app.js?v=upload-200mb-20261030" defer></script>
+  <link rel="stylesheet" href="/static/interface-switch.css"><script src="/static/interface-switch.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -14,6 +15,7 @@
     <header class="topbar">
       <a class="brand" href="/" aria-label="BOLD AutoKaggle home"><img class="brand-mark" src="/static/bold-butterfly.svg" width="40" height="40" alt="" aria-hidden="true"><span><span class="brand-bold">BOLD</span> AutoKaggle<small>CHALLENGE WORKBENCH</small></span></a>
       <div class="workspace-controls">
+        <nav id="interface-switch" class="interface-switch" aria-label="Application interface" hidden><a href="/" data-interface="intake">Problem Intake</a><a href="/internal" data-interface="internal">Internal</a></nav>
         <label class="sr-only" for="project-switch">Recent challenges</label>
         <select id="project-switch" aria-label="Recent challenges"><option value="">Recent challenges</option></select>
         <button class="button button-secondary button-small" id="new-project">＋ New challenge</button>

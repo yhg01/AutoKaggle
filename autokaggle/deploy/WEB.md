@@ -19,7 +19,10 @@ the database. User sessions last up to 30 days and are revoked on sign-out.
 The verified account email fills the private organizer contact for a new
 challenge. Signing in again with the same email restores that account's work.
 Account switching clears cached drafts and pending messages in the browser.
-The administrator access code remains a separate fallback in
+The administrator Access Key adds Internal permission to a verified email
+account. The login page has one Sign in button and an optional Administrator
+access checkbox. Email verification and the optional key are checked together;
+the key cannot sign in on its own. The existing key is retained in
 `$HOME/.config/autokaggle/web.env`, with mode 0600. Do not share that code
 with researchers. Existing administrator-owned challenges remain separate from
 email accounts unless an invitation grants access.
@@ -105,7 +108,76 @@ kubeconfig and preserves the operator's current context.
 and a Ready certificate before it creates the HTTPS route. Repeat `deploy` after
 source changes. Old immutable source ConfigMaps remain available for inspection.
 
-## Limits
+## Internal observability
+
+Open `/internal`, verify your email and check **Administrator access** on the
+existing login page. Supply the Access Key and use the single **Sign in** button.
+Ordinary email sign-in and challenge review invitations cannot access this page
+or `/api/internal/*`. The page is read-only and shows projects across accounts,
+saved conversations, execution events, selected backend state and model calls.
+It refreshes every five seconds while visible, with a manual refresh option.
+The existing deployment source bundle includes the page and instrumentation;
+redeploy the web workload using the deployment procedure above to activate it.
+
+Calls after this release record bounded instructions, request input, output,
+provider-returned reasoning text, token usage, duration and error type. Provider
+completion is separate from application acceptance: raw output appears before
+validation, and repair diagnostics appear separately. Hidden model reasoning is
+unavailable; older calls cannot be reconstructed. Each project retains its latest
+30 calls, and each recorded text field is capped at 24,000 characters. Records
+remain on the existing persistent volume. Pending calls become interrupted after
+a server restart. Rules-only runs do not produce model-call traces.
+
+Diagnostic responses exclude owner capabilities, participant tokens, split seeds,
+credential fields and dataset files. Organizer email addresses are redacted.
+The admin session uses the existing eight-hour signed cookie. Internal HTML and
+API responses use `Cache-Control: no-store`. This is an application access boundary
+on the existing HTTPS host, not a separate private network or VPN endpoint.
+
+The internal page was deployed on 31 October 2026 with source hash
+`a17892fb0c30b13052897470ddbb2d4716c8463af93f767e81bb362503dcab62`.
+The source-only update retained configuration, Secrets and the data PVC. SQLite
+backup integrity passed before each update; backups remain under `/data/backups`.
+Live checks confirmed readiness, administrator access to all 13 existing projects,
+and denial of anonymous internal API access. Browser QA used a loopback snapshot
+of the redacted live data, rather than exporting administrator credentials into
+the browser. The relevant Python suite passed 416 tests (one Windows symlink
+fixture excluded). The broader Windows run also encountered pre-existing POSIX
+permission, signal, shell and symlink requirements; it was not a fully passing
+Linux runner validation. The login client checks passed 19 tests.
+
+## Service limits
+
+### Internal review interface update — 31 October 2026
+
+The `internal-review` worktree was packaged without a Git commit and applied as
+a source-only update, hash
+`0f3362422faa9d2a4ceba5491bfe6cf67e2a347ac030c7bcb6fe3786e0c17e27`.
+The release preserves existing configuration, Secrets and the data PVC. A verified
+SQLite backup is stored at
+`/data/backups/pre-internal-review-20261031T183830Z.sqlite3`.
+The previous source ConfigMap, `source-a17892fb0c30b130`, remains available for
+rollback. The update includes the visual data inspector, account-bound
+administrator elevation and the Problem Intake / Internal navigation switch.
+The ordinary project owner/reviewer access checks still apply when switching
+from internal inspection to the interview.
+
+The release receipt is an ignored local operational record at
+`autokaggle/test-results/internal-review/release-receipt.json`. It identifies the
+exact application bundle independently of the uncommitted Git worktree.
+
+Post-release checks passed: the Deployment is ready, the public HTTPS health
+and login routes return 200, administrator Internal access succeeds, anonymous
+Internal API access returns 403, both application pages include the switch,
+and the email-login configuration is available. Database integrity and the
+pre/post counts of 13 projects, 5 email accounts and 4 sessions match. No email
+was sent by these checks. After explicit authorization, one small live OpenRouter
+validation passed at 18:43 UTC using `openai/gpt-6.1-sol`: provider completion,
+application acceptance and exact trigger-message linkage were verified. It used
+12,029 input and 857 output tokens (including 142 reasoning tokens), with a
+10,589 ms duration. The fixture stayed in memory; no production project was
+written and no further deployment was performed.
+
 
 - CSV upload limit: 200 MiB, with the existing row and column bounds.
 - Google Drive links are recorded; automatic import is still pending.
@@ -118,6 +190,29 @@ source changes. Old immutable source ConfigMaps remain available for inspection.
   team enrollment, and final leaderboard release are separate work.
 
 ## Verified email release
+
+### Unified sign-in correction — 31 October 2026, 19:00 UTC
+
+Source-only release
+`b7f7cf89027b66bc1d5175da369e567ebd3a090da398efe3a305cdc066cf3c25`
+replaces the separate administrator form with one email sign-in form and an
+optional Administrator access checkbox. One verify request checks the email
+code and optional Access Key before setting account-bound cookies. A wrong key
+does not consume the email code. Key-only sign-in and legacy shared administrator
+cookies no longer open a workspace; existing shared data is retained for Internal
+review. Ordinary email sign-in removes an earlier administrator elevation.
+
+The database backup at
+`/data/backups/pre-internal-review-20261031T190042Z.sqlite3` passed integrity
+validation. Post-release database counts match: 13 projects, 5 email accounts
+and 5 sessions. The rollout, live email configuration availability, single-submit
+HTML and rejection of anonymous/legacy administrator Internal access passed.
+The deployed browser page was checked by revealing the Access Key field with
+the checkbox. Authentication isolation and combined sign-in were exercised with
+isolated local accounts and a test mail transport; no new real email or model
+call was made for this authentication-only update. The earlier 18:43 UTC model
+validation remains the latest model evidence. This release was deployed from
+the worktree before its Git commit.
 
 The email release was verified with this application source hash:
 `09c67ed62e0392bb5f58def7e09ecfb8db8d44ec6789b55f3d79ceda1069a146`.

@@ -60,6 +60,88 @@ def login(client, deliveries, email="scientist@example.org"):
     return result
 
 
+def test_unified_sign_in_binds_admin_to_verified_email_and_keeps_personal_project(client, app, deliveries):
+    login(client, deliveries)
+    own = client.post("/api/projects", json={"title": "My study"}).json()
+    other = app.state.store.create("other-owner", "Someone else's study")
+    request = request_code(client, "admin-other@example.org").json()
+    result = client.post("/api/access/email/verify", json={"challenge_id": request["challenge_id"],
+        "code": deliveries[-1][1], "access_code": TEST_CODE}, headers=challenge(client))
+    assert result.status_code == 200 and result.json()["is_admin"] is True
+    assert result.json()["workspace_preserved"] is False
+    state = client.get("/api/access").json()
+    assert state["auth_kind"] == "user" and state["is_admin"] is True
+    assert "autokaggle_owner" not in client.cookies
+    assert client.get(f"/api/projects/{own['id']}").status_code == 404
+    assert client.get(f"/api/projects/{other['id']}").status_code == 404
+    assert client.get("/api/projects").json()["projects"] == []
+    assert client.get("/api/internal/projects").status_code == 200
+    personal = client.post("/api/projects", json={}).json()
+    assert personal["setup"]["organizer_email"] == "admin-other@example.org"
+
+
+def test_wrong_admin_key_does_not_consume_email_code_or_change_existing_account(client, deliveries):
+    login(client, deliveries)
+    token = client.cookies.get(email_auth.USER_COOKIE)
+    pending = request_code(client, "new-admin@example.org").json()
+    payload = {"challenge_id": pending["challenge_id"], "code": deliveries[-1][1], "access_code": "wrong-key"}
+    result = client.post("/api/access/email/verify", json=payload, headers=challenge(client))
+    assert result.status_code == 401
+    assert client.cookies.get(email_auth.USER_COOKIE) == token
+    assert client.get("/api/access").json()["is_admin"] is False
+    payload["access_code"] = TEST_CODE
+    result = client.post("/api/access/email/verify", json=payload, headers=challenge(client))
+    assert result.status_code == 200 and result.json()["is_admin"] is True
+
+
+def test_valid_admin_key_with_wrong_email_code_cannot_sign_in(client, deliveries):
+    pending = request_code(client).json()
+    wrong = "000001" if deliveries[-1][1] != "000001" else "000002"
+    result = client.post("/api/access/email/verify", json={"challenge_id": pending["challenge_id"],
+        "code": wrong, "access_code": TEST_CODE}, headers=challenge(client))
+    assert result.status_code == 401
+    assert access.ADMIN_COOKIE not in client.cookies and email_auth.USER_COOKIE not in client.cookies
+    assert client.get("/api/internal/projects").status_code == 403
+
+
+def test_access_key_alone_cannot_sign_in(client):
+    result = client.post("/api/access/login", json={"access_code": TEST_CODE}, headers=challenge(client))
+    assert result.status_code == 401
+    assert access.ADMIN_COOKIE not in client.cookies and "autokaggle_owner" not in client.cookies
+    assert client.get("/api/projects").json()["projects"] == []
+
+
+def test_unified_admin_sign_in_retains_own_workspace_and_plain_sign_in_removes_role(client, deliveries, monkeypatch):
+    login(client, deliveries)
+    own = client.post("/api/projects", json={"title": "Personal research"}).json()
+    current = time.time()
+    for offset, administrator in ((61, True), (122, False)):
+        monkeypatch.setattr(email_auth.time, "time", lambda: current + offset)
+        pending = request_code(client).json()
+        payload = {"challenge_id": pending["challenge_id"], "code": deliveries[-1][1]}
+        if administrator:
+            payload["access_code"] = TEST_CODE
+        result = client.post("/api/access/email/verify", json=payload, headers=challenge(client))
+        assert result.status_code == 200
+        assert result.json()["workspace_preserved"] is True
+        assert result.json()["is_admin"] is administrator
+        assert client.get(f"/api/projects/{own['id']}").status_code == 200
+        assert client.get("/api/internal/projects").status_code == (200 if administrator else 403)
+
+
+def test_old_shared_admin_cookie_cannot_reopen_shared_intake(client, app):
+    import hmac
+    gate = app.state.access
+    owner = hmac.new(gate._key, b"administrator-project-owner", hashlib.sha256).hexdigest()
+    project = app.state.store.create(owner, "Legacy shared study")
+    client.cookies.set(access.ADMIN_COOKIE, gate._sign("admin", access.SESSION_SECONDS))
+    client.cookies.set("autokaggle_owner", owner)
+    assert client.get("/api/access").json()["auth_kind"] == "anonymous"
+    assert client.get("/api/internal/projects").status_code == 403
+    assert client.get(f"/api/projects/{project['id']}").status_code == 404
+    assert client.get("/api/projects").json()["projects"] == []
+
+
 def test_email_login_creates_private_workspace_and_prefills_private_contact(client, app, deliveries):
     state = client.get("/api/access").json()
     assert state["email_login_available"] is True and state["auth_kind"] == "anonymous"
@@ -175,11 +257,34 @@ def test_switching_admin_user_and_another_user_keeps_workspaces_separate(client,
     assert app.state.access.email_auth.identity(token) is None
     assert client.get(f"/api/projects/{first['id']}").status_code == 404
     second_token = client.cookies.get(email_auth.USER_COOKIE)
+    second = client.post("/api/projects", json={"title": "Second account"}).json()
     assert sign_in(client).status_code == 200
-    assert app.state.access.email_auth.identity(second_token) is None
-    assert client.get("/api/config").json()["auth_kind"] == "admin"
-    assert client.get(f"/api/projects/{administrator['id']}").status_code == 200
+    assert app.state.access.email_auth.identity(second_token) is not None
+    assert client.cookies.get(email_auth.USER_COOKIE) == second_token
+    assert client.get("/api/config").json()["auth_kind"] == "user"
+    assert client.get("/api/access").json()["is_admin"] is True
+    assert client.get(f"/api/projects/{second['id']}").status_code == 200
+    assert client.get(f"/api/projects/{administrator['id']}").status_code == 404
     assert client.get(f"/api/projects/{first['id']}").status_code == 404
+    assert client.get("/api/internal/projects").status_code == 200
+    elevated = client.cookies.get(access.ADMIN_COOKIE)
+    client.cookies.clear()
+    client.cookies.set(access.ADMIN_COOKIE, elevated)
+    assert client.get("/api/internal/projects").status_code == 403
+
+
+def test_elevated_role_cannot_follow_another_email_session(client, app, deliveries):
+    login(client, deliveries)
+    own = client.post("/api/projects", json={}).json()
+    result = sign_in(client)
+    assert result.json()["workspace_preserved"] is True
+    elevated = client.cookies.get(access.ADMIN_COOKIE)
+    assert client.get("/api/internal/projects").status_code == 200
+    login(client, deliveries, "another@example.org")
+    assert client.get("/api/access").json()["is_admin"] is False
+    client.cookies.set(access.ADMIN_COOKIE, elevated)
+    assert client.get("/api/internal/projects").status_code == 403
+    assert client.get(f"/api/projects/{own['id']}").status_code == 404
 
 
 def test_logout_revokes_server_session_and_clears_all_cookies(client, app, deliveries):

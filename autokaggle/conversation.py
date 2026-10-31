@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import uuid
 
-from . import advisor, onboarding_setup, readiness
+from . import advisor, onboarding_setup, readiness, observability
 
 ITEMS = [
     ("question", "Research problem", "Problem", "What scientific problem should the research solve?", "Scientific question, practical value, and the outcome that would count as useful progress."),
@@ -85,10 +85,13 @@ def _validated_response(project, kind, context, reserve, validate):
     if previous and previous.get("kind") == kind:
         request_context["response_repair"] = copy.deepcopy(previous)
     for attempt in (1, 2):
+        traces = project.get("_model_traces", [])
+        previous_trace = traces[-1].get("id") if traces else None
         try:
             parsed = _provider(project, kind, request_context, reserve)
             result = validate(parsed)
         except ModelResponseError as exc:
+            observability.mark_validation(project, previous_trace, "rejected", attempt, exc.code)
             feedback = {"kind": kind, "code": exc.code, "instruction": exc.feedback}
             state["_last_response_failure"] = feedback
             _record_response_issue(state, kind, exc.code, attempt)
@@ -97,6 +100,7 @@ def _validated_response(project, kind, context, reserve, validate):
             state["_automatic_repair_used"] = True
             request_context["response_repair"] = feedback
         else:
+            observability.mark_validation(project, previous_trace, "accepted", attempt)
             state.pop("_last_response_failure", None)
             return result
 
@@ -677,11 +681,14 @@ def _provider(project, kind, context, reserve):
     if revision:
         instructions += "\n\n" + (Path(__file__).parent / "prompts/revision.md").read_text()
     provider_input = onboarding_setup.redact_private(project, json.dumps({"mode": kind, **context, "platform_context": _platform_context(project)}, ensure_ascii=False))
-    with OpenAI(timeout=120, max_retries=0) as client:
-        response = client.responses.create(model=advisor.model_name(), reasoning={"effort": "high" if kind == "draft" else "medium"},
-            instructions=instructions, input=provider_input,
-            max_output_tokens=10000 if kind == "scope" else 1600,
-            text={"format": {"type": "json_schema", "name": "onboarding_" + kind, "strict": True, "schema": _scope_schema() if kind == "scope" else _draft_schema()}})
+    effort = "high" if kind == "draft" else "medium"
+    with observability.model_call(project, kind, instructions, provider_input, effort, reserve) as trace:
+        with OpenAI(timeout=120, max_retries=0) as client:
+            response = client.responses.create(model=advisor.model_name(), reasoning={"effort": effort},
+                instructions=instructions, input=provider_input,
+                max_output_tokens=10000 if kind == "scope" else 1600,
+                text={"format": {"type": "json_schema", "name": "onboarding_" + kind, "strict": True, "schema": _scope_schema() if kind == "scope" else _draft_schema()}})
+        trace.update(observability.response_record(response))
     if response.status != "completed" or not response.output_text:
         raise ModelResponseError("Incomplete model response")
     try:

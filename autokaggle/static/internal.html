@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Internal review · AutoKaggle</title><link rel="stylesheet" href="/static/internal.css"><link rel="stylesheet" href="/static/interface-switch.css"><script src="/static/internal-data.js" defer></script><script src="/static/internal.js" defer></script><script src="/static/interface-switch.js" defer></script></head>
+<body>
+<header class="app-header"><button id="toggle-projects" aria-label="Toggle project sidebar" aria-expanded="true" title="Show or hide project sidebar">☰</button><a class="brand" href="/">AutoKaggle <span>/ Internal review</span></a><nav id="interface-switch" class="interface-switch" aria-label="Application interface" hidden><a href="/" data-interface="intake">Problem Intake</a><a href="/internal" data-interface="internal">Internal</a></nav><span class="access-label" id="identity">Administrator access</span><a href="/login?next=/internal">Account access</a></header>
+<div class="app-layout">
+<aside class="project-rail" aria-label="Projects">
+<div class="rail-heading"><h1>Projects</h1><span id="project-total" class="count">—</span></div>
+<label class="sr-only" for="project-search">Find a project on this page</label><input id="project-search" type="search" placeholder="Search title or ID on this page">
+<div id="projects" class="project-list"><p class="empty">Loading projects…</p></div>
+<nav class="pagination" aria-label="Project pages"><button id="previous" aria-label="Previous project page">←</button><span id="page"></span><button id="next" aria-label="Next project page">→</button></nav>
+<p class="rail-label">DATA</p><nav id="sections" class="sections" aria-label="Record categories"></nav>
+<p class="rail-note">Read-only · redacted records</p>
+</aside>
+<main class="workspace">
+<div class="workspace-toolbar"><h2 id="project-title">Select a project to review</h2><details class="toolbar-menu"><summary>Project details</summary><div class="menu-body"><p id="project-id" class="meta">PROJECT RECORD</p><p id="project-meta" class="muted">Saved snapshot metadata.</p></div></details><div class="toolbar-actions"><button id="refresh" title="Load the latest saved snapshot">↻ Refresh</button><details class="toolbar-menu"><summary>Snapshot</summary><div class="menu-body"><label><input id="auto" type="checkbox" checked> Check every 5 seconds</label><p id="status" role="status" aria-live="polite">Connecting…</p></div></details><button id="export" disabled>Export</button></div></div>
+<div id="new-data" class="new-data" hidden><span>New saved data is available. Your current review view has been kept.</span><button id="load-latest">Load latest snapshot</button></div>
+<div class="review-toolbar"><strong id="category-title">Conversation</strong><div class="view-switch" aria-label="Record presentation"><button id="visual-view" aria-pressed="true">Visual</button><button id="list-view" aria-pressed="false">List</button></div><label class="record-search"><span class="sr-only">Search records in this category</span><input id="record-search" type="search" placeholder="Search records"></label><label><span class="sr-only">Filter records</span><select id="record-filter"><option value="">All records</option></select></label><label><span class="sr-only">Record order</span><select id="record-order"><option value="forward">Recorded order</option><option value="reverse">Reverse recorded order</option></select></label><span id="record-count" class="muted"></span><button id="focus-panel" title="Expand the selected record to the full workspace" aria-pressed="false">Expand detail</button></div>
+<div class="review-layout" id="review-layout"><section id="records" class="records" aria-label="Recorded data"></section><div id="panel-resizer" class="panel-resizer" role="separator" tabindex="0" aria-label="Resize data and detail panels" aria-orientation="vertical" aria-valuemin="28" aria-valuemax="72" aria-valuenow="52" title="Drag to resize panels; arrow keys also work"></div><section id="inspector" class="inspector" aria-label="Selected record"><div class="empty"><h3>Inspect a saved record</h3><p>Select a message, call, field or execution record. Original data and its source path appear here.</p></div></section></div>
+</main>
+</div>
+</body></html>

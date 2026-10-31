@@ -40,6 +40,10 @@ class Store:
             for row in con.execute("SELECT id, body FROM projects").fetchall():
                 item = json.loads(row[1])
                 changed = recover_interrupted(item)
+                for trace in item.get("_model_traces", []):
+                    if trace.get("status") == "running":
+                        trace.update(status="interrupted", finished_at=now())
+                        changed = True
                 if item.get("harness", {}).get("status") == "running":
                     item["harness"] = {"status": "failed", "stage": "interrupted", "error": "The server restarted. Your saved work is available. Run the agent again."}
                     changed = True

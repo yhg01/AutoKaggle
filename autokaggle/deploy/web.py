@@ -42,7 +42,7 @@ def bundle():
     with tarfile.open(fileobj=raw, mode="w") as archive:
         for path in sorted(files):
             data = path.read_bytes()
-            info = tarfile.TarInfo(str(path.relative_to(ROOT)))
+            info = tarfile.TarInfo(path.relative_to(ROOT).as_posix())
             info.size, info.mode, info.mtime = len(data), 0o644, 0
             archive.addfile(info, io.BytesIO(data))
     data = gzip.compress(raw.getvalue(), mtime=0)

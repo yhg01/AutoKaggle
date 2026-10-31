@@ -27,6 +27,7 @@ def model_context(project, kind):
 
 
 def advise(project, kind, reserve=None):
+    from . import observability
     item = {"kind": kind, "mode": "rules", "content": "", "created_at": now(), "updates": [], "next_questions": []}
     if not configured():
         item["content"] = rules_advice(project, kind)
@@ -47,13 +48,15 @@ def advise(project, kind, reserve=None):
                       "required": ["field", "value", "evidence"]}}}, "required": ["content", "next_questions", "updates"]}
     try:
         from openai import OpenAI
-        with OpenAI(timeout=120, max_retries=0) as client:
-            result = client.responses.create(model=model_name(),
-                instructions=(Path(__file__).parent / "prompts/organizer.md").read_text(),
-                input=json.dumps(model_context(project, kind), ensure_ascii=False),
-                reasoning={"effort": "high" if kind == "review" else "medium"},
-                max_output_tokens=6000,
-                text={"format": {"type": "json_schema", "name": "challenge_advice", "strict": True, "schema": schema}})
+        instructions = (Path(__file__).parent / "prompts/organizer.md").read_text()
+        provider_input = json.dumps(model_context(project, kind), ensure_ascii=False)
+        effort = "high" if kind == "review" else "medium"
+        with observability.model_call(project, "advice_" + kind, instructions, provider_input, effort, reserve) as trace:
+            with OpenAI(timeout=120, max_retries=0) as client:
+                result = client.responses.create(model=model_name(), instructions=instructions,
+                    input=provider_input, reasoning={"effort": effort}, max_output_tokens=6000,
+                    text={"format": {"type": "json_schema", "name": "challenge_advice", "strict": True, "schema": schema}})
+            trace.update(observability.response_record(result))
         if result.status != "completed" or not result.output_text:
             raise ValueError("Model did not complete")
         parsed = json.loads(result.output_text)

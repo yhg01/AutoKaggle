@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from autokaggle import conversation as c
+from autokaggle.store import public_project
 from autokaggle.tests.test_conversation import draft, provider, requirement, scope, update
 
 
@@ -58,11 +59,13 @@ def test_semantic_repair_reserved_before_both_calls_and_applies_once(monkeypatch
     c.submit_message(project, "Predict stability.", "first", reserve=lambda p: snapshots.append(copy.deepcopy(p)))
     state = project["conversation"]
     assert state["status"] == "idle" and len(calls) == 2
-    assert [snapshot["_model_calls"] for snapshot in snapshots] == [1, 2]
+    # Diagnostic snapshots surround each provider call; the budget still rises once.
+    assert list(dict.fromkeys(snapshot["_model_calls"] for snapshot in snapshots)) == [1, 2]
     assert all(snapshot["conversation"]["_inflight"] for snapshot in snapshots)
     feedback = json.loads(calls[1]["input"])["response_repair"]
     assert feedback["code"] == "evidence_was_not_in_the_current_user_message"
-    assert "FABRICATED" not in json.dumps(project) + calls[1]["input"]
+    assert "FABRICATED" not in json.dumps(public_project(project)) + calls[1]["input"]
+    assert "FABRICATED" in project["_model_traces"][0]["output"]
     assert len(state["_history"]) == 1 and len(state["items"]["question"]["evidence"]) == 1
     assert "_last_response_failure" not in state
     before = copy.deepcopy(project)
@@ -80,7 +83,8 @@ def test_repeated_failure_stays_atomic_and_manual_retry_gets_feedback(monkeypatc
     assert state["items"] == original and state["status"] == "error"
     assert len(calls) == 2 and len(state["_response_diagnostics"]) == 2
     assert "recorded evidence" in state["error"] and "ValueError" not in state["error"]
-    assert "FABRICATED" not in json.dumps(project)
+    assert "FABRICATED" not in json.dumps(public_project(project))
+    assert "FABRICATED" in project["_model_traces"][0]["output"]
     c.submit_message(project, "Predict stability.", "first")
     assert len(calls) == 2
     c.retry_turn(project, "manual-retry")

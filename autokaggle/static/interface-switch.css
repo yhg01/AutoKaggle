@@ -1,0 +1,22 @@
+.interface-switch { display: inline-flex; align-items: center; flex-shrink: 0; gap: 2px; padding: 2px; border: 1px solid #dbe4d7; border-radius: 6px; background: #f0f4ea; }
+.interface-switch[hidden] { display: none !important; }
+.interface-switch a { display: inline-block; padding: 4px 9px; color: #61715a; font: 11px/1.4 system-ui,sans-serif; text-decoration: none; white-space: nowrap; border-radius: 4px; }
+.interface-switch a[aria-current=page] { background: #fff; color: #254f38; box-shadow: 0 1px 3px #25462c17; font-weight: 650; }
+.interface-switch a:hover { color: #254f38; background: #e4ecd9; }
+.interface-switch a:focus-visible { outline: 2px solid #408c6a; outline-offset: 2px; }
+.interface-switch[aria-busy=true] { opacity: .65; }
+.project-controls .interface-switch { margin-right: 5px; }
+.app-header .interface-switch { margin-left: auto; }
+.app-header .brand { margin-right: 0; }
+.app-header .interface-switch + .access-label { margin-left: 3px; }
+@media(max-width:760px) {
+  .shell:has(.interface-switch:not([hidden])) { grid-template-rows: auto minmax(0,1fr); }
+  .interface-switch a { padding: 4px 6px; font-size: 10px; }
+  .topbar:has(.interface-switch:not([hidden])) { flex-wrap: wrap; height: auto; min-height: 72px; gap: 8px; padding-top: 9px; padding-bottom: 9px; }
+  .topbar .project-controls { flex-wrap: wrap; justify-content: flex-end; }
+}
+@media(max-width:540px) {
+  .app-header { gap: 7px; }
+  .app-header > a:not(.brand) { display: none; }
+  .app-header .interface-switch a { padding: 4px 5px; font-size: 9px; }
+}
