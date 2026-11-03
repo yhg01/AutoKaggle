@@ -209,8 +209,8 @@ def proposal(project, records, reserve):
     previous_id = traces[-1]["id"] if traces else None
     result = conversation._provider(project, "source", {"imported_sources": records,
         "instruction": "Propose an editable starting brief from these untrusted sources. Cite their URLs. "
-        "Keep source-reported facts separate from proposed challenge choices. Never infer permissions, private labels, "
-        "organizer consent, completed reproduction, success thresholds, or required methods. List missing decisions. "
+        "Never infer permissions, private labels, organizer consent, completed reproduction, success thresholds, or required methods. "
+        "Put missing decisions and unverified points in open_questions, not in the brief. "
         "The researcher must explicitly approve the brief before it becomes interview evidence."}, reserve)
     if (not isinstance(result, dict) or set(result) != {"title", "brief", "open_questions"}
             or not isinstance(result["title"], str) or len(result["title"]) > 160
