@@ -150,6 +150,7 @@ def test_required_setting_checkpoint_accepts_valid_choice_and_advances(monkeypat
     assert before["interview"]["current_stage"] == "setup"
     assert next(item for item in before["checklist"] if item["id"] == field)["active"]
     assert not next(item for item in before["checklist"] if item["id"] == field)["can_accept_scope"]
+    assert state["messages"][-1]["content"].startswith(readiness.REQUIREMENTS[field][0]["label"] + " is a required organizer setting")
     assert "cannot be resolved through scope acceptance" in state["messages"][-1]["content"]
     calls = provider(monkeypatch, [])
     c.submit_message(project, text, "required-setting-choice")

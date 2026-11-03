@@ -1129,12 +1129,13 @@ def _checkpoint(state, field, criterion, reason=None):
     _reset_error(state)
     same_decision = previous and all(previous.get(key) == checkpoint[key] for key in ("field", "requirement_id"))
     if not same_decision:
-        instructions = {
-            "competition": "Choose Prediction submissions or Code submissions below, or reply with your choice in chat. This required organizer setting cannot be resolved through scope acceptance.",
-            "submissions": "Confirm or change the daily submission allowance below, or state the allowance in chat. This required organizer setting cannot be resolved through scope acceptance.",
-            "organizer": "Enter your private correspondence email in the email step. This required setting cannot be resolved through scope acceptance.",
-        }
-        _message(state, "assistant", instructions.get(field) or f"We have not resolved {criterion['label'].lower()}. Open this checklist item to confirm the scope, record an explicit exception, or supply a new decision. I will not ask the same detail again automatically.")
+        # The checkpoint card shows each setting's own control; the message only
+        # says which kind of decision this is.
+        if field in readiness.SERVER_FIELDS:
+            text = f"{criterion['label']} is a required organizer setting and cannot be resolved through scope acceptance. Use the option shown below, or reply in chat."
+        else:
+            text = f"We have not resolved {criterion['label'].lower()}. Open this checklist item to confirm the scope, record an explicit exception, or supply a new decision. I will not ask the same detail again automatically."
+        _message(state, "assistant", text)
     elif state["messages"] and state["messages"][-1]["role"] == "user":
         _message(state, "assistant", "Your update is saved. The remaining gap is shown below. You can reply with a decision, review the recorded scope, or leave this detail open and continue.")
 
