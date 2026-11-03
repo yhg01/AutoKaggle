@@ -530,7 +530,25 @@ def sync_legacy_answers(project, manual_fields=()):
         project["_chat_derived_answers"] = records
     if set(previous_manual if isinstance(previous_manual, list) else []) != manual:
         project["_chat_manual_answers"] = sorted(manual)
+    _record_form_declarations(items, answers, manual, fields, criteria_by_answer, known)
     return changed
+
+
+def _record_form_declarations(items, answers, manual, fields, criteria_by_answer, known):
+    # A manual answer is otherwise invisible to the interview checklist. Where a
+    # criterion only needs a concrete declared value, the form entry meets it.
+    for key in manual:
+        source, identifiers = fields[key], criteria_by_answer[key]
+        item = items.get(source)
+        if len(identifiers) != 1 or (source, identifiers[0]) not in readiness.DECLARED_VALUE_CRITERIA or not isinstance(item, dict):
+            continue
+        requirements = item.setdefault("requirements", {})
+        value = answers.get(key)
+        if isinstance(value, str) and known(value):
+            requirements[identifiers[0]] = {"status": "recorded", "value": value.strip(), "evidence": [value.strip()],
+                                            "reason": "", "source": "form"}
+        elif requirements.get(identifiers[0], {}).get("source") == "form":
+            del requirements[identifiers[0]]
 
 
 def recover_interrupted(project):
