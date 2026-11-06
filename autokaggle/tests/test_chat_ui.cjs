@@ -49,7 +49,7 @@ function pollHarness(state, api) {
   const calls = { cleared: 0, errors: 0, viewChanges: 0 };
   const rememberPending = (value) => { if (value === null) calls.cleared += 1; state.pending = value; };
   const poll = uiFunction("pollWorking", {
-    state, api, window: immediateWindow, updateControls: noop,
+    state, api, window: immediateWindow, updateControls: noop, renderActivity: noop,
     renderConversation: noop, showError: () => { calls.errors += 1; },
     base: () => "/conversation", rememberPending,
     clearDeliveredCompose: () => { throw new Error("A GET must not acknowledge a message"); },
@@ -68,6 +68,7 @@ function dispatchHarness(state, api, overrides = {}) {
     state, api, $, window: immediateWindow, contactRequired: () => false,
     working: () => !!state.busy || !!state.polling || state.conversation?.status === "working",
     rememberPending, rememberCompose, clearDeliveredCompose,
+    renderDocuments: noop, renderActivity: noop, watchActivity: noop,
     setView: (view) => { state.view = view; },
     setBusy: (busy) => { state.busy = busy; },
     base: () => "/conversation", renderConversation: noop,
@@ -168,7 +169,7 @@ test("Retry uses the same request ID and clears pending only after its POST succ
 function messageHarness(messages, pending) {
   const { $ } = dom();
   const state = { projectId: "p1", conversation: { messages }, pending, messageKey: "" };
-  const render = uiFunction("renderMessages", {
+  const render = uiFunction("renderMessages", { messageSteps: () => null, messageAttachments: () => null,
     state, $, element: node, markdown: (text, className) => node("div", className, text),
     document: { createTextNode: (text) => ({ nodeType: 3, textContent: text }) },
     window: immediateWindow, working: () => false,
@@ -1382,8 +1383,139 @@ test("Review explicitly opens the built challenge workbench and preserves unsent
   const open=uiFunction("openReview", {state:{projectId:"same-project",workflow:{version:"v1"}},rememberCompose:()=>{saved++;},window:{location:{assign:url=>destinations.push(url)}},setView:()=>assert.fail("Built review should use the workbench")});
   open(); assert.equal(saved,1); assert.deepEqual(destinations,["/workbench?project=same-project&view=review"]);
 });
+function elementHelper() {
+  return (tag, className, text) => { const made = node(tag, className, text); made.attributes = {}; return made; };
+}
+
+test("Lookup steps are collapsed and failed ones say why", () => {
+  const element = elementHelper();
+  const messageSteps = uiFunction("messageSteps", { element, stepRow: uiFunction("stepRow", { element }) });
+  assert.equal(messageSteps({ role: "assistant", content: "No lookups." }), null);
+  const details = messageSteps({ steps: [{ label: "Read notes.docx", ok: true }, { label: "Read https://example.org/a", ok: false, detail: "Access denied." }] });
+  assert.equal(details.tag, "details");
+  assert.equal(details.children[0].textContent, "2 steps");
+  const [read, failed] = details.children[1].children;
+  assert.equal(read.textContent, "Read notes.docx");
+  assert.equal(failed.className, "failed");
+  assert.equal(failed.children[0].textContent, "Access denied.");
+});
+
+test("A sent message shows its files and offers removal", () => {
+  const state = { conversation: { documents: [{ id: "a", name: "notes.pdf" }] }, pending: null };
+  const element = elementHelper();
+  const documentRemoveButton = uiFunction("documentRemoveButton", { element, working: () => false, state });
+  const fileCard = uiFunction("fileCard", { element });
+  const messageAttachments = uiFunction("messageAttachments", { element, state, documentRemoveButton, fileCard });
+  assert.equal(messageAttachments({ content: "No file." }), null);
+  const row = messageAttachments({ attachments: [{ id: "a", name: "notes.pdf" }, { id: "gone", name: "old.pdf" }] });
+  assert.equal(row.children[0].textContent, "notes.pdf");
+  assert.equal(row.children[0].attributes["data-kind"], "PDF");
+  assert.equal(row.children[0].children[0].attributes["data-remove-document"], "a");
+  assert.equal(row.children[1].className, "file-card removed");
+  assert.equal(row.children[1].children.length, 0);
+  assert.equal(messageAttachments({ pending: true, attachments: [{ id: "a", name: "notes.pdf" }] }).children[0].children.length, 0);
+});
+
+test("Operations are listed as they run, the current one pulses, and an unchanged list is not rebuilt", () => {
+  const { $ } = dom();
+  const state = { activity: [{ label: "Read notes.pdf", ok: true }, { label: "Read https://example.org/a", ok: false, detail: "Denied." }, { label: "Reviewing the results", running: true }] };
+  const element = elementHelper();
+  const renderActivity = uiFunction("renderActivity", { state, $, stepRow: uiFunction("stepRow", { element }), working: () => true });
+  renderActivity();
+  const root = $("activity-steps");
+  assert.equal(root.hidden, false);
+  assert.deepEqual(root.children.map((row) => row.className), ["done", "failed", "running"]);
+  assert.equal(root.children[1].children[0].textContent, "Denied.");
+  assert.equal($("thinking-message").hidden, true);
+  const rebuilt = root.replaceCount;
+  state.activity = [...state.activity];
+  renderActivity();
+  assert.equal(root.replaceCount, rebuilt);
+  state.activity = [];
+  renderActivity();
+  assert.equal(root.hidden, true);
+  assert.equal(root.children.length, 0);
+  assert.equal($("thinking-message").hidden, false);
+});
+
+test("Steps appear one at a time and only the newest shown step counts as current", () => {
+  const revealSteps = uiFunction("revealSteps");
+  const steps = [{ label: "Reviewed your message", ok: true }, { label: "Read notes.pdf", ok: true }, { label: "Reviewing the results", running: true }];
+  assert.deepEqual(revealSteps(steps, 0), []);
+  assert.deepEqual(revealSteps(steps, 1), [{ label: "Reviewed your message", ok: true, running: true }]);
+  assert.deepEqual(revealSteps(steps, 2).map((step) => !!step.running), [false, true]);
+  assert.deepEqual(revealSteps(steps, 3), steps);
+});
+
+test("Watching lookups stops when the reply arrives and ignores read failures", async () => {
+  const { $ } = dom();
+  const state = {}; let waiting = true; let reads = 0; const counts = [];
+  const steps = [{ label: "Reviewed your message", ok: true }, { label: "Read notes.pdf", ok: true }, { label: "Reviewing the results", running: true }];
+  const api = async () => { reads += 1; if (reads === 1) throw new Error("Busy"); return { activity: steps }; };
+  const renderActivity = () => { counts.push(state.activity.length); if (state.activity.length === 3) waiting = false; };
+  const watchActivity = uiFunction("watchActivity", { state, $, api, base: (id) => id, renderActivity, revealSteps: uiFunction("revealSteps"), window: immediateWindow });
+  await watchActivity("project", () => waiting);
+  assert.equal(reads >= 2, true);
+  assert.deepEqual(counts.filter((count, index) => count !== counts[index - 1]), [0, 1, 2, 3]);
+});
+
+test("The message box holds only files that have not been sent", () => {
+  const { $ } = dom();
+  const conversation = { documents: [{ id: "sent", name: "sent.pdf", pending: false }, { id: "doc-1", name: "notes.pdf", truncated: false, pending: true }, { id: "doc-2", name: "long.pdf", truncated: true, pending: true }] };
+  const render = (busy, pending = null) => {
+    const state = { conversation, pending }; const element = elementHelper(); const working = () => busy;
+    const documentRemoveButton = uiFunction("documentRemoveButton", { element, working, state });
+    const renderDocuments = uiFunction("renderDocuments", { state, $, documentRemoveButton, fileCard: uiFunction("fileCard", { element }) });
+    renderDocuments();
+    return $("document-list");
+  };
+  const root = render(false);
+  assert.equal(root.hidden, false);
+  assert.equal(root.children.length, 2);
+  const remove = root.children[0].children[0];
+  assert.equal(remove.attributes["data-remove-document"], "doc-1");
+  assert.equal(remove.disabled, false);
+  assert.match(root.children[1].title, /first part/);
+  assert.equal(render(true).children[0].children[0].disabled, true);
+  assert.equal(render(false, { action: "messages" }).hidden, true);
+  conversation.documents = [{ id: "sent", name: "sent.pdf", pending: false }];
+  assert.equal(render(false).hidden, true);
+});
+
+test("A failed attachment reports its reason and keeps the others", async () => {
+  const { $ } = dom();
+  $("document-notice").classList = { toggle: noop };
+  const state = { projectId: "p", conversation: { documents: [] }, pending: null };
+  const upload = (file) => file.name === "scan.png" ? Promise.reject(new Error("Images are not read.")) : Promise.resolve({ documents: [{ id: "a", name: file.name }] });
+  const documentNotice = uiFunction("documentNotice", { $ });
+  const attachDocuments = uiFunction("attachDocuments", { state, $, working: () => !!state.documentBusy, updateControls: noop, renderDocuments: noop, documentNotice, uploadDocumentFile: upload });
+  await attachDocuments([{ name: "notes.pdf" }, { name: "scan.png" }]);
+  assert.deepEqual(state.conversation.documents, [{ id: "a", name: "notes.pdf" }]);
+  assert.match($("document-notice").textContent, /scan\.png: Images are not read/);
+  assert.equal(state.documentBusy, false);
+});
+
 test("An unbuilt draft keeps review preparation inside the agent", () => {
   const views=[];
   const open=uiFunction("openReview", {state:{projectId:"same-project",workflow:{status:"not_built"}},rememberCompose:()=>{},window:{location:{assign:()=>assert.fail("No package exists yet")}},setView:view=>views.push(view)});
   open();assert.deepEqual(views,["review"]);
+});
+
+test("A file attached while the agent works is refused with a reason", async () => {
+  const { $ } = dom();
+  $("document-notice").classList = { toggle: noop };
+  const state = { projectId: "p", conversation: { documents: [] }, pending: null };
+  const upload = () => { throw new Error("Nothing may upload while the agent works"); };
+  const documentNotice = uiFunction("documentNotice", { $ });
+  const attachDocuments = uiFunction("attachDocuments", { state, $, working: () => true, updateControls: noop, renderDocuments: noop, documentNotice, uploadDocumentFile: upload });
+  await attachDocuments([{ name: "notes.pdf" }]);
+  assert.match($("document-notice").textContent, /Wait for the current step/);
+  assert.equal($("document-notice").hidden, false);
+});
+
+test("fileCard labels a file without an extension", () => {
+  const fileCard = uiFunction("fileCard", { element: elementHelper() });
+  assert.equal(fileCard("notes").attributes["data-kind"], "FILE");
+  assert.equal(fileCard("run.tar.gz").attributes["data-kind"], "GZ");
+  assert.equal(fileCard("a.docx", "file-card removed").className, "file-card removed");
 });

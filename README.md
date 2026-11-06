@@ -42,6 +42,7 @@ After email verification, a researcher with no saved name is asked for a name on
 
 - CSV classification and regression workflows support data checks, draft packages, and prediction submissions. CSV uploads are limited to 200 MB, with additional row, column, and cell bounds.
 - Dataset links are recorded for review. Automatic Google Drive import is not implemented in this app.
+- Researchers can attach papers, notes, and logs in the chat, and can ask the agent to read a document or link, check the dataset, or search the web. A lookup runs only on request, and a finding is recorded only after the researcher confirms it. Documents give context and do not enter the package. See [looking things up](autokaggle/docs/WORKSPACE.md#ask-the-agent-to-look-something-up).
 - The runtime uses an 80/20 outer split and training-derived development data. It keeps final answers private and withholds final scores. The requested 70/30 policy and public/private leaderboard workflow remain planned work.
 - A scientific reference baseline is optional. The current pipeline trial uses a simple predictor; it does not reproduce an external scientific baseline.
 - Hosted code execution is disabled. Operator-controlled Civo execution requires private configuration, verification receipts, and fresh runtime checks. Those receipts are not distributed in this repository.

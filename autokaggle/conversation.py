@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import uuid
 
-from . import advisor, onboarding_setup, readiness, observability
+from . import advisor, documents, lookup, observability, onboarding_setup, readiness
 
 ITEMS = [
     ("question", "Research problem", "Problem", "What scientific problem should the research solve?", "Scientific question, practical value, and the outcome that would count as useful progress."),
@@ -60,6 +60,7 @@ PARTIAL_QUESTIONS = {
 MAX_FOLLOWUPS = 8
 MAX_CALLS = 30
 MAX_REVISION_ROUNDS = 20
+MAX_REPLY_CHARS = 1500
 
 
 class ModelResponseError(ValueError):
@@ -161,8 +162,12 @@ def _data_link_question(state, text, requirement_id=None):
 
 
 def _message(state, role, content):
-    state["messages"].append({"role": role, "content": content, "id": str(uuid.uuid4())})
-    return state["messages"][-1]["id"]
+    message = {"role": role, "content": content, "id": str(uuid.uuid4())}
+    if role == "assistant" and state.get("_turn_steps"):
+        # Show the lookups of this turn on the first reply that follows them.
+        message["steps"] = state.pop("_turn_steps")
+    state["messages"].append(message)
+    return message["id"]
 
 
 def ensure_conversation(project):
@@ -264,6 +269,9 @@ def conversation_view(project):
                          for key, label, pillar, _, _ in ITEMS]
     by_id = {item["id"]: item for item in view["checklist"]}
     view["setup"] = onboarding_setup.get(project)
+    view["documents"] = documents.view(project)
+    # Lookups of the turn in progress. They move onto the reply when it arrives.
+    view["activity"] = copy.deepcopy(state.get("_turn_steps", []))
     view["readiness"] = readiness.assess(state)
     stages = []
     for stage_id, label, fields in INTERVIEW_STAGES:
@@ -621,6 +629,7 @@ def _scope_schema():
             "id": {"type": "string", "enum": sorted({c["id"] for criteria in readiness.REQUIREMENTS.values() for c in criteria})}, "status": {"type": "string", "enum": ["recorded", "missing", "deferred", "not_applicable", "conflicting"]},
             "evidence": {"type": "array", "maxItems": 8, "items": quote}, "reason": {"type": "string", "maxLength": 1000}},
             "required": ["field", "id", "status", "evidence", "reason"]}},
+        "reply": {"type": "string", "maxLength": MAX_REPLY_CHARS},
         "question_field": {"type": "string", "enum": ["", *BY_ID]}, "question_text": {"type": "string", "maxLength": 500},
         "question_requirement_id": {"type": "string", "enum": ["", *sorted({c["id"] for criteria in readiness.REQUIREMENTS.values() for c in criteria})]}, "question_why": {"type": "string", "maxLength": 1000},
         "question_proposal": {"type": "object", "additionalProperties": False, "properties": {
@@ -637,7 +646,7 @@ def _scope_schema():
             "daily_submission_limit": {"type": "integer", "minimum": 0, "maximum": 1000},
             "evidence": {"type": "array", "maxItems": 4, "items": quote}},
             "required": ["competition_type", "daily_submission_limit", "evidence"]}},
-        "required": ["updates", "requirements", "question_field", "question_text", "question_requirement_id", "question_why",
+        "required": ["updates", "requirements", "reply", "question_field", "question_text", "question_requirement_id", "question_why",
                      "question_proposal", "proposal_response", "setting_choice"]}
 
 
@@ -715,6 +724,17 @@ def _platform_context(project):
     }
 
 
+def _model_step_labels(kind, context, round_number):
+    """Name the model's work in a turn, without showing its reasoning."""
+    if kind == "draft":
+        return "Writing the working draft", "Wrote the working draft"
+    if round_number:
+        return "Reviewing the results", "Reviewed the results"
+    if "response_repair" in context:
+        return "Correcting the response", "Corrected the response"
+    return "Reviewing your message", "Reviewed your message"
+
+
 def _provider(project, kind, context, reserve):
     state = ensure_conversation(project)
     if _call_count(project) >= MAX_CALLS:
@@ -744,11 +764,44 @@ def _provider(project, kind, context, reserve):
         schema = _scope_schema() if kind == "scope" else _draft_schema()
     with observability.model_call(project, kind, instructions, provider_input, effort, reserve) as trace:
         with OpenAI(timeout=120, max_retries=0) as client:
-            response = client.responses.create(model=advisor.model_name(), reasoning={"effort": effort},
-                instructions=instructions, input=provider_input,
-                max_output_tokens=10000 if kind == "scope" else 1500 if kind == "source" else 1600,
-                text={"format": {"type": "json_schema", "name": "onboarding_" + kind, "strict": True, "schema": schema}})
+            request = {"model": advisor.model_name(), "reasoning": {"effort": effort}, "instructions": instructions,
+                       "max_output_tokens": 10000 if kind == "scope" else 1500 if kind == "source" else 1600,
+                       "text": {"format": {"type": "json_schema", "name": "onboarding_" + kind, "strict": True, "schema": schema}}}
+            if kind == "scope":
+                request["tools"] = lookup.tools()
+            items, usage, turn, cache = provider_input, {"input_tokens": 0, "output_tokens": 0}, [], {}
+            save = (lambda: reserve(project)) if reserve else None
+            # Lookup round trips share one trace and one place in the model call limit.
+            for round_number in range(lookup.MAX_PER_TURN + 2):
+                if kind == "scope":
+                    request["tool_choice"] = "auto" if len(turn) < lookup.MAX_PER_TURN else "none"
+                labels = _model_step_labels(kind, context, round_number) if kind != "source" else None
+                step = lookup.begin_step(state, labels[0], "model", save) if labels else None
+                try:
+                    response = client.responses.create(**request, input=items)
+                except Exception:
+                    if step:
+                        lookup.end_step(step, labels[1], "The model service did not complete this step.", save)
+                    raise
+                if step:
+                    lookup.end_step(step, labels[1], None, save)
+                for key in usage:
+                    usage[key] += getattr(getattr(response, "usage", None), key, None) or 0
+                calls = [item for item in getattr(response, "output", None) or [] if getattr(item, "type", None) == "function_call"]
+                if not calls:
+                    break
+                if isinstance(items, str):
+                    items = [{"role": "user", "content": provider_input}]
+                for call in calls:
+                    result = lookup.run(project, state, call.name, call.arguments, turn, cache, save)
+                    items.append({"type": "function_call", "call_id": call.call_id, "name": call.name, "arguments": call.arguments})
+                    items.append({"type": "function_call_output", "call_id": call.call_id, "output": json.dumps(result, ensure_ascii=False)})
+            else:
+                raise ModelResponseError("The model kept requesting lookups")
         trace.update(observability.response_record(response))
+        if turn:
+            trace["tool_calls"] = [{key: record[key] for key in ("name", "arguments", "ok")} for record in turn]
+            trace["usage"] = {**trace.get("usage", {}), **usage}
     if response.status != "completed" or not response.output_text:
         raise ModelResponseError("Incomplete model response")
     try:
@@ -770,8 +823,10 @@ def _evidence(text, current):
 def _validate_scope(parsed, current, state):
     # Older saved/test provider responses can be read, but cannot establish
     # requirement completion. The live provider schema requires assessments.
-    if not isinstance(parsed, dict) or not {"updates", "question_field", "question_text"} <= set(parsed) or set(parsed) - {"updates", "requirements", "question_field", "question_text", "question_requirement_id", "question_why", "question_proposal", "proposal_response", "setting_choice"}:
+    if not isinstance(parsed, dict) or not {"updates", "question_field", "question_text"} <= set(parsed) or set(parsed) - {"updates", "requirements", "reply", "question_field", "question_text", "question_requirement_id", "question_why", "question_proposal", "proposal_response", "setting_choice"}:
         raise ModelResponseError("Invalid conversation response")
+    if not isinstance(parsed.get("reply", ""), str) or len(parsed.get("reply", "")) > MAX_REPLY_CHARS:
+        raise ModelResponseError("Invalid reply")
     if not isinstance(parsed["updates"], list) or len(parsed["updates"]) > len(ITEMS):
         raise ModelResponseError("Invalid updates")
     # Question wording and routing are presentation. Repair them only after
@@ -1317,10 +1372,10 @@ def _needs_checkpoint(state):
     return False
 
 
-def _ask(state, field, criterion, text, why="", proposal=None):
+def _ask(state, field, criterion, text, why="", proposal=None, counted=True):
     token = field + "." + criterion["id"]
     count = state["_criterion_asks"].get(token, 0)
-    if count >= 2:
+    if counted and count >= 2:
         _checkpoint(state, field, criterion)
         return
     if not text or text.count("?") > 1 or "\n" in text:
@@ -1330,18 +1385,20 @@ def _ask(state, field, criterion, text, why="", proposal=None):
     normalized = re.sub(r"\W+", " ", text.lower()).strip()
     revision = _revision(state)
     asked = revision["asked_questions"] if revision else state["_asked_questions"]
-    if normalized in asked:
+    if counted and normalized in asked:
         text = f"To settle {criterion['label'].lower()}, what decision should the challenge use?"
         normalized = re.sub(r"\W+", " ", text.lower()).strip()
-    asked.append(normalized)
-    state["_criterion_asks"][token] = count + 1
+    if normalized not in asked:
+        asked.append(normalized)
+    if counted:
+        state["_criterion_asks"][token] = count + 1
     state.update(phase="revision" if revision else "conversation", scope_checkpoint=None,
                  current_question={"field": field, "requirement_id": criterion["id"], "text": text,
                                    "why": why or criterion["description"]}, _pending=None)
     if revision:
-        revision["followups"] += 1
+        revision["followups"] += int(counted)
         revision["status"] = "clarifying"
-    else:
+    elif counted:
         state["_asked"].append(field)
         state["followups"] += 1
     _reset_error(state)
@@ -1349,6 +1406,25 @@ def _ask(state, field, criterion, text, why="", proposal=None):
     # A rewritten question no longer shows the proposed value, so it proposes nothing.
     if proposal and proposal["text"] in text:
         state["current_question"]["proposal"] = {**proposal, "message_id": question_id}
+
+
+def _after_reply(project, reserve, suggestion):
+    """A question or lookup supplies no fact, so it cannot count as a failed clarification."""
+    state = ensure_conversation(project)
+    field, text = suggestion.get("question_field"), (suggestion.get("question_text") or "").strip()
+    active, proposal = state.get("current_question"), suggestion.get("_question_proposal")
+    askable = field in BY_ID and field not in readiness.SERVER_FIELDS and field not in AGENT_OWNED_FIELDS
+    criterion = _target_criterion(state, field, suggestion) if askable else None
+    normalize = lambda value: re.sub(r"\W+", " ", value.lower()).strip()
+    repeated = bool(active) and normalize(active["text"]) == normalize(text)
+    if criterion and text and (proposal or not repeated):
+        _ask(state, field, criterion, text, suggestion.get("question_why", ""), proposal, counted=False)
+    elif active or state.get("scope_checkpoint"):
+        # The open question stays active. The reply already told the researcher what they asked.
+        state["_pending"] = None
+        _reset_error(state)
+    else:
+        _advance(project, reserve, suggestion)
 
 
 def _advance(project, reserve, suggestion=None, force_draft=False):
@@ -1586,6 +1662,7 @@ def _rules_method_change(state, field, text):
 def _process_message(project, reserve):
     state = ensure_conversation(project)
     pending = state["_pending"]
+    state.pop("_turn_steps", None)
     text, message_id, current = pending["text"], pending["message_id"], pending["field"]
     revision = _revision(state)
     was_draft = pending["was_draft"] and not revision
@@ -1658,6 +1735,7 @@ def _process_message(project, reserve):
                    "organizer_scope_decisions": readiness.assess(state)["scope_decisions"],
                    "manual_bypasses": readiness.assess(state)["bypasses"],
                    "saved_project_context": _saved_project_context(project),
+                   "lookups": lookup.context(project, state),
                    "checklist_requirements": [{"id": key, "label": label, "pillar": pillar, "requirement": gap} for key, label, pillar, _, gap in ITEMS],
                    "already_asked": state["_asked"], "questions_this_round": state["_asked_questions"],
                    "eligible_fields": _eligible(state), "followups_remaining": MAX_FOLLOWUPS - state["followups"],
@@ -1684,10 +1762,18 @@ def _process_message(project, reserve):
         notice = _correction_notice(updates)
         if notice:
             _message(state, "assistant", notice)
+        reply = onboarding_setup.redact_private(project, parsed.get("reply") or "").strip()
+        if reply:
+            _message(state, "assistant", reply)
+            state.setdefault("_replies", []).append(reply)
+            del state["_replies"][:-5]
         if "requirements" in parsed:
             _apply_requirements(state, requirements)
         state["_unprocessed"] = [m for m in state.get("_unprocessed", []) if m["message_id"] not in reviewed_ids]
-        _advance(project, reserve, parsed, force_draft=was_draft)
+        if reply and not updates and not choice and (not was_draft or parsed.get("_question_proposal")):
+            _after_reply(project, reserve, parsed)
+        else:
+            _advance(project, reserve, parsed, force_draft=was_draft)
     except Exception as exc:
         _fail(state, exc, _call_count(project) < MAX_CALLS)
 
@@ -1715,6 +1801,9 @@ def submit_message(project, text, request_id, reserve=None):
     previous_question = state["current_question"] or state.get("scope_checkpoint")
     onboarding_setup.remember_private_mentions(project, text.strip(), previous_question["field"] if previous_question else None)
     _message(state, "user", text.strip())
+    attached = documents.take_new(project)
+    if attached:
+        state["messages"][-1]["attachments"] = attached
     if project.get("title") in DEFAULT_TITLES and not _draft_command(text):
         project["title"] = text.strip().splitlines()[0][:80]
         state["_generated_title"] = project["title"]
@@ -1752,6 +1841,7 @@ def make_readme(project, request_id, reserve=None):
     state = ensure_conversation(project)
     if not _request(state, request_id, "draft"):
         return
+    state.pop("_turn_steps", None)
     _message(state, "user", "Create a draft README.")
     _reset_error(state)
     _draft(project, reserve)

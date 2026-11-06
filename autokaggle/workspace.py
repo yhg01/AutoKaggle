@@ -18,13 +18,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import conversation, onboarding_setup
 from .store import ANSWERS, now
 
-POLICY_VERSION = "2026-11-02"
+POLICY_VERSION = "2026-11-06"
 NOTICE = (
     "BOLD AutoKaggle stores this session, its files, messages, model records, and generated "
     "artifacts on the service running this app. The hosted service is on Civo in London; local development stores data on the developer’s machine. Chat text and imported source excerpts "
     "are sent to the configured model service through OpenRouter. Attached dataset files and private "
-    "test answers are not sent as interview attachments. Text you paste in chat is processed as chat content. Content is retained until you delete "
-    "it. The session owner can delete the session or its attached dataset. Deleted live data "
+    "test answers are not sent as interview attachments. Text you paste in chat is processed as chat content. "
+    "When you ask the agent to look something up, it sends what it reads from your attached documents and links, summaries of your dataset, and "
+    "its web search queries to those services. Documents are kept as text for the interview and do not enter the challenge package. Content is retained until you delete "
+    "it. The session owner can delete the session, its attached dataset, or an attached document. Deleted live data "
     "and access grants are removed. Downloads and email already received by other people "
     "cannot be recalled. Operator backups require the erasure journal before restoration; "
     "backup copies must remain outside normal use until removed under the operator's "
@@ -50,10 +52,10 @@ def consent_view(project):
 
 
 def clear_artifacts(store, item, *, erase_results=False):
-    """Remove all derivative files, revoke old capabilities, and keep the dataset."""
+    """Remove all derivative files, revoke old capabilities, and keep the researcher's inputs."""
     directory = store.directory(item["id"])
     for path in directory.iterdir() if directory.exists() else []:
-        if path.name == "dataset.csv":
+        if path.name in {"dataset.csv", "documents"}:
             continue
         if path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)
@@ -140,6 +142,9 @@ def forget_answer(project, message_id):
     project.pop("_model_traces", None)
     project.pop("_submission_feedback", None)
     project.pop("_setup_private_emails", None)
+    # Removing a message keeps its documents visible, so the researcher can resend or remove them.
+    waiting = project.setdefault("_new_documents", [])
+    waiting.extend(file["id"] for file in target.get("attachments", []) if file["id"] not in waiting)
     imported = project.get("_source_import", {})
     if any(removed(v) for v in imported.get("proposal", {}).values() if isinstance(v, str)):
         imported.pop("proposal", None)

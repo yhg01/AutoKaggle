@@ -124,6 +124,12 @@ python -m autokaggle.scripts.live_scope_verify
 
 The script writes a report under ignored `autokaggle/test-results/`. It makes real API calls and incurs provider usage.
 
+Researcher-requested lookups have their own live check. It uses isolated sessions and neutral material, and checks that nothing is looked up without a request, that a finding is recorded only after acceptance, that a rejected finding stays out, that a question is not counted as a failed clarification, and that instructions inside a document are not followed:
+
+```sh
+python -m autokaggle.scripts.live_lookup_verify --runs 2
+```
+
 Browser checks during the scope release covered acceptance, reload persistence, explicit exceptions, removal, and a checkpoint after two attempts. The checkpoint browser test used a seeded local state. The deployed scope editor was inspected without saving a change to the existing organizer project.
 
 ## Hosted release and private operational records
