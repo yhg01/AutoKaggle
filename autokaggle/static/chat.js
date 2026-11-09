@@ -46,7 +46,7 @@
   }
   function base(id = state.projectId) { return `/api/projects/${encodeURIComponent(id)}/conversation`; }
   function projectPath(id = state.projectId) { return `/api/projects/${encodeURIComponent(id)}`; }
-  function working() { return state.signingOut || state.busy || state.contactBusy || state.polling || state.workflowLoading || state.workflowBusy || state.dataLoading || state.dataBusy || state.conversation?.status === "working"; }
+  function working() { return state.documentBusy || state.signingOut || state.busy || state.contactBusy || state.polling || state.workflowLoading || state.workflowBusy || state.dataLoading || state.dataBusy || state.conversation?.status === "working"; }
   function contactRequired() { return !!state.conversation && (state.conversation.contact_required ?? !state.conversation.setup?.organizer_email); }
   function inRevision() { return state.conversation?.review?.mode === "revision"; }
   function reviewAvailable() { return !!state.conversation?.readme || inRevision() || !!state.workflow?.version; }
@@ -84,14 +84,16 @@
     const canCreate = state.config?.can_create_projects !== false;
     $("sign-out").hidden = !state.config?.private_mode; $("sign-out").disabled = !!state.signingOut; $("sign-out").textContent = state.signingOut ? "Signing out…" : "Sign out";
     $("new-project").hidden = !canCreate; $("new-project").disabled = busy || !canCreate; $("message-input").disabled = busy || !ready;
-    $("send-message").disabled = busy || !ready || uncertain || blockedByError || !$("message-input").value.trim();
+    $("send-message").disabled = busy || !ready || uncertain || blockedByError || (!$("message-input").value.trim() && !(state.conversation?.documents || []).some((item) => item.pending));
     $("skip-question").hidden = (!state.conversation?.current_question && !state.conversation?.scope_checkpoint) || ["competition", "submissions", "organizer"].includes(state.conversation?.scope_checkpoint?.field); $("skip-question").textContent = state.conversation?.scope_checkpoint ? "Leave open and continue" : "Not sure yet"; $("skip-question").disabled = busy || !ready || uncertain || blockedByError;
     $("draft-readme").disabled = busy || !ready || uncertain || userCount() === 0;
     const canContinue = state.conversation?.interview?.can_continue === true && state.conversation?.review?.mode !== "revision";
     for (const id of ["continue-interview", "draft-continue-interview"]) { $(id).hidden = !canContinue; $(id).disabled = busy || !ready || uncertain || blockedByError; $(id).title = `Continue with up to ${state.conversation?.interview?.followups_limit || 8} focused questions. Earlier answers are kept.`; }
     $("readme-tab").disabled = !ready || !state.conversation?.readme; $("review-tab").disabled = !ready || !reviewAvailable(); $("open-data").disabled = busy || !ready || uncertain;
+    $("attach-document").disabled = busy || !ready || uncertain;
+    for (const control of document.querySelectorAll("[data-remove-document]")) control.disabled = busy || !ready || uncertain;
     $("download-readme").disabled = !state.conversation?.readme || busy;
-    $("thinking-message").hidden = !busy; $("message-form").setAttribute("aria-busy", String(busy));
+    $("thinking-message").hidden = !busy || !!state.activity?.length; $("message-form").setAttribute("aria-busy", String(busy));
     $("retry-action").disabled = busy;
     for (const control of document.querySelectorAll("[data-conversation-retry]")) control.disabled = busy || !!state.authRequired;
     $("answer-in-chat").disabled = busy || !ready;
@@ -862,12 +864,117 @@
     } catch (error) { dataMessage("", false); dataMessage(error.message, true); }
     finally { state.dataBusy = false; $("data-file").value = ""; $("data-progress-wrap").hidden = true; updateControls(); }
   }
+  function stepRow(step) {
+    const row = element("li", step.running ? "running" : step.ok === false ? "failed" : "done", step.label);
+    if (step.detail) row.append(element("span", "step-detail", step.detail));
+    return row;
+  }
+  function messageSteps(message) {
+    if (!message.steps?.length) return null;
+    const details = element("details", "message-steps"); const count = message.steps.length;
+    details.append(element("summary", "", `${count} ${count === 1 ? "step" : "steps"}`));
+    const list = element("ul", "activity-steps");
+    for (const step of message.steps) list.append(stepRow(step));
+    details.append(list);
+    return details;
+  }
+  function fileCard(name, className = "file-card") {
+    const card = element("span", className, name);
+    const extension = String(name).includes(".") ? String(name).split(".").pop().slice(0, 5).toUpperCase() : "FILE";
+    card.setAttribute("data-kind", extension);
+    return card;
+  }
+  function documentRemoveButton(item) {
+    const remove = element("button", "file-remove", "\u00d7"); remove.type = "button";
+    remove.setAttribute("aria-label", `Remove ${item.name}`); remove.setAttribute("data-remove-document", item.id);
+    remove.disabled = working() || !!state.pending;
+    return remove;
+  }
+  function messageAttachments(message) {
+    if (!message.attachments?.length) return null;
+    const row = element("div", "message-files"); const kept = new Set((state.conversation?.documents || []).map((item) => item.id));
+    for (const file of message.attachments) {
+      const attached = kept.has(file.id); const card = fileCard(file.name, attached ? "file-card" : "file-card removed");
+      if (!attached) card.title = "Removed from this session.";
+      else { card.title = "The agent can read this when you ask. It does not enter the challenge package."; if (!message.pending) card.append(documentRemoveButton(file)); }
+      row.append(card);
+    }
+    return row;
+  }
+  function renderActivity() {
+    const root = $("activity-steps"); const steps = state.activity || [];
+    $("thinking-message").hidden = !working() || steps.length > 0;
+    // Rebuilding an unchanged list would restart the pulse of the current step.
+    const key = JSON.stringify(steps); if (key === state.activityKey) return; state.activityKey = key;
+    root.hidden = !steps.length; root.replaceChildren(...steps.map(stepRow));
+  }
+  function revealSteps(steps, shown) {
+    // A step waiting for later ones to appear stays the current step until its turn to finish.
+    return steps.slice(0, shown).map((step, index) => (index === shown - 1 && shown < steps.length ? { ...step, running: true } : step));
+  }
+  async function watchActivity(projectId, active) {
+    // The reply arrives in one response, so read the saved steps while waiting for it, and show them one at a time.
+    let steps = []; let shown = 0; let tick = 0;
+    while (active()) {
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+      if (!active()) return;
+      if (tick % 2 === 0) {
+        try { const current = await api(base(projectId)); if (!active()) return; steps = current.activity || []; }
+        catch (_) { /* The message request reports its own failure. */ }
+      }
+      tick += 1;
+      const next = Math.min(shown + 1, steps.length); const grew = next !== shown; shown = next;
+      state.activity = revealSteps(steps, shown); renderActivity();
+      if (grew) { const transcript = $("transcript"); transcript.scrollTop = transcript.scrollHeight; }
+    }
+  }
+  function renderDocuments() {
+    const root = $("document-list"); const sending = state.pending?.action === "messages";
+    const documents = sending ? [] : (state.conversation?.documents || []).filter((item) => item.pending);
+    root.hidden = !documents.length; root.replaceChildren();
+    for (const item of documents) {
+      const card = fileCard(item.name);
+      card.title = item.truncated ? "Only the first part of this document could be kept." : "Sends with your next message. It does not enter the challenge package.";
+      card.append(documentRemoveButton(item)); root.append(card);
+    }
+  }
+  function documentNotice(text, isError = false) {
+    const note = $("document-notice"); note.textContent = text; note.hidden = !text; note.classList.toggle("error", isError);
+  }
+  function uploadDocumentFile(file) {
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest(); request.open("POST", `${projectPath()}/documents`); request.responseType = "json"; request.timeout = 10 * 60 * 1000;
+      request.addEventListener("load", () => { if (request.status >= 200 && request.status < 300 && request.response) resolve(request.response); else reject(new Error(readableError(request.response?.detail))); });
+      request.addEventListener("error", () => reject(new Error("The upload connection failed. Try again when the connection returns.")));
+      request.addEventListener("timeout", () => reject(new Error("The upload timed out. Try a smaller file.")));
+      const body = new FormData(); body.append("file", file); request.send(body);
+    });
+  }
+  async function attachDocuments(files) {
+    const chosen = [...files]; if (!chosen.length || !state.projectId || !state.conversation) return;
+    if (working() || state.pending) { documentNotice("Wait for the current step to finish, then attach the file again.", true); return; }
+    const failed = []; state.documentBusy = true; updateControls();
+    for (const file of chosen) {
+      documentNotice(`Reading ${file.name}\u2026`);
+      try { const result = await uploadDocumentFile(file); state.conversation.documents = result.documents; }
+      catch (error) { failed.push(`${file.name}: ${error.message}`); }
+    }
+    state.documentBusy = false; $("document-file").value = "";
+    documentNotice(failed.join(" "), failed.length > 0); renderDocuments(); updateControls();
+  }
+  async function removeDocument(id) {
+    if (!state.projectId || working() || state.pending) return;
+    state.documentBusy = true; updateControls();
+    try { const result = await api(`${projectPath()}/documents/${encodeURIComponent(id)}`, { method: "DELETE" }); state.conversation.documents = result.documents; documentNotice(""); }
+    catch (error) { documentNotice(error.message, true); }
+    state.documentBusy = false; state.messageKey = ""; renderMessages(); renderDocuments(); updateControls();
+  }
   function renderMessages(forceScroll = false) {
     const started = userCount() > 0 || state.pending?.action === "messages";
     const messages = [...(state.conversation?.messages || [])];
     const pendingVisibleInHistory = state.pending?.action === "messages" && messages.filter((message) => message.role === "user").slice(state.pending.before_user_count ?? userCount()).some((message) => message.content === state.pending.message);
-    if (state.pending?.action === "messages" && !pendingVisibleInHistory) messages.push({ id: `pending:${state.pending.request_id}`, role: "user", content: state.pending.message, pending: true });
-    const key = `${state.projectId}:${JSON.stringify(messages)}:${working()}`; $("welcome").hidden = started || messages.length > 0;
+    if (state.pending?.action === "messages" && !pendingVisibleInHistory) messages.push({ id: `pending:${state.pending.request_id}`, role: "user", content: state.pending.message, attachments: state.pending.attachments, pending: true });
+    const key = `${state.projectId}:${JSON.stringify(messages)}:${(state.conversation?.documents || []).map((item) => item.id).join()}:${working()}`; $("welcome").hidden = started || messages.length > 0;
     if (key === state.messageKey) return; state.messageKey = key;
     const root = $("messages"); const transcript = $("transcript"); const nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 120;
     root.replaceChildren();
@@ -875,7 +982,9 @@
       if (!["user", "assistant"].includes(message.role)) continue;
       const block = element("article", `message ${message.role}`); const role = element("div", "message-role");
       if (message.role === "assistant") { const mark = element("img", "assistant-mark"); mark.src = "/static/bold-butterfly.svg"; mark.alt = ""; mark.width = 24; mark.height = 24; mark.setAttribute("aria-hidden", "true"); role.append(mark, document.createTextNode("BOLD AutoKaggle")); } else role.textContent = message.pending ? (working() ? "You · sending" : "You · awaiting confirmation") : message.author || "You";
-      block.append(role, message.role === "user" ? element("div", "message-content", message.content) : markdown(message.content, "message-content"));
+      block.append(role); const files = messageAttachments(message); if (files) block.append(files);
+      const steps = messageSteps(message); if (steps) block.append(steps);
+      block.append(message.role === "user" ? element("div", "message-content", message.content) : markdown(message.content, "message-content"));
       if (message.role === "user" && !message.pending) { const edit = element("button", "message-edit", "Edit or remove answer"); edit.type = "button"; edit.setAttribute("data-edit-answer", message.id); edit.disabled = working(); block.append(edit); }
       root.append(block);
     }
@@ -900,7 +1009,7 @@
     $("opening-question").textContent = question || "Describe the situation, the current difficulty, and what you want to predict, explain, improve, or optimize.";
     renderQuestionWhy(); renderScopeCheckpoint();
     $("message-input").placeholder = inRevision() ? "Describe what you want to change and why…" : userCount() ? "Add an answer, a correction, or a detail…" : "We are studying… The difficulty is… We want to find out…";
-    renderChecklist(); renderMessages(scroll); renderReview();
+    renderChecklist(); renderMessages(scroll); renderDocuments(); renderReview();
     if (conversation.readme) { $("readme-content").replaceChildren(markdown(conversation.readme)); $("readme-dot").hidden = state.view === "readme"; document.querySelector(".readme-toolbar p").textContent = conversation.phase === "draft" ? "Review the working draft and its required open details." : "Earlier working draft. Create it again to include your latest answers."; }
     else if (state.view === "readme") setView("chat");
     updateControls();
@@ -929,13 +1038,13 @@
       while (state.conversation?.status === "working") {
         if (Date.now() >= deadline || checks++ >= 300) { showError("This request is taking longer than expected. Reconnect to check its saved result.", "Check the saved response"); break; }
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
-        try { state.conversation = await api(base()); failures = 0; renderConversation({ scroll: true }); }
+        try { state.conversation = await api(base()); failures = 0; state.activity = state.conversation.activity || []; renderActivity(); renderConversation({ scroll: true }); }
         catch (error) { failures += 1; if (error.status === 401 || failures >= 3) { showError(error.status === 401 ? error.message : "The status connection was interrupted. Reconnect to check the current request.", error.status === 401 ? "Sign in to continue" : "Connection interrupted"); break; } }
       }
       completed = state.conversation?.status !== "working";
       // GET reports project activity, not acknowledgement of this tab's request.
       // Keep the pending payload and ID until its own POST returns successfully.
-    } finally { state.polling = false; state.connectionUncertain = !completed; if (!completed && state.conversation) state.conversation = { ...state.conversation, status: "error", error: "The connection needs to be checked. The server may still be working.", can_retry: true }; updateControls(); }
+    } finally { state.polling = false; state.activity = []; renderActivity(); state.connectionUncertain = !completed; if (!completed && state.conversation) state.conversation = { ...state.conversation, status: "error", error: "The connection needs to be checked. The server may still be working.", can_retry: true }; updateControls(); }
   }
   async function openProject(id) {
     const requestedView = new URLSearchParams(window.location.search).get("view");
@@ -997,14 +1106,16 @@
     if (working() || !state.projectId || !state.conversation || contactRequired() || state.conversation.storage?.required) return;
     if (state.pending && !recovered) return;
     if (action === "continue" && !recovered && (state.conversation.interview?.can_continue !== true || state.conversation.review?.mode === "revision")) return;
-    const request = recovered || { project_id: state.projectId, action, request_id: crypto.randomUUID(), ...(action === "messages" ? { message, before_user_count: userCount() } : {}) };
-    rememberPending(request); state.localError = null; state.dismissedError = null; setView("chat");
+    const request = recovered || { project_id: state.projectId, action, request_id: crypto.randomUUID(), ...(action === "messages" ? { message, before_user_count: userCount(), attachments: (state.conversation.documents || []).filter((item) => item.pending).map((item) => ({ id: item.id, name: item.name })) } : {}) };
+    rememberPending(request); state.localError = null; state.dismissedError = null; setView("chat"); renderDocuments();
     if (!recovered && request.action === "messages") { $("message-input").value = ""; rememberCompose(); }
     setBusy(true, request.action === "draft" ? "Writing your challenge README…" : "Thinking through your challenge…");
     window.requestAnimationFrame(() => { $("transcript").scrollTop = $("transcript").scrollHeight; });
+    let waiting = true; watchActivity(state.projectId, () => waiting);
     try {
       const payload = { request_id: request.request_id, ...(request.action === "messages" ? { message: request.message } : {}) };
       state.conversation = await api(`${base()}/${request.action}`, { method: "POST", body: JSON.stringify(payload) });
+      waiting = false; state.activity = []; renderActivity();
       clearDeliveredCompose(request); rememberPending(null); renderConversation({ scroll: true });
       if (state.conversation.status === "working") await pollWorking();
       if (request.action === "draft" && state.conversation.readme && state.conversation.status !== "error") setView("readme");
@@ -1013,7 +1124,7 @@
       if (error.status && error.status >= 400 && error.status < 500 && ![408, 409, 429].includes(error.status)) { rememberPending(null); if (request.action === "messages" && !$("message-input").value) { $("message-input").value = request.message; rememberCompose(); } }
       showError(error.message, "This step was not confirmed");
       try { const current = await api(base()); state.conversation = current; renderConversation({ scroll: true }); if (current.status === "working") { state.localError = null; await pollWorking(); } } catch (_) { /* Keep the original request ID for a safe retry. */ }
-    } finally { setBusy(false); }
+    } finally { waiting = false; state.activity = []; renderActivity(); renderDocuments(); setBusy(false); }
   }
   async function retry() {
     if (working()) return;
@@ -1049,7 +1160,16 @@
     for (const id of ["review-website", "review-package", "review-submission"]) $(id).addEventListener("click", (event) => { if (working() || state.pending) event.preventDefault(); });
     $("message-input").addEventListener("input", () => { rememberCompose(); updateControls(); });
     $("message-input").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("send-message").disabled) $("message-form").requestSubmit(); } });
-    $("message-form").addEventListener("submit", (event) => { event.preventDefault(); const text = $("message-input").value.trim(); if (text) dispatch("messages", text); });
+    $("message-form").addEventListener("submit", (event) => { event.preventDefault(); const text = $("message-input").value.trim(); const files = (state.conversation?.documents || []).filter((item) => item.pending); if (text || files.length) dispatch("messages", text || `Attached: ${files.map((item) => item.name).join(", ")}`); });
+    $("attach-document").addEventListener("click", () => $("document-file").click());
+    $("document-file").addEventListener("change", (event) => attachDocuments(event.target.files));
+    for (const id of ["document-list", "messages"]) $(id).addEventListener("click", (event) => { const control = event.target.closest("[data-remove-document]"); if (control) removeDocument(control.getAttribute("data-remove-document")); });
+    const composer = document.querySelector(".composer-area");
+    // Accept a file dropped anywhere in the conversation. The data dialog keeps its own file control.
+    const fileDrag = (event) => event.dataTransfer?.types?.includes("Files") && !event.target.closest?.("dialog");
+    window.addEventListener("dragover", (event) => { if (fileDrag(event)) { event.preventDefault(); composer.classList.toggle("drag-over", state.view === "chat"); } });
+    window.addEventListener("dragleave", (event) => { if (!event.relatedTarget) composer.classList.remove("drag-over"); });
+    window.addEventListener("drop", (event) => { composer.classList.remove("drag-over"); if (!fileDrag(event)) return; event.preventDefault(); if (state.view === "chat") attachDocuments(event.dataTransfer.files); });
     $("new-project").addEventListener("click", () => runNavigation(createProject));
     $("sign-out").addEventListener("click", signOut);
     window.addEventListener("storage", (event) => { if (event.key === SESSION_ENDED && event.newValue && state.config?.private_mode) { clearPrivateBrowserState(); window.location.replace("/login"); } });

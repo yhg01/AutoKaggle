@@ -20,6 +20,22 @@ Import bounds:
 - At most eight selected repository files are read from one immutable commit. Each file is at most 200,000 bytes; its stored model excerpt is at most 7,000 characters. Truncation is recorded.
 - One import runs per session. Repeating the same import request ID returns its existing job. Explicit retry uses a new ID. Model calls still reserve and consume the existing interview call budget.
 
+## Ask the agent to look something up
+
+Select **Attach** in the chat, or drag files onto the conversation, to give the agent papers, notes, code, or logs. PDF, Word, PowerPoint, Excel, OpenDocument, RTF, HTML, and notebook files are read, as are ZIP and gzip archives and any file that reads as text, whatever its extension. Scanned PDFs, images, and legacy Office files are refused with the reason. A document can be up to 50 MB, and a session can hold 20. Files wait inside the message box until you send. They then appear above your message, and a message can contain only files. Removing that message returns its files to the message box.
+
+Only the extracted text is kept, up to 400,000 characters. Documents give context for the interview. They never become the challenge dataset and they do not enter the website, the research ZIP, or the private package. A dataset still comes through **Data & checks**. Remove a document from its card in the message box or above your message, or delete the session to remove them all.
+
+The agent reads nothing on its own. Ask for what you need in the chat, for example to find a method in an attached paper or to confirm a unit in a linked table. On request it can:
+
+- read an attached document or a link you sent, including a PDF link;
+- answer fixed questions about the uploaded dataset, such as column ranges, whether columns identify a row, and row counts;
+- search the public web, when you ask for a search, and read the pages that the search returned.
+
+It can open only links you sent, links from your imported sources, and links a search returned. A link written inside a document or a page is not opened. Each message allows six lookups, and they count as one model call. Text it reads, dataset summaries, and search queries are sent to the configured model service. Page text and search results are untrusted, and the agent does not follow instructions in them.
+
+While the agent works, each operation appears one at a time, and the current one pulses: reviewing your message, each lookup, and reviewing the results. It then reports what it found and where, in a reply above its next question. The list collapses into **steps** on that reply. Opening it shows the same operations, including failed attempts. Model reasoning is not shown. A lookup records nothing. When a finding answers a requirement, the agent shows the exact value and its source and asks you to confirm it. The value is recorded only if you accept it. A question or a lookup request does not count as an unsuccessful answer to the open question.
+
 ## Resume, share, and revise
 
 **Sessions** lists accessible sessions with title, update time, and ownership. Open an existing session to resume it, or create another session. Session access is checked on the server. An arbitrary project URL does not grant access.

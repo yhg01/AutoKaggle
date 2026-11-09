@@ -49,8 +49,12 @@ A new email-account project starts with its verified address as `organizer_email
 - `POST /api/projects/{id}/conversation/retry`: `{request_id}`. Explicitly retry a failed model action without duplicating its user message.
 - `POST /api/projects/{id}/conversation/revision`: `{request_id}`. Start a bounded organizer revision from a saved draft. Preserve prior context and ask which changes the organizer wants. Repeating the request ID does not create another round.
 - `GET /api/projects/{id}/conversation/readme.md`: current README attachment; 404 if no current draft exists.
+- `POST /api/projects/{id}/documents`: multipart `file`, up to 50 MB. Keep the extracted text as interview context and return `{document, documents}`. An unreadable file returns 422 with the reason. Attaching the same content again keeps one copy and marks that document as waiting for the next message.
+- `DELETE /api/projects/{id}/documents/{document_id}`: delete a document's text, its lookup excerpts, and the session's model traces, and return `{deleted, documents}`.
 
 Use a unique request ID for each action. Retry an uncertain transport outcome with the same action and ID. A model retry uses the `/retry` action with a new ID. The server serializes project writes and returns 409 for a concurrent action.
+
+The conversation includes `documents`, without their text; `pending` marks a document that waits for the next message. `activity` lists the operations of the turn in progress, each with `label`, `kind` (`model` or `lookup`), and either `running` or `ok`. A researcher message can include `attachments` with the documents sent with it. An assistant message can include `steps`, each with `label`, `kind`, `ok`, and an optional `detail`, for the operations of that turn. Model traces record the lookup names and arguments.
 
 Question formatting is repaired locally after factual validation. Invalid model JSON, response structure, or evidence receives at most one automatic repair call per action, shared across interview and draft generation. Each call reserves budget before it starts and counts toward the 30-call limit. The replacement is validated in full before facts are applied. Network and authentication failures are not automatically retried. Private conversation state retains fixed validation codes and repair instructions; rejected response bodies are not stored.
 

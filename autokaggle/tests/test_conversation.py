@@ -448,7 +448,7 @@ def test_model_extracts_multiple_items_once_and_asks_one_missing_question(monkey
     assert calls[0]["reasoning"] == {"effort": "medium"}
     assert "private dataset marker" not in calls[0]["input"]
     assert "private-seed" not in calls[0]["input"]
-    assert "tools" not in calls[0]
+    assert [tool["name"] for tool in calls[0]["tools"]][:2] == ["read_source", "query_data"]
 
 
 @pytest.mark.parametrize("question", ["Which simulation dataset provides the stability labels?", "Please upload the full dataset."])

@@ -219,6 +219,18 @@ def test_private_data_declarations_gate_the_review_package(case, declaration):
     assert not {"train.csv", "test_features.csv", "validation_features.csv"} & set(archive.namelist())
 
 
+def test_attached_documents_stay_out_of_every_generated_file(case):
+    app, client, root, pid = case
+    marker = b"Interview context marker that stays private."
+    client.post(root + "/documents", files={"file": ("notes.txt", marker)}).raise_for_status()
+    result = build(case)
+    assert result["status"] in {"ready_for_review", "needs_changes"}
+    archive = zipfile.ZipFile(io.BytesIO(client.get(root + "/workflow/package").content))
+    assert archive.namelist() and not any(marker in archive.read(name) for name in archive.namelist())
+    generated = [path for path in (app.state.store.directory(pid) / "workflow").rglob("*") if path.is_file()]
+    assert generated and not any(marker in path.read_bytes() for path in generated)
+
+
 def test_data_audit_uses_chat_answers_and_preserves_manual_corrections(case):
     app, client, root, pid = case
     item = app.state.store.get(pid, client.cookies["autokaggle_owner"])
