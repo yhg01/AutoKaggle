@@ -185,7 +185,7 @@ def parse_repository(url):
     return parts[0], parts[1]
 
 
-def repository(url):
+def repository(url, include_execution=False):
     owner, repo = parse_repository(url)
     api = f"https://api.github.com/repos/{owner}/{repo}"
     metadata = json.loads(fetch(api)[0])
@@ -196,19 +196,33 @@ def repository(url):
     candidates = [entry["path"] for entry in tree.get("tree", []) if entry.get("type") == "blob"
                   and entry.get("size", 0) <= 200000
                   and re.search(r"(^|/)(readme[^/]*|license[^/]*|requirements[^/]*\.txt|pyproject\.toml|setup\.py|baseline\.py|train\.py|predict\.py|evaluate\.py)$", entry["path"], re.I)]
+    if include_execution:
+        candidates += [entry["path"] for entry in tree.get("tree", []) if entry.get("type") == "blob"
+            and entry.get("size", 0) <= 200000
+            and re.search(r"(^|/)(base|tasks?|metrics?|environment|adapter|config|evaluation)\.(py|json|ya?ml)$", entry["path"], re.I)]
+        candidates = list(dict.fromkeys(candidates))
     candidates.sort(key=lambda name: (0 if name.lower().startswith("readme") else 1, name.count("/"), name))
     files = []
-    for name in candidates[:8]:
+    file_limit = 12 if include_execution else 8
+    for name in candidates[:file_limit]:
         # Read blobs from the frozen commit. Symlinks are text; never follow or execute them.
         body, _, _ = fetch(f"https://raw.githubusercontent.com/{owner}/{repo}/{commit}/{quote(name, safe='/')}", 200000)
         text = body.decode("utf-8", errors="replace")
+        if include_execution and len(text) > 12000:
+            # Keep the opening context and bounded sections around generic execution hooks.
+            fragments = [text[:5000]]
+            for match in list(re.finditer(r"(?m)^\s*def (?:reset|step|seed|_get_information|_reward_fn|evaluate|compute|score)\b", text))[:7]:
+                fragments.append(text[max(0, match.start()-80):match.start()+1200])
+            excerpt = "\n[... bounded source excerpt ...]\n".join(fragments)[:14000]
+        else:
+            excerpt = text[:12000 if include_execution else 7000]
         files.append({"path": name, "sha256": hashlib.sha256(body).hexdigest(),
-                      "text": text[:7000], "truncated": len(text) > 7000})
+                      "text": excerpt, "truncated": len(excerpt) < len(text)})
     if not files:
         raise ValueError("The repository has no readable README, environment, or starter files within the import bounds.")
     return {"kind": "repository", "url": f"https://github.com/{owner}/{repo}", "commit": commit,
             "description": metadata.get("description"), "license": (metadata.get("license") or {}).get("spdx_id"),
-            "files": files, "truncated": bool(tree.get("truncated")) or len(candidates) > 8,
+            "files": files, "truncated": bool(tree.get("truncated")) or len(candidates) > file_limit or any(f["truncated"] for f in files),
             "imported_at": now()}
 
 

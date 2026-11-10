@@ -50,6 +50,10 @@ class Store:
                 if active_import and not state.get("_pending"):
                     state.update(_inflight=False, status="idle", error=None, can_retry=False)
                 changed = recover_interrupted(item)
+                if item.get("lite", {}).get("status") == "working":
+                    item["lite"].update(status="error", stage="Interrupted; saved work is available",
+                        job_id=None, error="The service restarted. Retry the saved request to continue.")
+                    changed = True
                 if active_import:
                     item["_source_import"].update(status="failed", stage="Import interrupted",
                         error="The service restarted. Retry the import; saved answers are unchanged.")

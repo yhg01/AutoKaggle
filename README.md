@@ -1,5 +1,7 @@
 # BOLD AutoKaggle
 
+[BOLD AutoKaggle Lite](autokaggle/docs/LITE.md) is the separate internal ML mode at `/lite`. It adds source-assisted onboarding, a short accepted evaluation contract, local research packages, and explicit result evidence levels. The public competition workflow remains separate.
+
 An agent-led interview that turns a research idea into a draft competition. The agent asks focused questions, records the agreed scope, and prepares a challenge README, website draft, research ZIP, and private prediction-submission workflow.
 
 [Open the hosted BOLD preview](https://ecc962fa-2f4c-4a3f-96c4-179af273fb7a.k8s.civo.com/) · [User guide](autokaggle/README.md) · [Challenge design guide](autokaggle/docs/README.md) · [API](autokaggle/docs/API.md) · [Session and data controls](autokaggle/docs/WORKSPACE.md)

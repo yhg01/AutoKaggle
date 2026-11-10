@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import advisor, conversation, environments, onboarding_setup, workflow, notifications, submissions, observability, workspace, sources
+from . import advisor, conversation, environments, onboarding_setup, workflow, notifications, submissions, observability, workspace, sources, lite
 from .access import AccessGate
 from .email_auth import USER_COOKIE
 from .core import datasets
@@ -170,7 +170,10 @@ def create_app(data_dir: Path | None = None):
     app.state.store = store
     notifications.initialize(store)
     submissions.initialize(store)
-    pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="autokaggle")
+    worker_count = int(os.getenv("AUTOKAGGLE_WORKERS", "2"))
+    if not 1 <= worker_count <= 8:
+        raise ValueError("AUTOKAGGLE_WORKERS must be between 1 and 8.")
+    pool = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="autokaggle")
     app.state.pool = pool
     hosts = ["localhost", "127.0.0.1", "[::1]", "testserver"]
     hosts += [h.strip() for h in os.getenv("AUTOKAGGLE_ALLOWED_HOSTS", "").split(",") if h.strip()]
@@ -207,6 +210,17 @@ def create_app(data_dir: Path | None = None):
         item = store.get(project_id, owner(request))
         if not item:
             raise HTTPException(404, "Challenge not found in this organizer session.")
+        if "lite" in item:
+            lite.require_member(access, request)
+            path = request.url.path
+            # The separate Lite contract must not be changed by Full interview tools.
+            prefix = f"/api/projects/{project_id}"
+            handoff_child = path.removeprefix(prefix + "/handoff/") if path.startswith(prefix + "/handoff/") else ""
+            shared = path in {prefix + "/privacy", prefix + "/handoff"} or (
+                request.method == "DELETE" and handoff_child and "/" not in handoff_child)
+            lite_route = path == prefix + "/lite" or path.startswith(prefix + "/lite/")
+            if not lite_route and not shared and not (request.method == "DELETE" and path == prefix):
+                raise HTTPException(409, "Open this internal experiment in AutoKaggle Lite.")
         return item
 
     def output(item):
@@ -306,7 +320,7 @@ def create_app(data_dir: Path | None = None):
 
     @app.get("/api/projects")
     def projects(request: Request):
-        return {"projects": store.list(owner(request))}
+        return {"projects": [item for item in store.list(owner(request)) if "lite" not in (store.get(item["id"], owner(request)) or {})]}
 
     @app.post("/api/projects")
     def create(body: ProjectPatch, request: Request, response: Response):
@@ -862,6 +876,9 @@ def create_app(data_dir: Path | None = None):
 
     @app.get("/")
     def chat_index(request: Request):
+        if os.getenv("AUTOKAGGLE_DEFAULT_INTERFACE", "full").lower() == "lite":
+            project_id = request.query_params.get("project")
+            return RedirectResponse("/lite" + ("?project=" + quote(project_id, safe="") if project_id else ""), status_code=303)
         if not access.can_open(request, store):
             return RedirectResponse("/login?next=" + quote(str(request.url.path) + ("?" + request.url.query if request.url.query else ""), safe=""), status_code=303)
         project_id = request.query_params.get("project")
@@ -899,6 +916,7 @@ def create_app(data_dir: Path | None = None):
 
     workspace.register(app, store, access, get, editing, conversation_output)
     sources.register(app, store, pool, get, editing, conversation_output)
+    lite.register(app, store, pool, access, get, editing)
 
     (HERE / "static").mkdir(exist_ok=True)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")

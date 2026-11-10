@@ -1,5 +1,18 @@
 # Project instructions
 
+## BOLD OS integration plan — 5 November 2026
+
+BOLD OS is an operating system that agents can access through an MCP server. The configured Codex server is named `bold`. Its endpoint is `https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/mcp`. Authentication uses a private Bearer token. Keep that token in private configuration, outside this repository.
+
+Integrating AutoKaggle with BOLD OS is an immediate project goal. The plan is:
+
+1. BOLD OS will provide a dedicated page for onboarding new projects. This page is planned; do not assume it already exists.
+2. Connect the AutoKaggle onboarding workflow to that page through the BOLD OS MCP. Define the detailed workflow in later work with the project owner.
+3. After a problem is confirmed, support creation of a private verifier repository in `bold-lab-ai`. Reuse BOLD OS's existing GitHub App and project repository workflow. Use a lab-approved template, preserve its project-tracking requirements, and link the repository to the corresponding BOLD OS project record. Use the project's access controls; lab-wide access is not required. Save the repository ID and URL so retries reuse the same repository. Keep hidden test data and runtime credentials outside Git. An authorized provisioning action is still needed; the current read-only MCP connection does not establish permission to create repositories.
+4. In the longer term, enable agents to interact with BOLD OS as part of ongoing project work.
+
+This section records the integration direction. The page and application integration have not been implemented by this documentation change.
+
 ## Follow the Kaggle workflow
 
 For all work in this project, reproduce the Kaggle competition workflow as closely as the task permits. Use official Kaggle documentation and published competition rules as the first reference. Explain any necessary difference and record it in the affected documentation. Do not assume that Kaggle's private security infrastructure is publicly documented.
@@ -87,6 +100,24 @@ Use short, direct sentences. Preserve existing work. Report what was actually te
 ## Branch and commit naming
 
 Use descriptive branch names without AI product or model names. Keep those names out of commit messages as well. Do not add attribution signatures, generated-by footers, or co-author trailers. Do not commit or push changes until explicitly requested.
+
+## Internal Lite and public Full modes — 5 November 2026
+
+- Keep two explicit modes. Full follows the competition policies above. Lite serves trusted lab researchers at `/lite`; Full remains at `/`. Do not convert existing sessions between modes without an explicit migration.
+- Lite uses six decision groups: research objective, data or environment, submitted artifact, evaluation protocol, resources, and reproduction record. Use a paper and repository to propose as much as the sources support. Ask only for missing or conflicting decisions. A reference baseline remains optional.
+- Keep source facts, researcher statements, and agent suggestions distinct. Require researcher acceptance before a proposal becomes the contract. Preserve excerpts, source versions, corrections, and prior result versions. Treat imported documents and code as untrusted data. Never execute a repository during import.
+- Support ML batch tasks and interactive environments through a declared adapter interface. Separate a prediction file, policy, or checkpoint from the method that created it. Record environment versions, observation/action rules, state resets, outcome definition, failure rules, seeds, and resource bounds when applicable.
+- Lite may use visible fixed seeds and researcher-controlled execution. This is an approved difference from Full. Result validation establishes structural consistency, not independent reproduction. Record code, artifact, dependency, and contract digests. Do not claim that an uploaded result proves training provenance or scientific accuracy.
+- Keep hosted Lite access limited to an explicit lab membership list or an administrator. A verified email or shared project alone does not grant internal access. Local development must stay on loopback.
+- Every Full compute request and node rental needs the owner's manual approval through BOLD OS. Agents can request permission but cannot approve themselves. Bind permission to the exact execution bundle, challenge version, executor, resource bounds, attempt count, cost ceiling, and expiry. All extra resources need a new approval.
+- The BOLD OS approval gate is a permission record. Provider adapters must still enforce quotas, cancellation, time limits, idempotent job creation, and separation of credentials from participant code. Keep hosted execution disabled until those checks pass. Never call the system impossible to compromise.
+- See `autokaggle/docs/LITE.md` for delivered Lite behavior. A separate `bold-os-approval` checkout contains the native BOLD OS gate and its integration guide. Implementation does not imply that the gate has been deployed or connected to Civo or Isambard.
+
+### Lite requirements before merge — 10 November 2026
+
+- Each onboarded Lite problem must have its own GitHub evaluator repository and a versioned YAML evaluation config. Keep the repo accessible to the lab members who work on the problem. Pin the evaluator release to a Git commit. Include the task adapter, input contract, dependency setup, required asset references, and one documented local scoring command.
+- Before marking a benchmark ready, clone its evaluator repository into a clean directory and score a known sample of the declared artifact type. A collaborator must be able to supply a compatible checkpoint, policy, or output and receive the defined fitness and a machine-readable result. Use the declared metric, seeds, and failure rules. A template adapter or a run that requires files from the author's laptop does not pass. Evaluation runs on the collaborator's machine. It requires no hosted evaluator on Civo.
+- Make BOLD OS the home for Lite onboarding. Put each problem in the Problem Bank and link its evaluator version under Benchmarks. Collaborators open and resume onboarding from BOLD OS. Use stable IDs and update the same records on retry. Keep Lite's backend as needed to support this workflow. Replace the standalone challenge page as the destination for an onboarded problem.
 
 ## Live API testing
 

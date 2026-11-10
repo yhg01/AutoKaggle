@@ -51,7 +51,7 @@
         if (target.searchParams.get("project")) interview.searchParams.set("project", target.searchParams.get("project"));
         return interview.pathname + interview.search;
       }
-      return target.origin === window.location.origin && ["/", "/workbench", "/internal"].includes(target.pathname) ? target.pathname + target.search : "/";
+      return target.origin === window.location.origin && ["/", "/lite", "/workbench", "/internal"].includes(target.pathname) ? target.pathname + target.search : "/";
     } catch (_) { return "/"; }
   }
   async function request(path, payload) {
