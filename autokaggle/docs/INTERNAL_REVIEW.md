@@ -72,8 +72,18 @@ The snapshot includes canonical setup and workflow records, plus bounded
 development-submission and invitation metadata ledgers. It excludes credentials,
 owner capabilities, participant tokens, split seeds and test answer files.
 Correspondence email addresses are redacted. Invitation token digests and grants
-are not returned. This remains a read-only application boundary on the existing
-host, not a private network endpoint.
+are not returned. The research-record interface is read-only. The researcher-name
+editor updates account metadata through a separate, CSRF-protected admin route.
+These are application access controls on the existing host.
+
+Project search covers researcher name, problem title, and project ID across all
+pages. Each result and the selected project show the owner's current name.
+**Project details → Researcher name** can label or correct the verified account
+that owns the project. The new name applies to that account's session listings.
+Research records, ownership, quotas, and existing message labels stay recorded.
+Names identify an account for maintenance; they are not proof of a person's
+identity. A project without a verified email account shows **Name not recorded**
+and has no name editor. Researchers can update their own name from **Profile**.
 
 ## Capture limits
 

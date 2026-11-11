@@ -3,7 +3,7 @@
   const D = window.InternalData, $ = id => document.getElementById(id);
   const categories = [["messages", "Conversation"], ["calls", "Model calls"], ["fields", "Saved fields"], ["changes", "Changes"], ["execution", "Execution"], ["artifacts", "Draft & artifacts"], ["raw", "Raw data"]];
   const params = new URLSearchParams(location.search);
-  const state = {id: params.get("project"), section: params.get("view") || "messages", selected: {}, projects: [], total: 0, offset: 0, data: null, pending: null, version: 0, controller: null, refreshing: false, presentation: "visual", inspectorTabs: {}};
+  const state = {id: params.get("project"), section: params.get("view") || "messages", selected: {}, projects: [], total: 0, offset: 0, data: null, pending: null, version: 0, controller: null, refreshing: false, presentation: "visual", inspectorTabs: {}, renaming: false};
   if (!categories.some(c => c[0] === state.section)) state.section = "messages";
   if (params.get("record")) state.selected[state.section] = params.get("record");
   const el = (tag, text, cls) => {const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n;};
@@ -15,6 +15,7 @@
     const p = new URLSearchParams(); if (state.id) p.set("project", state.id); p.set("view", state.section);
     if (state.selected[state.section]) p.set("record", state.selected[state.section]);
     const target = `/internal?${p}`;
+    $("internal-profile").href = "/profile?next=" + encodeURIComponent(target);
     if (location.pathname + location.search !== target) history.pushState(null, "", target);
   }
   function pill(value) {return el("span", value || "not recorded", "pill" + (["failed", "rejected", "error", "interrupted"].includes(value) ? " failure" : ["missing", "partial", "incomplete"].includes(value) ? " warning" : ""));}
@@ -37,11 +38,11 @@
   function go(sectionId, recordId) {state.section = sectionId; state.selected[sectionId] = recordId; $("record-search").value = ""; $("record-filter").value = ""; render(true); url();}
   function jump(parent, title, sectionId, row) {const b = el("button", title, "record-link"); b.addEventListener("click", () => go(sectionId, row.id)); parent.append(b);}
   function projectList() {
-    const q = $("project-search").value.toLowerCase(), root = $("projects"); root.replaceChildren();
-    for (const p of state.projects.filter(p => `${p.title} ${p.id}`.toLowerCase().includes(q))) {
+    const root = $("projects"); root.replaceChildren();
+    for (const p of state.projects) {
       const b = el("button", undefined, "project" + (p.id === state.id ? " active" : "")); b.setAttribute("aria-current", p.id === state.id ? "true" : "false");
-      b.append(el("strong", p.title), el("small", `${p.workflow_status === "awaiting_approval" ? "Waiting for approval" : p.conversation_status || p.status} · ${p.model_calls} calls`), el("small", date(p.updated_at)));
-      b.addEventListener("click", () => {if (state.id === p.id) return; state.id = p.id; state.data = null; state.pending = null; state.selected = {}; $("new-data").hidden = true; $("record-search").value = ""; $("record-filter").value = ""; $("project-title").textContent = p.title; $("project-id").textContent = p.id; $("records").replaceChildren(el("p", "Loading saved records…", "empty")); $("inspector").replaceChildren(); $("export").disabled = true; projectList(); url(); load(true);});
+      b.append(el("strong", p.title), el("small", p.researcher_name || "Researcher name not recorded"), el("small", `${p.workflow_status === "awaiting_approval" ? "Waiting for approval" : p.conversation_status || p.status} · ${p.model_calls} calls`), el("small", date(p.updated_at)));
+      b.addEventListener("click", () => {if (state.id === p.id) return; state.id = p.id; state.data = null; state.pending = null; state.selected = {}; $("new-data").hidden = true; $("record-search").value = ""; $("record-filter").value = ""; $("project-title").textContent = p.title; $("project-id").textContent = p.id; $("researcher-label").textContent = "Researcher: " + (p.researcher_name || "Name not recorded"); $("researcher-form").hidden = true; $("researcher-status").textContent = ""; $("records").replaceChildren(el("p", "Loading saved records…", "empty")); $("inspector").replaceChildren(); $("export").disabled = true; projectList(); url(); load(true);});
       root.append(b);
     }
     if (!root.children.length) root.append(el("p", "No projects match this page.", "empty"));
@@ -52,7 +53,11 @@
   function render(rebuildFilters = false) {
     if (!state.data) return;
     const data = state.data, p = data.project, records = D.rows(data, state.section);
+    $("internal-profile").href = "/profile?next=" + encodeURIComponent(location.pathname + location.search);
     $("project-title").textContent = p.title; $("project-title").title = p.title; $("project-id").textContent = p.id;
+    $("researcher-label").textContent = "Researcher: " + (data.researcher?.name || "Name not recorded");
+    $("researcher-form").hidden = !data.researcher?.can_edit;
+    if (document.activeElement !== $("admin-researcher-name") && !state.renaming) $("admin-researcher-name").value = data.researcher?.name || "";
     $("project-meta").textContent = `Saved status: ${p.status} · Conversation: ${p.conversation?.status ?? "not recorded"} · Revision ${p.revision ?? "not recorded"} · Saved ${date(p.updated_at)}`;
     $("export").disabled = false;
     const nav = $("sections"); nav.replaceChildren();
@@ -296,7 +301,7 @@
     state.controller?.abort(); state.controller = new AbortController(); const signal = state.controller.signal, version = ++state.version, id = state.id;
     state.refreshing = true; $("refresh").disabled = true;
     try {
-      const list = await api(`/api/internal/projects?offset=${state.offset}`, signal);
+      const list = await api(`/api/internal/projects?offset=${state.offset}&q=${encodeURIComponent($("project-search").value.trim())}`, signal);
       if (version !== state.version) return;
       const listChanged = JSON.stringify(state.projects) !== JSON.stringify(list.projects) || state.total !== list.total;
       state.projects = list.projects; state.total = list.total;
@@ -311,7 +316,26 @@
     } catch (error) {if (version === state.version && error.name !== "AbortError") status(`${error.message}${state.data ? " Saved snapshot retained." : ""}`, true);}
     finally {if (version === state.version) {state.refreshing = false; $("refresh").disabled = false; $("previous").disabled = state.offset === 0; $("next").disabled = state.offset + 50 >= state.total;}}
   }
-  $("project-search").addEventListener("input", projectList);
+  async function saveResearcher(event) {
+    event.preventDefault();
+    if (state.renaming || !state.id || !state.data?.researcher?.can_edit || !$("admin-researcher-name").reportValidity()) return;
+    const id = state.id, name = $("admin-researcher-name").value.trim(); if (!name) return;
+    state.renaming = true; $("save-researcher").disabled = true; $("researcher-status").textContent = "Saving name…";
+    try {
+      const access = await fetch("/api/access", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(20000) }).then(response => response.json());
+      if (access.is_admin !== true || typeof access.csrf_token !== "string") throw new Error("Sign in as an administrator before updating a researcher name.");
+      const response = await fetch(`/api/access/researcher-profiles/${encodeURIComponent(id)}`, { method: "PATCH", credentials: "same-origin", signal: AbortSignal.timeout(20000), headers: { "Content-Type": "application/json", "X-CSRF-Token": access.csrf_token }, body: JSON.stringify({ name }) });
+      const result = await response.json();
+      if (!response.ok || typeof result.name !== "string") throw new Error(typeof result.detail === "string" ? result.detail : "The name could not be saved. Try again.");
+      if (id === state.id) { state.data.researcher.name = result.name; $("researcher-label").textContent = "Researcher: " + result.name; $("researcher-status").textContent = "Name saved for this account."; }
+      for (const project of state.projects) if (project.id === id) project.researcher_name = result.name;
+      projectList(); await load(false);
+    } catch (error) { if (id === state.id) $("researcher-status").textContent = error.message || "The connection stopped. Retry to save the name."; }
+    finally { state.renaming = false; $("save-researcher").disabled = false; }
+  }
+  $("researcher-form").addEventListener("submit", saveResearcher);
+  let searchTimer;
+  $("project-search").addEventListener("input", () => { clearTimeout(searchTimer); state.offset = 0; searchTimer = setTimeout(() => load(true), 200); });
   $("visual-view").addEventListener("click", () => {state.presentation = "visual"; render();});
   $("list-view").addEventListener("click", () => {state.presentation = "list"; render();});
   $("toggle-projects").addEventListener("click", () => {

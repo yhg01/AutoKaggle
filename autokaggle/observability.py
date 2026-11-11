@@ -141,14 +141,19 @@ def register(app, access, store, static_dir):
         return FileResponse(static_dir / "internal.html")
 
     @app.get("/api/internal/projects")
-    def projects(request: Request, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)):
+    def projects(request: Request, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), q: str = Query("", max_length=128)):
         require_admin(request)
         # Do not deserialize every project's full model input/output on a list request.
+        query = q.strip().casefold()
+        join = " FROM projects p LEFT JOIN researcher_profiles r ON r.account=p.owner"
+        where = " WHERE instr(casefold(COALESCE(r.name,'') || ' ' || COALESCE(json_extract(p.body, '$.title'),'') || ' ' || p.id), ?) > 0" if query else ""
+        parameters = (query,) if query else ()
         with store.connection() as con:
-            total = con.execute("SELECT count(*) FROM projects").fetchone()[0]
-            rows = con.execute("SELECT id, updated_at, json_extract(body, '$.title'), json_extract(body, '$.status'), json_extract(body, '$._model_calls'), json_extract(body, '$.conversation.status'), json_extract(body, '$.workflow.status') FROM projects ORDER BY updated_at DESC, id LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+            con.create_function("casefold", 1, lambda value: value.casefold() if isinstance(value, str) else "")
+            total = con.execute("SELECT count(*)" + join + where, parameters).fetchone()[0]
+            rows = con.execute("SELECT p.id, p.updated_at, json_extract(p.body, '$.title'), json_extract(p.body, '$.status'), json_extract(p.body, '$._model_calls'), json_extract(p.body, '$.conversation.status'), COALESCE(r.name,''), json_extract(p.body, '$.workflow.status')" + join + where + " ORDER BY p.updated_at DESC, p.id LIMIT ? OFFSET ?", (*parameters, limit, offset)).fetchall()
         return {"total": total, "limit": limit, "offset": offset, "projects": [
-            {"id": r[0], "updated_at": r[1], "title": scrub(r[2]), "status": r[3], "model_calls": r[4] or 0, "conversation_status": r[5], "workflow_status": r[6]}
+            {"id": r[0], "updated_at": r[1], "title": scrub(r[2]), "status": r[3], "model_calls": r[4] or 0, "conversation_status": r[5], "researcher_name": r[6], "workflow_status": r[7]}
             for r in rows]}
 
     @app.get("/api/internal/projects/{project_id}")
@@ -159,5 +164,7 @@ def register(app, access, store, static_dir):
         if not row:
             raise HTTPException(404, "Challenge not found.")
         item = json.loads(row[0])
+        from .researcher_profiles import project_researcher
         return {"project": project_detail(item), "review": review_data(store, item), "trace_limit": LIMIT,
+                "researcher": project_researcher(store, project_id),
                 "reasoning_note": "Only reasoning text returned by the provider is recorded. Hidden reasoning is unavailable. Older calls have no trace; records retain the latest 30 calls, with each text field capped at 24,000 characters."}

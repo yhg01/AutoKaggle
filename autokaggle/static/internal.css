@@ -231,4 +231,6 @@ h4 { font-size: 11px; margin-bottom: 8px; }
   .project-list { flex: none; max-height: 100px; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+.project-heading{min-width:0;flex:1}.project-heading h2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.project-heading p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#researcher-form{display:grid;gap:8px;margin-top:12px}#researcher-form[hidden]{display:none}#admin-researcher-name{width:100%;min-width:0;padding:7px;border:1px solid var(--line);border-radius:5px}#researcher-status{font-size:11px;overflow-wrap:anywhere}
 .approval-control label,.approval-control textarea{display:block;width:100%}.approval-control textarea{margin:4px 0 10px}.approval-control p:last-child{margin-top:8px;overflow-wrap:anywhere}

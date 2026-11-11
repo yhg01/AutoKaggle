@@ -38,6 +38,7 @@ class Store:
             con.execute("CREATE TABLE IF NOT EXISTS handoff_codes (digest TEXT PRIMARY KEY, project TEXT NOT NULL, expires TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0)")
             con.execute("CREATE TABLE IF NOT EXISTS handoff_attempts (actor TEXT NOT NULL, at TEXT NOT NULL)")
             con.execute("CREATE TABLE IF NOT EXISTS submission_usage (project TEXT NOT NULL, day TEXT NOT NULL, team TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(project,day,team))")
+            con.execute("CREATE TABLE IF NOT EXISTS researcher_profiles (account TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL)")
         self.apply_erasure_journal()
         os.chmod(self.db, 0o600)
         # A process restart cannot silently leave a run active forever.
@@ -111,21 +112,24 @@ class Store:
 
     def list(self, owner):
         with self.connection() as con:
-            rows = con.execute("SELECT body, owner=? FROM projects WHERE owner=? OR EXISTS (SELECT 1 FROM review_grants WHERE session=? AND project=projects.id AND expires>?) OR EXISTS (SELECT 1 FROM collaborators WHERE member=? AND project=projects.id) ORDER BY updated_at DESC", (owner, owner, owner, now(), owner)).fetchall()
-        return [{**{k: item[k] for k in ("id", "title", "updated_at", "status")}, "role": "owner" if own else "collaborator", "can_delete": bool(own)} for item, own in ((json.loads(r[0]), r[1]) for r in rows)]
+            rows = con.execute("SELECT body, owner=?, COALESCE((SELECT name FROM researcher_profiles WHERE account=projects.owner),'') FROM projects WHERE owner=? OR EXISTS (SELECT 1 FROM review_grants WHERE session=? AND project=projects.id AND expires>?) OR EXISTS (SELECT 1 FROM collaborators WHERE member=? AND project=projects.id) ORDER BY updated_at DESC", (owner, owner, owner, now(), owner)).fetchall()
+        return [{**{k: item[k] for k in ("id", "title", "updated_at", "status")}, "role": "owner" if own else "collaborator", "can_delete": bool(own), "researcher_name": name} for item, own, name in ((json.loads(r[0]), r[1], r[2]) for r in rows)]
 
     def owns(self, project_id, owner):
         with self.connection() as con:
             return bool(con.execute("SELECT 1 FROM projects WHERE id=? AND owner=?", (project_id, owner)).fetchone())
 
     def author_label(self, project_id, owner):
+        with self.connection() as con:
+            profile = con.execute("SELECT name FROM researcher_profiles WHERE account=?", (owner,)).fetchone()
+        prefix = profile[0] + " · " if profile else ""
         if self.owns(project_id, owner):
-            return "Organizer"
+            return prefix + "Organizer"
         with self.connection() as con:
             row = con.execute("SELECT id FROM collaborators WHERE project=? AND member=?", (project_id, owner)).fetchone()
         if row:
-            return "Collaborator " + row[0][:6].upper()
-        return "Reviewer"
+            return prefix + "Collaborator " + row[0][:6].upper()
+        return prefix + "Reviewer"
 
     def record_erasure(self, project_id, scope="project"):
         """Persist non-content deletion instructions outside restorable snapshots."""

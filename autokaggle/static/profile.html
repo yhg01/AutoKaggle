@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your researcher name — BOLD AutoKaggle</title>
+  <link rel="icon" type="image/svg+xml" href="/static/bold-butterfly.svg">
+  <link rel="stylesheet" href="/static/chat.css"><link rel="stylesheet" href="/static/login.css?v=researcher-names-20261103">
+  <script src="/static/profile.js?v=researcher-review-20261106" defer></script>
+</head>
+<body>
+  <main class="invitation-page">
+    <section class="email-card login-card" aria-labelledby="profile-title">
+      <img src="/static/bold-butterfly.svg" width="48" height="48" alt="">
+      <span class="eyebrow">BOLD AUTOKAGGLE</span>
+      <h1 id="profile-title">What name should we use?</h1>
+      <p>Your name helps organizers and collaborators identify your work. You can change it later from Profile.</p>
+      <form id="profile-form">
+        <label for="researcher-name">Your name</label>
+        <input id="researcher-name" name="name" type="text" autocomplete="name" required maxlength="100" aria-describedby="name-help" disabled>
+        <p id="name-help" class="email-privacy">Use the name your research team knows. It appears in private session and admin views. It is not added to participant packages or sent to the interview model as account data.</p>
+        <button id="save-profile" class="button button-primary" type="submit" disabled>Save and continue</button>
+      </form>
+      <p id="profile-status" role="status" aria-live="polite">Loading your profile…</p>
+      <a id="profile-sign-in" href="/login" hidden>Sign in again</a>
+    </section>
+  </main>
+</body>
+</html>

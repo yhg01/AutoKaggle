@@ -49,8 +49,12 @@ A new email-account project starts with its verified address as `organizer_email
 - `POST /api/projects/{id}/conversation/retry`: `{request_id}`. Explicitly retry a failed model action without duplicating its user message.
 - `POST /api/projects/{id}/conversation/revision`: `{request_id}`. Start a bounded organizer revision from a saved draft. Preserve prior context and ask which changes the organizer wants. Repeating the request ID does not create another round.
 - `GET /api/projects/{id}/conversation/readme.md`: current README attachment; 404 if no current draft exists.
+- `POST /api/projects/{id}/documents`: multipart `file`, up to 50 MB. Keep the extracted text as interview context and return `{document, documents}`. An unreadable file returns 422 with the reason. Attaching the same content again keeps one copy and marks that document as waiting for the next message.
+- `DELETE /api/projects/{id}/documents/{document_id}`: delete a document's text, its lookup excerpts, and the session's model traces, and return `{deleted, documents}`.
 
 Use a unique request ID for each action. Retry an uncertain transport outcome with the same action and ID. A model retry uses the `/retry` action with a new ID. The server serializes project writes and returns 409 for a concurrent action.
+
+The conversation includes `documents`, without their text; `pending` marks a document that waits for the next message. `activity` lists the operations of the turn in progress, each with `label`, `kind` (`model` or `lookup`), and either `running` or `ok`. A researcher message can include `attachments` with the documents sent with it. An assistant message can include `steps`, each with `label`, `kind`, `ok`, and an optional `detail`, for the operations of that turn. Model traces record the lookup names and arguments.
 
 Question formatting is repaired locally after factual validation. Invalid model JSON, response structure, or evidence receives at most one automatic repair call per action, shared across interview and draft generation. Each call reserves budget before it starts and counts toward the 30-call limit. The replacement is validated in full before facts are applied. Network and authentication failures are not automatically retried. Private conversation state retains fixed validation codes and repair instructions; rejected response bodies are not stored.
 
@@ -180,6 +184,21 @@ Required setting checkpoints use validated chat choices, such as `Competition: c
 ## Session collaboration and data controls
 
 See [the workspace API](WORKSPACE.md#api-additions) for source import, explicit storage acceptance, session and dataset erasure, answer replacement, handoff codes, and revision after measured attempts. Research writes require the current storage notice (428 until accepted). The existing authorization, project locks, quotas, and retry identities remain in force.
+
+## Researcher account names
+
+Names are account display labels. Existing verified email sessions and account IDs control access. The name routes do not edit scientific records or access grants.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/access/profile` | Get the signed-in account's `name`, `account_id`, and `is_admin` status. Requires verified email sign-in. |
+| `PATCH /api/access/profile` | Set the signed-in account's name with `{"name": "Antonio", "account_id": "ACCOUNT_FROM_PROFILE"}`. |
+| `PATCH /api/access/researcher-profiles/{project_id}` | Admin: set the name of the verified account that owns the given project. Uses `{"name": "Antonio"}`. |
+| `GET /api/internal/projects?q=Antonio` | Admin: search researcher names, project titles, and IDs across all pages. Existing `limit` and `offset` parameters apply. |
+
+Both PATCH routes require a fresh CSRF token from `GET /api/access`, the matching cookie, and the same-origin request header. Name input accepts 1–100 Unicode characters after normalization and whitespace cleanup. Control characters are rejected. Duplicate names are allowed. The self-update account ID must match the current signed-in account. A switched account receives 409 and must reload the form. Extra fields cannot select another account. Admin updates require a verified account behind the target project; legacy non-email owners receive 422.
+
+Email verification returns `profile_required: true` when a name has not been saved. The browser then opens `/profile` and preserves the safe workspace destination in `next`. Returning named accounts continue directly. Existing API clients and already-open sessions can keep working. `GET /api/config` exposes only the signed-in user's name. Session lists add `researcher_name`; shared members add `name`. Internal detail adds `researcher` with `name` and `can_edit`.
 
 ## Environment competitions
 

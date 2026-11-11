@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import advisor, conversation, environments, onboarding_setup, workflow, notifications, submissions, observability, workspace, sources, lite, lite_build, lite_providers
+from . import advisor, conversation, documents, environments, lite, lite_build, lite_providers, notifications, observability, onboarding_setup, sources, submissions, workflow, workspace
 from .access import AccessGate
 from .email_auth import USER_COOKIE
 from .core import datasets
@@ -190,7 +190,7 @@ def create_app(data_dir: Path | None = None):
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
-        if request.url.path.startswith(("/api/", "/challenge/")) or request.url.path in {"/", "/workbench", "/login", "/review", "/internal"}:
+        if request.url.path.startswith(("/api/", "/challenge/")) or request.url.path in {"/", "/workbench", "/login", "/profile", "/review", "/internal"}:
             response.headers["Cache-Control"] = "no-store"
         elif request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache"
@@ -316,7 +316,7 @@ def create_app(data_dir: Path | None = None):
     def config(request: Request):
         return {"mode": "model" if advisor.configured() else "rules", "model": advisor.model_name(), "max_upload_mb": datasets.MAX_UPLOAD_MB, "max_upload_bytes": datasets.MAX_BYTES, "version": "0.3.0",
                 "private_mode": access.enabled, "can_create_projects": access.can_create(request),
-                "auth_kind": access.auth_kind(request)}
+                "auth_kind": access.auth_kind(request), "researcher_name": (access.user(request) or {}).get("name", "")}
 
     @app.get("/api/projects")
     def projects(request: Request):
@@ -915,6 +915,8 @@ def create_app(data_dir: Path | None = None):
         return FileResponse(HERE / "static/index.html")
 
     workspace.register(app, store, access, get, editing, conversation_output)
+    documents.DIRECTORY = store.directory
+    documents.register(app, store, editing)
     sources.register(app, store, pool, get, editing, conversation_output)
     lite_providers.install(lite)
     lite.register(app, store, pool, access, get, editing)

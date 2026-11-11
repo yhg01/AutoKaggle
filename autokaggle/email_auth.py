@@ -145,9 +145,9 @@ class EmailAuth:
         if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
             return None
         with self.store.connection() as con:
-            row = con.execute("SELECT a.id,a.email FROM email_sessions s JOIN email_accounts a ON a.id=s.account WHERE s.digest=? AND s.expires>?",
+            row = con.execute("SELECT a.id,a.email,COALESCE(p.name,'') FROM email_sessions s JOIN email_accounts a ON a.id=s.account LEFT JOIN researcher_profiles p ON p.account=a.id WHERE s.digest=? AND s.expires>?",
                               (hashlib.sha256(token.encode()).hexdigest(), time.time())).fetchone()
-        return {"owner": row[0], "email": row[1]} if row else None
+        return {"owner": row[0], "email": row[1], "name": row[2]} if row else None
 
     def revoke(self, token):
         if isinstance(token, str) and len(token) <= 256:

@@ -21,3 +21,5 @@
 .source-progress{padding:10px 12px;background:#edf3e5;border-radius:8px}
 .privacy-page{max-width:760px;margin:50px auto;padding:24px;font:16px/1.8 system-ui,sans-serif;color:#283e38}
 @media(max-width:620px){.workspace-header{padding:14px 16px}.workspace-header h2{font-size:17px}.workspace-body{padding:16px;max-height:calc(90dvh - 210px)}.session-row{align-items:flex-start;flex-direction:column;gap:10px}.workspace-tabs{padding:8px;gap:2px}.workspace-tabs .button{padding:7px 9px;font-size:11px}.storage-banner{align-items:flex-start;flex-direction:column;gap:8px}.project-controls{gap:4px}}
+
+#open-profile{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1}#open-profile[hidden]{display:none}

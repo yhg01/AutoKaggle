@@ -51,7 +51,7 @@
         if (target.searchParams.get("project")) interview.searchParams.set("project", target.searchParams.get("project"));
         return interview.pathname + interview.search;
       }
-      return target.origin === window.location.origin && ["/", "/lite", "/workbench", "/internal"].includes(target.pathname) ? target.pathname + target.search : "/";
+      return target.origin === window.location.origin && ["/", "/lite", "/workbench", "/internal", "/profile"].includes(target.pathname) ? target.pathname + target.search : "/";
     } catch (_) { return "/"; }
   }
   async function request(path, payload) {
@@ -114,7 +114,9 @@
       const result = await request("/api/access/email/verify", { challenge_id: state.challenge, code, ...(administrator ? {access_code: $("access-code").value} : {}) });
       if (result.redirect !== "/") throw new Error("The server returned an unexpected response. Please try again.");
       $("email-code").value = ""; $("access-code").value = ""; state.challenge = ""; state.csrf = "";
-      status("Signed in. Opening your workspace…"); if (!result.workspace_preserved) clearPreviousAccount(); window.location.replace(destination(result.is_admin === true));
+      status("Signed in. Opening your workspace…"); if (!result.workspace_preserved) clearPreviousAccount();
+      const next = destination(result.is_admin === true);
+      window.location.replace(result.profile_required && !next.startsWith("/profile?") && next !== "/profile" ? "/profile?next=" + encodeURIComponent(next) : next);
     } catch (error) {
       $("email-code").value = ""; $("access-code").value = "";
       if (error.status === 410) state.expires = 0;

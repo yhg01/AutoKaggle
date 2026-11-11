@@ -193,6 +193,52 @@ class AccessGate:
                 result["csrf_token"] = token
             return result
 
+        @app.get("/profile")
+        def profile_page(request: Request):
+            if not self.enabled:
+                return RedirectResponse("/", status_code=303)
+            if not self.user(request):
+                from urllib.parse import quote
+                next_path = "/profile?next=" + quote(request.query_params.get("next", "/"), safe="")
+                return RedirectResponse("/login?next=" + quote(next_path, safe=""), status_code=303)
+            return FileResponse(static_dir / "profile.html")
+
+        @app.get("/api/access/profile")
+        def profile(request: Request):
+            identity = self.user(request)
+            if not identity:
+                raise HTTPException(401, "Sign in to view your researcher name.")
+            return {"name": identity.get("name", ""), "account_id": identity["owner"], "is_admin": self.is_admin(request)}
+
+        @app.patch("/api/access/profile")
+        async def update_profile(request: Request):
+            self._require_csrf(request)
+            identity = self.user(request)
+            if not identity:
+                raise HTTPException(401, "Sign in to update your researcher name.")
+            values = await self._body(request, {"name", "account_id"})
+            if values["account_id"] != identity["owner"]:
+                raise HTTPException(409, "Your signed-in account changed. Reload the profile before saving a name.")
+            from .researcher_profiles import set_name
+            name = set_name(self.store, identity["owner"], values["name"], identity["owner"])
+            return {"name": name, "is_admin": self.is_admin(request)}
+
+        @app.patch("/api/access/researcher-profiles/{project_id}")
+        async def label_researcher(project_id: str, request: Request):
+            self._require_csrf(request)
+            if not self.is_admin(request):
+                raise HTTPException(403, "Administrator sign-in required.")
+            values = await self._body(request, {"name"})
+            with self.store.connection() as con:
+                row = con.execute("SELECT p.owner, a.id FROM projects p LEFT JOIN email_accounts a ON a.id=p.owner WHERE p.id=?", (project_id,)).fetchone()
+            if not row:
+                raise HTTPException(404, "Challenge not found.")
+            if not row[1]:
+                raise HTTPException(422, "This challenge has no verified researcher account to label.")
+            from .researcher_profiles import set_name
+            name = set_name(self.store, row[0], values["name"], self.user(request)["owner"])
+            return {"name": name}
+
         @app.post("/api/access/login")
         async def login(request: Request, response: Response):
             self._require_csrf(request)
@@ -255,6 +301,7 @@ class AccessGate:
                                     httponly=True, secure=secure, samesite="lax", path="/", max_age=SESSION_SECONDS)
             response.delete_cookie(CSRF_COOKIE, path="/api/access", httponly=True, secure=secure, samesite="strict")
             return {"redirect": "/", "is_admin": administrator,
+                    "profile_required": not bool(identity.get("name")),
                     "workspace_preserved": bool(previous and previous["owner"] == identity["owner"])}
 
         @app.post("/api/access/logout")

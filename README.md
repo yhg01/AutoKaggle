@@ -38,10 +38,13 @@ Use Sessions to resume or delete a session, share a single-use handoff code, rev
 
 The hosted service uses email codes and private account workspaces. New challenges use the signed-in address as the private organizer contact.
 
+After email verification, a researcher with no saved name is asked for a name once. **Sessions → Profile** lets them edit it later. Session lists, shared-session members, and new message labels show names. Internal review can search all projects by researcher name and can label an existing verified account through **Project details → Researcher name**. Names are account labels; email verification and the existing account ID determine access.
+
 ## Delivered scope and limits
 
 - CSV classification and regression workflows support data checks, draft packages, and prediction submissions. CSV uploads are limited to 200 MB, with additional row, column, and cell bounds.
 - Dataset links are recorded for review. Automatic Google Drive import is not implemented in this app.
+- Researchers can attach papers, notes, and logs in the chat, and can ask the agent to read a document or link, check the dataset, or search the web. A lookup runs only on request, and a finding is recorded only after the researcher confirms it. Documents give context and do not enter the package. See [looking things up](autokaggle/docs/WORKSPACE.md#ask-the-agent-to-look-something-up).
 - The runtime uses an 80/20 outer split and training-derived development data. It keeps final answers private and withholds final scores. The requested 70/30 policy and public/private leaderboard workflow remain planned work.
 - A scientific reference baseline is optional. The current pipeline trial uses a simple predictor; it does not reproduce an external scientific baseline.
 - Hosted code execution is disabled. Operator-controlled Civo execution requires private configuration, verification receipts, and fresh runtime checks. Those receipts are not distributed in this repository.

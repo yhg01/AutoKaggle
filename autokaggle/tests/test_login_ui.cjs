@@ -45,6 +45,13 @@ async function sent(search = "") {
   await h.event("send-code", "click"); return h;
 }
 
+test("An unnamed verified researcher is asked for a name before returning to the challenge", async () => {
+  const h = await sent("?next=%2F%3Fproject%3Dp1");
+  h.responses.push(access(), { redirect: "/", profile_required: true, workspace_preserved: true, is_admin: false });
+  h.$("email-code").value = "123456"; await h.event("login-form");
+  assert.deepEqual(h.redirects, ["/profile?next=%2F%3Fproject%3Dp1"]);
+});
+
 test("The single sign-in form has an accessible OTP and optional administrator checkbox", () => {
   assert.match(html, /id="email-code"[^>]*inputmode="numeric"[^>]*autocomplete="one-time-code"/);
   assert.match(html, /id="email-code"[^>]*maxlength="6"/);
@@ -221,10 +228,23 @@ for (const [requested, expected] of [
   ["/lite?project=mine", "/lite?project=mine"],
   ["/workbench", "/"],
   ["/workbench?project=mine&view=problem", "/?project=mine"],
+  ["/workbench?view=review", "/"],
   ["/workbench?project=mine&view=review", "/workbench?project=mine&view=review"],
-]) test(`Login returns to the agent unless review was explicit: ${requested}`, async () => {
-  const h = await sent("?next=" + encodeURIComponent(requested));
-  h.responses.push(access(), { redirect: "/", workspace_preserved: true });
-  h.$("email-code").value = "123456"; await h.event("email-code", "input"); await h.event("login-form");
-  assert.deepEqual(h.redirects, [expected]);
+]) {
+  for (const profileRequired of [false, true]) {
+    test(`Login keeps the selected interview or review destination (profile required: ${profileRequired}): ${requested}`, async () => {
+      const h = await sent("?next=" + encodeURIComponent(requested));
+      h.responses.push(access(), { redirect: "/", workspace_preserved: true, profile_required: profileRequired });
+      h.$("email-code").value = "123456"; await h.event("email-code", "input"); await h.event("login-form");
+      assert.deepEqual(h.redirects, [profileRequired ? "/profile?next=" + encodeURIComponent(expected) : expected]);
+    });
+  }
+}
+
+test("Reauthentication returns to the existing profile form without nesting another profile route", async () => {
+  const next = "/profile?next=" + encodeURIComponent("/workbench?project=mine&view=review");
+  const h = await sent("?next=" + encodeURIComponent(next));
+  h.responses.push(access(), { redirect: "/", workspace_preserved: true, profile_required: true });
+  h.$("email-code").value = "123456"; await h.event("login-form");
+  assert.deepEqual(h.redirects, [next]);
 });

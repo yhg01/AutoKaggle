@@ -43,6 +43,8 @@
   dialog.append(header, nav, body, status); document.body.append(dialog);
   const manager = button("Sessions", () => open("sessions"), "button button-quiet"); manager.id = "open-sessions";
   document.querySelector(".project-controls").prepend(manager);
+  const profileLink = node("a", "Profile", "button button-quiet"); profileLink.id = "open-profile"; profileLink.hidden = true;
+  header.insertBefore(profileLink, close);
   const banner = node("div", null, "storage-banner"); banner.hidden = true; banner.id = "storage-banner";
   banner.append(node("span", "Review data storage before adding research content."), button("Review notice", () => open("privacy"), "button button-small button-secondary"));
   document.querySelector(".conversation-toolbar").after(banner);
@@ -103,7 +105,7 @@
     const list = node("div", null, "session-list");
     for (const project of result.projects) {
       const row = node("div", null, "session-row"); const detail = node("div");
-      detail.append(node("strong", project.title), node("small", (project.id === ws.id ? "Current · " : "") + project.role + " · " + new Date(project.updated_at).toLocaleString()));
+      detail.append(node("strong", project.title), node("small", (project.researcher_name || "Researcher name not recorded") + " · " + (project.id === ws.id ? "Current · " : "") + project.role + " · " + new Date(project.updated_at).toLocaleString()));
       const actions = node("div", null, "workspace-actions");
       actions.append(button(project.id === ws.id ? "Resume current" : "Open", () => { requireIdle(); dialog.close(); notify("open", { id: project.id }); }, "button button-small button-secondary"));
       if (project.can_delete) actions.append(button("Delete", () => confirmDelete(project), "button button-small button-danger"));
@@ -218,7 +220,7 @@
     }
     for (let index = 0; index < result.members.length; index++) {
       const member = result.members[index]; const row = node("div", null, "session-row");
-      row.append(node("span", "Collaborator " + member.id.slice(0, 6).toUpperCase() + (member.is_you ? " (you)" : "") + " · joined " + new Date(member.joined_at).toLocaleString()));
+      row.append(node("span", (member.name ? member.name + " · " : "") + "Collaborator " + member.id.slice(0, 6).toUpperCase() + (member.is_you ? " (you)" : "") + " · joined " + new Date(member.joined_at).toLocaleString()));
       if (result.can_manage || member.is_you) row.append(button(member.is_you ? "Leave session" : "Revoke access", async () => {
         await api(path("/handoff/" + encodeURIComponent(member.id)), "DELETE");
         if (member.is_you) { notify("deleted", { id: ws.id }); dialog.close(); } else { await show("share"); notice("Collaborator access and existing submission tokens revoked."); }
@@ -252,6 +254,11 @@
   window.addEventListener("autokaggle:state", (event) => {
     const changed = ws.id !== event.detail.projectId;
     ws.id = event.detail.projectId; ws.conversation = event.detail.conversation; ws.busy = event.detail.busy; ws.canCreate = event.detail.canCreate;
+    profileLink.hidden = event.detail.authKind !== "user";
+    profileLink.href = "/profile?next=" + encodeURIComponent(ws.id ? "/?project=" + encodeURIComponent(ws.id) : "/");
+    profileLink.textContent = event.detail.researcherName || "Profile";
+    profileLink.title = event.detail.researcherName || "Edit your researcher name";
+    profileLink.setAttribute("aria-label", "Edit your researcher name");
     banner.hidden = !ws.conversation?.storage?.required;
     manager.disabled = false;
     if (changed) { ws.importRequest = null; ws.importSignature = null; clearTimeout(ws.timer); if (dialog.open) run(() => show(ws.tab)); }

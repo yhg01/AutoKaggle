@@ -20,6 +20,22 @@ Import bounds:
 - At most eight selected repository files are read from one immutable commit. Each file is at most 200,000 bytes; its stored model excerpt is at most 7,000 characters. Truncation is recorded.
 - One import runs per session. Repeating the same import request ID returns its existing job. Explicit retry uses a new ID. Model calls still reserve and consume the existing interview call budget.
 
+## Ask the agent to look something up
+
+Select **Attach** in the chat, or drag files onto the conversation, to give the agent papers, notes, code, or logs. PDF, Word, PowerPoint, Excel, OpenDocument, RTF, HTML, and notebook files are read, as are ZIP and gzip archives and any file that reads as text, whatever its extension. Scanned PDFs, images, and legacy Office files are refused with the reason. A document can be up to 50 MB, and a session can hold 20. Files wait inside the message box until you send. They then appear above your message, and a message can contain only files. Removing that message returns its files to the message box.
+
+Only the extracted text is kept, up to 400,000 characters. Documents give context for the interview. They never become the challenge dataset and they do not enter the website, the research ZIP, or the private package. A dataset still comes through **Data & checks**. Remove a document from its card in the message box or above your message, or delete the session to remove them all.
+
+The agent reads nothing on its own. Ask for what you need in the chat, for example to find a method in an attached paper or to confirm a unit in a linked table. On request it can:
+
+- read an attached document or a link you sent, including a PDF link;
+- answer fixed questions about the uploaded dataset, such as column ranges, whether columns identify a row, and row counts;
+- search the public web, when you ask for a search, and read the pages that the search returned.
+
+It can open only links you sent, links from your imported sources, and links a search returned. A link written inside a document or a page is not opened. Each message allows six lookups, and they count as one model call. Text it reads, dataset summaries, and search queries are sent to the configured model service. Page text and search results are untrusted, and the agent does not follow instructions in them.
+
+While the agent works, each operation appears one at a time, and the current one pulses: reviewing your message, each lookup, and reviewing the results. It then reports what it found and where, in a reply above its next question. The list collapses into **steps** on that reply. Opening it shows the same operations, including failed attempts. Model reasoning is not shown. A lookup records nothing. When a finding answers a requirement, the agent shows the exact value and its source and asks you to confirm it. The value is recorded only if you accept it. A question or a lookup request does not count as an unsuccessful answer to the open question.
+
 ## Resume, share, and revise
 
 **Sessions** lists accessible sessions with title, update time, and ownership. Open an existing session to resume it, or create another session. Session access is checked on the server. An arbitrary project URL does not grant access.
@@ -29,6 +45,16 @@ The owner opens **Share → Create handoff code**. Share the code privately with
 Joining adds edit access to this session. It does not replace the owner or grant another session, account, or Internal access. The owner retains session/dataset deletion and membership control. Collaborators can leave. Revocation blocks later API access and revokes existing submission tokens. It cannot recall already downloaded or visible copies. New human turns have an organizer or stable collaborator label, without publishing an email or account capability. Session writes use the existing project lock; concurrent actions receive a recoverable 409.
 
 **Attempts & changes** lists up to twenty saved development attempts. Select **Revisit the problem definition** after a working draft exists. The revision keeps previous context and includes up to ten measured attempt results and their versions. It asks what should change. It does not expose final scores. A scientific change requires rebuilt artifacts. The existing daily allowance continues across revisions.
+
+## Researcher names
+
+Email sign-in asks for a name when the verified account has no name yet. Saving it returns to the requested challenge. Returning accounts use the saved name. A researcher can edit it through **Sessions → Profile**. An existing signed-in account can continue its current session; name collection is presented on its next email sign-in.
+
+Names appear in private session lists, shared-session member lists, new message author labels, and Internal review. Administrators can search projects by researcher name across all pages. **Project details → Researcher name** updates the name on the verified account that owns that project. This also updates its other session listings. This supports labeling existing accounts without asking the researcher to restart their work.
+
+Names are display labels. Duplicate names are allowed. Stable account IDs, verified email sessions, project ownership, and collaboration grants determine access. Existing accounts and data are preserved by an additive `researcher_profiles` table. Name changes update account metadata without rebuilding research packages. Old message author labels stay as recorded; new turns use the current name and role. Legacy messages and non-email review grants keep their existing role labels.
+
+The profile form explains who can see the name. Account profile data are separate from session content. Session deletion keeps the sign-in account and its name; account-level erasure requires the operator. Profile names are not added as account metadata to model requests or participant packages. A name that a researcher writes in the scientific conversation is processed as conversation content.
 
 ## Edit or remove an earlier answer
 
