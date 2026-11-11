@@ -4,6 +4,8 @@ The separate [BOLD AutoKaggle Lite mode](docs/LITE.md) supports internal ML expe
 
 An agent interviews the researcher and turns the answers into a private challenge draft. It follows the [Kaggle workflow](../AGENTS.md) and uses the [interview guide](docs/README.md) to choose relevant follow-up questions.
 
+New Full interviews offer **Speedrun** for an existing paper and public repository, or **start from scratch**. Speedrun accepts a paper link or text PDF up to 16 MiB. Review its proposed brief before the agent records the details and asks about remaining decisions. Returning sessions keep their conversation. Both Full paths use the same readiness, private-answer, scorer, runner, and access checks. See [Internal, Speedrun, and Full](docs/ONBOARDING_PATHS.md).
+
 The [private Civo portal](https://ecc962fa-2f4c-4a3f-96c4-179af273fb7a.k8s.civo.com/) has HTTPS and persistent storage. Email sign-in gives each verified address its own private workspace; administrator access remains separate. Email sign-in is deployed through the Gmail API and passed a real inbox, sign-in, sign-out, and return-session test. Delivery was tested only to the sender Gmail inbox. See the email verification record (local operational record; not included in this repository). Invited reviewers can access one assigned challenge. The website, ZIP, and prediction submission routes are available after the challenge passes its build checks. See [deployment and access instructions](deploy/WEB.md). The hosted code controller remains disabled. This deployment does not resolve the recorded SPOCK revision failures.
 
 ## Selected MVP scope
@@ -135,3 +137,7 @@ Not delivered: hosted execution. There is no GPU runner, and the service never r
 ## Organizer review workbench
 
 After building a first version, select **Review** to inspect the website, ZIP, submission test, saved definition, checks, and development results. **Discuss changes with the agent** opens the same project in review mode and retains the earlier context. Rebuild after changes before using the files again. See [the review workflow](docs/WORKBENCH.md).
+
+## Public-data research
+
+For prediction tasks with known public test answers, select Public-data research in Data & checks. This produces a disclosed research package and requires predictions plus a code ZIP. A separate model review withholds scores when it finds concerns or cannot complete. Clear reviews permit provisional development scores; they do not verify reproduction. Private-answer evaluation remains the default and keeps its existing submission flow. See [public-data research](docs/PUBLIC_RESEARCH.md).

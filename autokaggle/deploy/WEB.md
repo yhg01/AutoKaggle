@@ -1,6 +1,20 @@
 # Private AutoKaggle review service
 
-## Current release — 4 November 2026
+## Public-data research release — 9 November 2026
+
+The web service now supports an explicit public-data research setting for prediction tasks. It requires predictions and a code ZIP, stores both with hashes and a challenge version, and runs a separate model review for possible reward hacking. Clear reviews permit provisional development scores. Flagged or incomplete reviews withhold scores. Private-answer evaluation keeps its existing CSV submission path. Automatic reproduction is not connected; attempt records state `not_run`.
+
+The source SHA256 is `4d4392ef37f7bd885d44bf0967407efe760b51155d7ace0a03790f3d597ae05f`. Its immutable ConfigMap is `source-4d4392ef37f7bd88`. The previous source is `source-0a4ea61dcb46e11f`. A source rollback must restore that ConfigMap and the matching SHA annotation. Do not restore the database for a source rollback.
+
+The verified database backup is `/data/backups/pre-public-research-20261109T011857Z.sqlite3`. All 32 project-body hashes and all table counts matched before and after rollout. The rollout changed only the source volume reference and source annotation. It retained the existing data volume, Secrets, runtime settings, and separate Lite service.
+
+Use server-side apply when creating source ConfigMaps. Client-side apply exceeds Kubernetes' annotation limit for this bundle.
+
+Validation passed: 1,228 Python tests, 179 JavaScript tests, and 70 focused tests after the final contract-hash change. Live OpenRouter checks used `openai/gpt-6.1-sol` with medium reasoning. They accepted a training-derived baseline, flagged copied answers and review prompt injection, checked retry identity, and confirmed private CSV submissions still work. These checks also passed inside the deployed web container using a temporary store. Browser checks covered data settings, data audit, package download, missing attachments, submission, and the displayed review result. HTTPS health, sign-in, anonymous access state, and deployed assets passed. Release tests sent no email.
+
+Source changes require rebuilding existing packages before using them with this release. See [public-data research](../docs/PUBLIC_RESEARCH.md) for submission limits and review states.
+
+## Previous release — 4 November 2026
 
 The owner approved a source-only release of the review workbench and the pending environment-evaluation path. GitHub main contains the separate commits `09ceb90` (30-request interview limit), `43d1ceb` (environment evaluation), and `170d41e` (review workbench). The deployed application source SHA256 is:
 

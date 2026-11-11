@@ -18,6 +18,7 @@ import zipfile
 import pandas as pd
 
 from . import conversation, environments, onboarding_setup
+from .research_policy import is_public, DISCLOSURE, ACCESS_RULES
 from .core.datasets import analyze_dataset, write_partitions, _split_indices, _load_csv
 from .exports import EVALUATE
 from .policy import brief_checks, summarize
@@ -74,6 +75,7 @@ if __name__ == "__main__":
     inputs.add_argument("--predictions", type=Path)
     inputs.add_argument("--code", type=Path, help="One Python source file for a code competition")
     inputs.add_argument("--repository", help="GitHub repository for an environment competition")
+    p.add_argument("--reproduction-code", type=Path, help="Code ZIP required for public-data research predictions")
     p.add_argument("--ref", default="", help="Branch, tag, or commit. Defaults to the default branch.")
     p.add_argument("--request-id", default=None, help="Reuse this ID when retrying the same upload")
     a = p.parse_args()
@@ -83,7 +85,11 @@ if __name__ == "__main__":
         body = json.dumps({"request_id": request_id, "repository_url": a.repository, "ref": a.ref}).encode()
     else:
         field, path = ("source_code", a.code) if a.code else ("predictions_csv", a.predictions)
-        body = json.dumps({"request_id": request_id, field: path.read_text()}).encode()
+        content = {"request_id": request_id, field: path.read_text()}
+        if a.reproduction_code:
+            import base64
+            content["code_zip_base64"] = base64.b64encode(a.reproduction_code.read_bytes()).decode()
+        body = json.dumps(content).encode()
     token = os.environ.get("AUTOKAGGLE_SUBMISSION_TOKEN", "")
     if not token:
         p.error("Set AUTOKAGGLE_SUBMISSION_TOKEN to the submission-only token from the organizer. Never use an organizer login cookie.")
@@ -101,7 +107,7 @@ def generator_hash():
     digest = hashlib.sha256()
     root = Path(__file__).parent
     for name in ("workflow.py", "readiness.py", "conversation.py", "scope_exports.py", "site_template.py", "static/bold-butterfly.svg", "exports.py", "core/datasets.py", "environments.py", "environment_harness.py",
-                 "runner/civo.py", "runner/controller.py", "runner/entrypoint.py"):
+                 "runner/civo.py", "runner/controller.py", "runner/entrypoint.py", "research_policy.py", "research_review.py"):
         source = root / name
         digest.update(name.encode() + b"\0")
         digest.update(source.read_bytes())
@@ -247,6 +253,7 @@ def reference_receipts(project):
 
 def build(project, directory: Path):
     settings = onboarding_setup.get(project)
+    public_research = is_public(project)
     state = conversation.ensure_conversation(project)
     readme = state.get("readme")
     if not readme:
@@ -319,6 +326,13 @@ def build(project, directory: Path):
         spec["execution"] = {"status": "not_enabled", "network": "disabled for submitted code", "seeds_available_to_policy": False,
                              "resources": {"seconds": int(config["evaluation_hours"] * 3600) if config.get("evaluation_hours") else None},
                              "resource_status": environments.EXECUTION_NOTICE + " See the recorded plan for the intended hardware."}
+    if public_research:
+        spec["research_mode"] = "public_research"
+        spec["access"]["test_answers"] = "withheld here; publicly available elsewhere"
+        spec["access"]["disclosure"] = DISCLOSURE
+        spec["submission_review"] = {"code_required": True, "policy": ACCESS_RULES,
+            "reproduction": "Code is retained for reproduction. Review does not execute it or verify reproduction.",
+            "limits": {"zip_bytes": 524288, "text_bytes": 98304, "files": 32}}
     temp = Path(tempfile.mkdtemp(prefix="workflow-", dir=directory))
     os.chmod(temp, 0o700)
     try:
@@ -416,6 +430,8 @@ def build(project, directory: Path):
         code_mode = settings["competition_type"] == "code"
         sample_input = "example_inputs.csv" if code_mode else "validation_features.csv"
         submission_option = "--code baseline.py" if code_mode else "--predictions predictions.csv"
+        if public_research:
+            submission_option += " --reproduction-code code.zip"
         environment_help = f"Read challenge.json for the seed policy, environment, and submission contract. Implement the policy protocol in example_policy.py, and add {environments.MANIFEST} to your repository root; autokaggle-submission.example.json shows its fields. Test locally with `python environment_harness.py run --env-factory MODULE:FUNCTION --seeds SMOKE_SEEDS -- python example_policy.py`. Submit with `python submit.py --url SUBMISSION_URL --repository https://github.com/OWNER/REPOSITORY`. Set AUTOKAGGLE_SUBMISSION_TOKEN to the submission-only token from the organizer. Final scores are withheld. {environments.EXECUTION_NOTICE}"
         package_help = f"Read challenge.json for the contract. Run `python baseline.py --input {sample_input} --output predictions.csv` for a local example. Submit with `python submit.py --url SUBMISSION_URL {submission_option}`. Set AUTOKAGGLE_SUBMISSION_TOKEN to the submission-only token from the organizer preview. Reuse the printed request ID with --request-id when retrying an uncertain upload. Final scores are withheld."
         if code_mode:
@@ -424,6 +440,9 @@ def build(project, directory: Path):
             package_help = environment_help
         scope_section = "\n\n" + scope_notes if scope_notes and scope_notes not in readme else ""
         package_readme = readme + scope_section + "\n\n" + _readiness_text(readiness) + "\n\n## Preparation results\n\nThe statements above were recorded during onboarding. The preparation checks below were produced when this package was built. Unresolved required decisions prevent review readiness.\n\n" + preparation + "\n\n## Draft package\n\n" + package_help + "\n"
+        if public_research:
+            package_readme = "## Public-data research\n\n" + DISCLOSURE + "\n\n" + package_readme
+            package_readme += "\n## Code and review\n\n" + ACCESS_RULES + "\n\nSubmit predictions and a code ZIP together. Use reproduction.json as the manifest. Include all source needed for your attempt. Record the environment, command, seeds, data version, model assets, resources, and prior answer access. For the supplied baseline: `python -m zipfile -c code.zip baseline.py reproduction.json challenge.json`. The ZIP permits up to 32 UTF-8 text files, 96 KiB total text, and 512 KiB compressed. Binary assets must have immutable references and hashes in model_assets; this service does not fetch them. Submitted text is sent to the configured model service for a separate reward-hacking review. The review has no tools or test answers. Findings or an unavailable review withhold the score. A clear review permits a provisional development score. It does not establish reproduction or absence of cheating.\n"
         (public / "README.md").write_text(package_readme)
         agent_instructions = f"""# BOLD AutoKaggle participant instructions
 
@@ -466,6 +485,15 @@ Commit a manifest named {environments.MANIFEST} to the repository root. See auto
 
 {environments.EXECUTION_NOTICE} Keep measured results separate from claims. Report code versions, seeds used in training, dependencies, failures, and costs.
 """
+        if public_research:
+            agent_instructions += "\n## Public-data access and review\n\n" + DISCLOSURE + "\n\n" + ACCESS_RULES + "\n\nSubmit the exact code with predictions. Include reproduction.json and pinned dependencies. Do not put credentials in the code ZIP. The review reads submitted text through the configured model service. It cannot enforce controls on your machine or establish reproduction. Disclose missing assets and prior access.\n"
+            from .research_review import FORMAT as REPRODUCTION_FORMAT
+            (public / "reproduction.json").write_text(_json({"format": REPRODUCTION_FORMAT,
+                "entrypoint": "baseline.py", "command": "python baseline.py --input validation_features.csv --output predictions.csv",
+                "environment": "Python 3.12; standard library only", "seeds": "None; deterministic constant predictor",
+                "data_version": version, "model_assets": "None; learned from supplied train.csv",
+                "resources": "One CPU; no GPU; record actual use for your attempt",
+                "prior_answer_access": "REPLACE with your disclosure before submitting"}))
         if bypassed:
             agent_instructions += "\n" + _bypass_text(readiness) + "\n"
         if scope_notes:

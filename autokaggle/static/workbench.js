@@ -97,6 +97,26 @@
     for (const attempt of attempts.attempts || []) {
       const r = attempt.result || {}, row = record(`${attempt.day || "Saved trial"} · version ${attempt.version || "not recorded"}`, r.detail, r.status);
       if (r.score !== undefined && r.score !== null) { const values = node("dl"); pair(values, "Metric", metricLabels[r.metric] || r.metric); pair(values, "Score", r.score); row.append(values); }
+      if (r.review) {
+        row.append(node("p", `Code review: ${r.review.status}. ${r.review.summary}`));
+        for (const finding of r.review.findings || []) row.append(node("pre", `${finding.file}: ${finding.reason}\nEvidence: ${finding.evidence}`));
+      }
+      if (r.status === "review_pending" && r.review_attempts < 3 && r.artifact_id) {
+        const retry = node("button", "Retry code review"); retry.type = "button";
+        retry.addEventListener("click", async () => {
+          retry.disabled = true;
+          try { await api(root + `/attempts/${r.artifact_id}/review`, {method: "POST"}); await load(); }
+          catch (error) { await failure(error); retry.disabled = false; }
+        });
+        row.append(retry);
+      }
+      if (r.artifact_id) {
+        for (const file of ["code.zip", "predictions.csv"]) {
+          const link = node("a", "Download " + file);
+          link.href = `/api/projects/${project.id}` + `/attempts/${r.artifact_id}/${file}`;
+          row.append(link, node("span", " "));
+        }
+      }
       trials.append(row);
     }
     if (!trials.children.length) trials.append(node("p", "No development submissions have been scored. Use the submission test above to try one.", "empty"));

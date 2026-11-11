@@ -5,7 +5,7 @@
   function destination(administrator) {
     try {
       const target = new URL(new URLSearchParams(location.search).get("next") || "/", location.origin);
-      if (target.origin !== location.origin || !["/", "/workbench", "/internal"].includes(target.pathname) || (target.pathname === "/internal" && !administrator)) return "/";
+      if (target.origin !== location.origin || !["/", "/lite", "/workbench", "/internal"].includes(target.pathname) || (target.pathname === "/internal" && !administrator)) return "/";
       if (target.pathname === "/workbench"
           && !(target.searchParams.get("view") === "review" && target.searchParams.get("project"))) {
         const interview = new URL("/", location.origin);

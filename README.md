@@ -2,6 +2,8 @@
 
 [BOLD AutoKaggle Lite](autokaggle/docs/LITE.md) is the separate internal ML mode at `/lite`. It adds source-assisted onboarding, a short accepted evaluation contract, local research packages, and explicit result evidence levels. The public competition workflow remains separate.
 
+Full has two starting paths: **Speedrun** imports a paper and repository for review; **from scratch** starts with a research question. Both use the same Full validation and evaluator controls. Internal remains a separate lab service on Civo. See the [three-path guide](autokaggle/docs/ONBOARDING_PATHS.md) for access, behavior, and limits.
+
 An agent-led interview that turns a research idea into a draft competition. The agent asks focused questions, records the agreed scope, and prepares a challenge README, website draft, research ZIP, and private prediction-submission workflow.
 
 [Open the hosted BOLD preview](https://ecc962fa-2f4c-4a3f-96c4-179af273fb7a.k8s.civo.com/) · [User guide](autokaggle/README.md) · [Challenge design guide](autokaggle/docs/README.md) · [API](autokaggle/docs/API.md) · [Session and data controls](autokaggle/docs/WORKSPACE.md)
@@ -67,3 +69,7 @@ The live check reads the private `OPENROUTER_API_KEY` from `.env`, makes real mo
 The deployment scripts target the existing BOLD AutoKaggle Civo installation. Review [the web deployment guide](autokaggle/deploy/WEB.md) and [runner requirements](autokaggle/deploy/README.md) before use. They require operator credentials and are not a generic cluster installer.
 
 This repository contains application source and setup documentation. Uploaded datasets, conversations, private answers, credentials, and local deployment receipts are excluded.
+
+## Public-data research
+
+For prediction tasks with known public test answers, select Public-data research in Data & checks. This produces a disclosed research package and requires predictions plus a code ZIP. A separate model review withholds scores when it finds concerns or cannot complete. Clear reviews permit provisional development scores; they do not verify reproduction. Private-answer evaluation remains the default and keeps its existing submission flow. See [public-data research](autokaggle/docs/PUBLIC_RESEARCH.md).

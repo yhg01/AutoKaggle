@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 import csv
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import secrets
 
-from . import environment_harness, environments, onboarding_setup, workflow
+from . import environment_harness, environments, onboarding_setup, workflow, research_review
+from .research_policy import is_public, DISCLOSURE
 
 
 class LimitReached(ValueError):
@@ -49,8 +51,8 @@ def authenticate(store, project_id, token):
     return project, row[3]
 
 
-def submit(store, project, request_id, csv_text, team="organizer-preview"):
-    return _submit(store, project, request_id, csv_text, team, "prediction")
+def submit(store, project, request_id, csv_text, team="organizer-preview", code_zip_base64=""):
+    return _submit(store, project, request_id, csv_text, team, "prediction", code_zip_base64=code_zip_base64)
 
 
 def submit_code(store, project, request_id, source, team="organizer-preview"):
@@ -112,7 +114,7 @@ def _saved_result(connection, project_id, storage_request, digest):
     return json.loads(prior[1])
 
 
-def _submit(store, project, request_id, payload, team, kind, runner=None):
+def _submit(store, project, request_id, payload, team, kind, runner=None, code_zip_base64=""):
     current = workflow.view(project)
     if current.get("status") in {"stale", "not_built"} or not current.get("version"):
         raise ValueError("Build the current workflow before making a development submission.")
@@ -125,7 +127,12 @@ def _submit(store, project, request_id, payload, team, kind, runner=None):
     if onboarding_setup.get(project)["competition_type"] != kind:
         raise ValueError("The submission format does not match this competition type.")
     version = current["version"]
-    digest = hashlib.sha256((version + "\0" + kind + "\0" + payload).encode()).hexdigest()
+    public_research = is_public(project) and kind == "prediction"
+    bundle = research_review.unpack(code_zip_base64, version) if public_research else None
+    if code_zip_base64 and not public_research:
+        raise ValueError("Code ZIP attachments apply only to public-data research predictions.")
+    digest_payload = payload + ("\0" + hashlib.sha256(bundle[0]).hexdigest() if bundle else "")
+    digest = hashlib.sha256((version + "\0" + kind + "\0" + digest_payload).encode()).hexdigest()
     storage_request = hashlib.sha256((team + "\0" + request_id).encode()).hexdigest()
     with store.connection() as con:
         prior = _saved_result(con, project["id"], storage_request, digest)
@@ -153,6 +160,21 @@ def _submit(store, project, request_id, payload, team, kind, runner=None):
             raise LimitReached("The daily submission allowance has been used. It resets at 00:00 UTC.")
         reserved = {"status": "interrupted", "detail": "The attempt was reserved. If execution stopped, use a new request ID; the reserved attempt still counts.", "request_id": request_id}
         con.execute("INSERT INTO draft_submissions (project,version,request,fingerprint,day,result,team) VALUES (?,?,?,?,?,?,?)", (project["id"], version, storage_request, digest, day, json.dumps(reserved), team))
+    if public_research:
+        artifact_dir = store.directory(project["id"]) / "attempts" / storage_request
+        artifact_dir.mkdir(parents=True, mode=0o700)
+        (artifact_dir / "code.zip").write_bytes(bundle[0])
+        (artifact_dir / "predictions.csv").write_text(payload)
+        for path in artifact_dir.iterdir():
+            os.chmod(path, 0o600)
+        result = {"status": "review_pending", "request_id": request_id, "scope": "development",
+                  "remaining_today": limit - count - 1, "version": version,
+                  "artifact_id": storage_request, "code_sha256": hashlib.sha256(bundle[0]).hexdigest(),
+                  "predictions_sha256": hashlib.sha256(payload.encode()).hexdigest(),
+                  "reproduction": {"status": "not_run", "detail": "Code saved for reproduction. No execution has been verified."},
+                  "review_attempts": 0, "detail": "Code saved. The reward-hacking review is pending."}
+        _persist(store, project["id"], storage_request, result)
+        return _review_attempt(store, project, storage_request, result, bundle[1])
     if kind == "environment":
         result = {"status": "received", "request_id": request_id, "scope": "development", "remaining_today": limit - count - 1, **frozen,
                   "detail": environments.EXECUTION_NOTICE}
@@ -188,3 +210,55 @@ def _submit(store, project, request_id, payload, team, kind, runner=None):
     with store.connection() as con:
         con.execute("UPDATE draft_submissions SET result=? WHERE project=? AND request=?", (json.dumps(result), project["id"], storage_request))
     return result
+
+
+def _persist(store, project_id, storage_request, result):
+    with store.connection() as con:
+        con.execute("UPDATE draft_submissions SET result=? WHERE project=? AND request=?", (json.dumps(result), project_id, storage_request))
+
+
+def _review_attempt(store, project, storage_request, result, files):
+    private = store.directory(project["id"]) / "workflow/private"
+    artifacts = store.directory(project["id"]) / "attempts" / storage_request
+    spec = json.loads((private / "challenge.json").read_text())
+    result["review_attempts"] += 1
+    _persist(store, project["id"], storage_request, result)
+    try:
+        # Validate the predictions before a paid review. Scoring values stay outside the reviewer.
+        measured = workflow.score_file(private / "validation_truth.csv", artifacts / "predictions.csv", spec["metric"]["name"])
+    except (ValueError, KeyError, TypeError, OverflowError, UnicodeError, csv.Error):
+        result.update(status="invalid", detail="The prediction file does not match the published format. Check columns, IDs, count, and values.")
+        _persist(store, project["id"], storage_request, result)
+        return result
+    report = research_review.review(files, {"version": spec["version"], "target": spec["target"], "metric": spec["metric"],
+                                           "output_columns": ["_autokaggle_id", "prediction"]})
+    result["review"] = report
+    if report["status"] == "clear":
+        result.update(status="scored", metric=measured["metric"], score=round(measured["score"], 6),
+                      detail="Provisional development score. Source review found no concrete concern. Reproduction is not verified. " + DISCLOSURE)
+    elif report["status"] == "flagged":
+        result.update(status="review_flagged", detail="The review found a possible rule violation. The score is withheld. Inspect the findings and submit a corrected attempt.")
+    else:
+        result.update(status="review_pending", detail="The review did not complete. The score is withheld. Retry the review without using another submission.")
+    _persist(store, project["id"], storage_request, result)
+    return result
+
+
+def retry_review(store, project, artifact_id):
+    with store.connection() as con:
+        row = con.execute("SELECT version,result FROM draft_submissions WHERE project=? AND request=?", (project["id"], artifact_id)).fetchone()
+    if row is None:
+        raise ValueError("This attempt does not exist.")
+    result = json.loads(row[1])
+    if workflow.view(project).get("status") in {"stale", "not_built"} or workflow.view(project).get("version") != row[0] or not is_public(project):
+        raise ValueError("This attempt belongs to a different challenge version. Rebuild and submit a new attempt.")
+    if result.get("status") != "review_pending" or result.get("review_attempts", 0) >= 3:
+        raise ValueError("Only an incomplete review can be retried, up to three review attempts.")
+    directory = store.directory(project["id"]) / "attempts" / artifact_id
+    raw = (directory / "code.zip").read_bytes()
+    predictions = (directory / "predictions.csv").read_bytes()
+    if hashlib.sha256(raw).hexdigest() != result["code_sha256"] or hashlib.sha256(predictions).hexdigest() != result["predictions_sha256"]:
+        raise ValueError("Saved artifacts failed the integrity check.")
+    import base64
+    _, files, _ = research_review.unpack(base64.b64encode(raw).decode(), row[0])
+    return _review_attempt(store, project, artifact_id, result, files)

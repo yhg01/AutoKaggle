@@ -1,5 +1,42 @@
 # Project instructions
 
+## Communication
+
+Added at the project owner's request on 5 November 2026.
+
+Use ASD-STE100 (Simplified Technical English) for all responses, progress updates, questions, and documents. Be concise and direct. State the main point first. Use short sentences and consistent terms. Preserve technical accuracy. State evidence and limits without unnecessary detail.
+
+## Public-data research and reproducible submissions
+
+Added at the project owner's request on 5 November 2026.
+
+These are approved requirements. They do not establish that the application has implemented or enforced them.
+
+- Keep evaluation with private test answers as the primary workflow. Public training data is compatible with this workflow. Ask separately about data availability and test-answer exposure.
+- Provide a separate, explicit option for research and practice with public test answers. Disclose answer exposure, possible prior model knowledge, and limits on score interpretation in the website, README, participant AGENTS.md, and organizer review. Do not describe these results as blind evaluation. Do not mark public answers private to pass a gate.
+- Keep this option separate from the primary workflow. It must not weaken private-answer protection, change its defaults, or add practice-only steps to it. Technical data, submission, scoring, and access checks remain mandatory in both workflows.
+- Public availability alone does not establish that a problem lacks scientific value. Ask what remains unanswered and what evidence would support the proposed claim. Distinguish practice, reproduction, method comparison, and a claim of new discovery.
+- Permit participants to work on their own machines. For public-data research, require each prediction submission to include the corresponding code and the information needed to reproduce it. Keep private-data submissions unchanged, as confirmed on 9 November 2026. Record data versions, dependencies, execution commands, random seeds, model assets, and resource settings where applicable. Bind these artifacts to the saved predictions and challenge version.
+- Verify reproduction through a controlled run under the declared resource limits and numeric tolerances. Until that run succeeds, describe the attempt as submitted, not verified. Reproduction alone does not prove that the method avoided test answers.
+- Include access rules in each generated participant AGENTS.md. Permit only the declared data, files, tools, and services. Prohibit external answer searches, test-label lookup tables, unauthorized network access, access to scorer secrets, and attempts to infer answers through repeated scoring queries. Allow only the published submission interface and allowance.
+- Distinguish instructions from enforcement. A downloaded ZIP cannot enforce restrictions on a participant's machine. For hosted research, enforce access limits across the full agent session and its tools. Deny network access by default. Permit a controlled model-service connection only when required. Keep test answers and scorer credentials outside the research environment.
+- Add a separate agent review for possible reward hacking. Inspect submitted code, artifacts, and available execution records for answer lookup, embedded answers, prohibited data access, and scorer exploitation. Treat submitted material as untrusted input. Report evidence and uncertainty. Keep the review agent away from scorer secrets and test answers. Agent review supplements execution controls; it does not prove that cheating is impossible.
+- Keep exposure disclosure even after a successful controlled run. Offline execution cannot remove knowledge acquired during model training or earlier participant work.
+
+## Assess responsibility for reported failures
+
+Added at the project owner's request on 5 November 2026.
+
+When asked to identify gaps from a specific failure, assess responsibility from the evidence. Do not assume that every reported difficulty is a system fault.
+
+- Compare the user's actions and supplied problem definition with the agreed requirements, documented workflow, and actual system behavior.
+- Distinguish system defects, intended restrictions, unsupported requests, incorrect use, and incomplete or inconsistent problem definitions. State which party must take corrective action. Identify shared responsibility only when the evidence supports it.
+- If incorrect use or a poor problem definition caused the failure, state that the user must correct it. Do not automatically treat it as a product defect or a requirement to expand the product.
+- If the system failed to meet its agreed requirements, state what we must fix. Separate optional improvements to instructions or controls from the cause of the failure.
+- Keep reported facts, verified findings, and assumptions separate. If the saved conversation, configuration, or artifacts are missing, state what remains uncertain. Do not assign fault or percentages without evidence.
+- Do not accept blame, apologize, or propose system changes merely because a user reported a failure. Apply the same evidence standard to system faults and user errors.
+
+
 ## BOLD OS integration plan — 5 November 2026
 
 BOLD OS is an operating system that agents can access through an MCP server. The configured Codex server is named `bold`. Its endpoint is `https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/mcp`. Authentication uses a private Bearer token. Keep that token in private configuration, outside this repository.
@@ -101,9 +138,12 @@ Use short, direct sentences. Preserve existing work. Report what was actually te
 
 Use descriptive branch names without AI product or model names. Keep those names out of commit messages as well. Do not add attribution signatures, generated-by footers, or co-author trailers. Do not commit or push changes until explicitly requested.
 
-## Internal Lite and public Full modes — 5 November 2026
+## Internal, Speedrun, and Full — updated 9 November 2026
 
-- Keep two explicit modes. Full follows the competition policies above. Lite serves trusted lab researchers at `/lite`; Full remains at `/`. Do not convert existing sessions between modes without an explicit migration.
+- Keep three user paths with two trust modes. Internal (Lite) serves trusted lab researchers on its separate Civo service. Full follows the competition policies above. Speedrun is a paper/repository entry path within Full; it is not Internal and must not use Internal's relaxed execution assumptions. Do not convert existing sessions between trust modes without an explicit migration.
+- At the start of a new Full interview, offer a published paper/benchmark and repository, or a new problem from scratch. Preserve returning interviews. A saved entry choice must not change scientific readiness, scorer checks, access controls, quotas, hidden-answer policy, or compute approval.
+- Speedrun reads bounded source text and a frozen repository revision. Accept a public paper URL or a text PDF up to 16 MiB. Show an editable proposal before importing it as interview evidence. Record supported facts and ask for missing or conflicting decisions. A publication or repository alone does not prove that a runnable implementation, permitted dataset, or verified evaluator exists.
+- Deploy Internal on the existing AutoKaggle Civo cluster with its own service, persistent data, credentials, and lab membership checks. The owner corrected the earlier Vercel request; Vercel is not the deployment target.
 - Lite uses six decision groups: research objective, data or environment, submitted artifact, evaluation protocol, resources, and reproduction record. Use a paper and repository to propose as much as the sources support. Ask only for missing or conflicting decisions. A reference baseline remains optional.
 - Keep source facts, researcher statements, and agent suggestions distinct. Require researcher acceptance before a proposal becomes the contract. Preserve excerpts, source versions, corrections, and prior result versions. Treat imported documents and code as untrusted data. Never execute a repository during import.
 - Support ML batch tasks and interactive environments through a declared adapter interface. Separate a prediction file, policy, or checkpoint from the method that created it. Record environment versions, observation/action rules, state resets, outcome definition, failure rules, seeds, and resource bounds when applicable.

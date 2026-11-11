@@ -51,6 +51,26 @@
         result.textContent = "Ready for a new attempt. Your next submission will count toward today's allowance.";
       });
     }
+    const retry = document.getElementById("retry-code-review");
+    let reviewArtifact = null;
+    function showReview(data) {
+      const panel = document.getElementById("submission-review");
+      if (panel) panel.textContent = data.review ? `Code review: ${data.review.status}. ${data.review.summary}\n` + data.review.findings.map(f => `${f.file}: ${f.reason}\nEvidence: ${f.evidence}`).join("\n") : "";
+      reviewArtifact = data.artifact_id || null;
+      if (retry) retry.hidden = data.status !== "review_pending" || data.review_attempts >= 3;
+    }
+    if (retry) retry.addEventListener("click", async () => {
+      if (!reviewArtifact) return;
+      retry.disabled = true;
+      result.textContent = "Reviewing the saved code. This does not use another submission.";
+      try {
+        const response = await fetch(`/api/projects/${container.dataset.project}/attempts/${reviewArtifact}/review`, {method: "POST"});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Review failed.");
+        result.textContent = data.status === "scored" ? `${data.metric}: ${data.score}. ${data.detail}` : data.detail;
+        showReview(data);
+      } catch (error) { result.textContent = error.message; } finally { retry.disabled = false; }
+    });
     submit.addEventListener("click", async () => {
       const codeMode = container.dataset.type === "code";
       if (container.dataset.type === "environment") {
@@ -77,23 +97,31 @@
       const file = document.getElementById("prediction-file").files[0];
       if (!file) { result.textContent = codeMode ? "Choose a Python file first." : "Choose a prediction CSV first."; return; }
       if (file.size > (codeMode ? 262144 : 5000000)) { result.textContent = codeMode ? "Python files must be at most 256 KiB." : "Prediction files must be at most 5 MB."; return; }
+      const codeFile = document.getElementById("reproduction-code")?.files[0];
+      if (container.dataset.research === "true" && !codeFile) { result.textContent = "Choose a code ZIP with reproduction.json."; return; }
+      if (codeFile && codeFile.size > 524288) { result.textContent = "The code ZIP must be at most 512 KiB."; return; }
       submit.disabled = true;
       if (newAttempt) newAttempt.hidden = true;
       result.textContent = codeMode
         ? "Running the code on Civo. Storage setup and cleanup can take several minutes. Keep this page open for the result."
-        : "Checking predictions and calculating the development score…";
+        : container.dataset.research === "true" ? "Checking predictions and reviewing the code. The review can take up to two minutes. Keep this page open." : "Checking predictions and calculating the development score…";
       try {
         const csv = await file.text();
+        const bytes = codeFile ? new Uint8Array(await codeFile.arrayBuffer()) : null;
+        let encoded = "";
+        if (bytes) { let binary = ""; for (const b of bytes) binary += String.fromCharCode(b); encoded = btoa(binary); }
+        const attachment = bytes ? {code_zip_base64: encoded} : {};
         const key = storageKey();
-        const fingerprint = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(csv)))).map(x => x.toString(16).padStart(2,"0")).join("");
+        const fingerprint = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(csv + encoded)))).map(x => x.toString(16).padStart(2,"0")).join("");
         const prior = savedAttempt(key);
         const request_id = prior?.fingerprint === fingerprint ? prior.id : crypto.randomUUID();
         rememberAttempt(key, {fingerprint, id: request_id});
-        const response = await fetch(`/api/projects/${container.dataset.project}/workflow/${codeMode ? "code-submissions" : "submissions"}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({request_id, [codeMode ? "source_code" : "predictions_csv"]: csv})});
+        const response = await fetch(`/api/projects/${container.dataset.project}/workflow/${codeMode ? "code-submissions" : "submissions"}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({request_id, [codeMode ? "source_code" : "predictions_csv"]: csv, ...attachment})});
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Submission failed.");
         result.textContent = data.status === "scored" ? `${data.metric}: ${data.score}. ${data.remaining_today} submissions remain today. ${data.detail}` : data.detail;
-        if (newAttempt && ["scored", "invalid", "failed", "interrupted"].includes(data.status)) {
+        showReview(data);
+        if (newAttempt && ["scored", "invalid", "failed", "interrupted", "review_flagged", "review_pending"].includes(data.status)) {
           newAttempt.hidden = false;
           result.textContent += " Choose New attempt to submit this file again. The next submission will count toward today's allowance.";
         }

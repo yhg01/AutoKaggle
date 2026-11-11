@@ -891,3 +891,4 @@ def register(app, store, pool, access, get, editing):
         def save(item):
             record_results(item, store.directory(project_id), body.request_id, body.manifest, body.results)
         return change(project_id, request, save)
+
