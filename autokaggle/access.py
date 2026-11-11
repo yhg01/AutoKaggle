@@ -40,8 +40,7 @@ class AccessGate:
         base = urlparse(os.getenv("AUTOKAGGLE_PUBLIC_BASE_URL", ""))
         self._origin = f"{base.scheme}://{base.netloc}" if base.scheme and base.netloc else ""
         self._secure = base.scheme == "https"
-        self._attempts: dict[str, deque] = {}
-        self._all_attempts: deque = deque()
+        self._attempts: dict[str, deque] = {}  # failed admin keys per email address
         self._lock = threading.Lock()
         self.email_auth = None
         self.store = None
@@ -151,27 +150,38 @@ class AccessGate:
             if name not in replacing:
                 response.delete_cookie(name, path="/", httponly=True, secure=self.secure_cookie(request), samesite="lax")
 
-    def _record_attempt(self, request: Request):
-        # One application process serves this private deployment. The total limit
-        # also bounds memory and limits attempts from changing source addresses.
+    @staticmethod
+    def _key_digest(code, message):
+        if not isinstance(code, str) or not 1 <= len(code) <= 1024:
+            raise HTTPException(400, message)
+        try:
+            return hashlib.sha256(code.encode()).digest()
+        except UnicodeEncodeError:
+            raise HTTPException(400, message) from None
+
+    def _check_admin_key(self, email_key: str, supplied_digest: bytes, wrong_message: str):
+        # Failed keys are counted per verified email address, never per client
+        # address: behind the ingress every visitor shares a few source addresses,
+        # so an address limit lets anyone lock out every administrator. Only callers
+        # holding a delivered code or a live email session reach this check, and
+        # only incorrect keys count. One application process serves this deployment.
         current = time.monotonic()
-        address = request.client.host if request.client else "unknown"
         with self._lock:
             cutoff = current - ATTEMPT_WINDOW
-            while self._all_attempts and self._all_attempts[0] <= cutoff:
-                self._all_attempts.popleft()
             for key in list(self._attempts):
                 attempts = self._attempts[key]
                 while attempts and attempts[0] <= cutoff:
                     attempts.popleft()
                 if not attempts:
                     del self._attempts[key]
-            attempts = self._attempts.setdefault(address, deque())
-            if len(attempts) >= ATTEMPT_LIMIT or len(self._all_attempts) >= 100:
+            # Check the limit before comparing, so a locked account learns nothing.
+            if len(self._attempts.get(email_key, ())) >= ATTEMPT_LIMIT:
                 raise HTTPException(429, "Too many sign-in attempts. Wait five minutes, then try again.",
                                     headers={"Retry-After": str(ATTEMPT_WINDOW)})
-            attempts.append(current)
-            self._all_attempts.append(current)
+            if hmac.compare_digest(supplied_digest, self._code_digest):
+                return
+            self._attempts.setdefault(email_key, deque()).append(current)
+        raise HTTPException(401, wrong_message)
 
     def register(self, app: FastAPI, static_dir: Path):
         @app.get("/login")
@@ -242,21 +252,14 @@ class AccessGate:
         @app.post("/api/access/login")
         async def login(request: Request, response: Response):
             self._require_csrf(request)
-            self._record_attempt(request)
             values = await self._body(request, {"access_code"})
-            code = values.get("access_code")
-            if not isinstance(code, str) or not 1 <= len(code) <= 1024 or set(values) != {"access_code"}:
-                raise HTTPException(400, "Enter a valid access code.")
-            try:
-                supplied_digest = hashlib.sha256(code.encode()).digest()
-            except UnicodeEncodeError:
-                raise HTTPException(400, "Enter a valid access code.") from None
-            if not hmac.compare_digest(supplied_digest, self._code_digest):
-                raise HTTPException(401, "The access code is not valid.")
+            supplied_digest = self._key_digest(values.get("access_code"), "Enter a valid access code.")
             secure = self.secure_cookie(request)
             identity = self.user(request)
             if not identity:
                 raise HTTPException(401, "Verify your email to add administrator access.")
+            self._check_admin_key(self.email_auth.email_key(identity["email"]), supplied_digest,
+                                  "The access code is not valid.")
             self._clear_identity_cookies(response, request, (ADMIN_COOKIE, USER_COOKIE))
             purpose = "admin:" + identity["owner"]
             response.set_cookie(ADMIN_COOKIE, self._sign(purpose, SESSION_SECONDS), httponly=True,
@@ -276,16 +279,15 @@ class AccessGate:
             values = await self._body(request, {"challenge_id", "code"}, {"access_code"})
             administrator = "access_code" in values
             if administrator:
-                self._record_attempt(request)
-                code = values["access_code"]
-                if not isinstance(code, str) or not 1 <= len(code) <= 1024:
-                    raise HTTPException(400, "Enter a valid administrator access key.")
-                try:
-                    supplied = hashlib.sha256(code.encode()).digest()
-                except UnicodeEncodeError:
-                    raise HTTPException(400, "Enter a valid administrator access key.") from None
-                if not hmac.compare_digest(supplied, self._code_digest):
-                    raise HTTPException(401, "The administrator access key is not valid. Correct it or uncheck administrator access.")
+                supplied = self._key_digest(values["access_code"], "Enter a valid administrator access key.")
+                # Bind the key limit to the address that received this code. A request
+                # without a pending, delivered code never reaches the key check.
+                email_key = await run_in_threadpool(self.email_auth.challenge_email_key, values["challenge_id"])
+                if email_key is None:
+                    raise HTTPException(410, "This code expired or was replaced. Request a new code.")
+                # The key is checked before the email code, so a wrong key leaves it unused.
+                self._check_admin_key(email_key, supplied,
+                                      "The administrator access key is not valid. Correct it or uncheck administrator access.")
             previous = self.user(request)
             session = await run_in_threadpool(self.email_auth.verify, values["challenge_id"], values["code"])
             identity = self.email_auth.identity(session)
