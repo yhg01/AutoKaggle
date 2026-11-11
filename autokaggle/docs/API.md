@@ -232,3 +232,11 @@ The service never clones or runs a repository. A frozen submission has status `r
 `GET /` opens the interview. `GET /workbench?project=ID&view=review` opens the read-only review dashboard after account/project access checks, and only when a built version exists. Explicit legacy `/?project=ID&view=review` links redirect there for built challenges. A bare or old workbench URL redirects to the interview and retains its project ID. Direct `/static/index.html` requests also redirect to the interview; `/challenge/{token}` remains available for existing participant links.
 
 The dashboard reads the project, conversation, workflow, and development-attempt endpoints. Its change button uses the existing `POST /api/projects/{id}/iterate` contract with a stable `request_id`, then opens the same project's agent chat. No new scoring or approval capability is granted. Stale packages remain reviewable but their file/test links are withheld until rebuilt.
+
+## Public-data research submissions
+
+Set `answers.research_mode` to `public_research` through the existing project PATCH endpoint. The default is `private`. Public research requires `labels_public: "yes"` and prediction competition type. Rebuild after changing the setting.
+
+For this setting, both prediction-submission endpoints require `code_zip_base64` with the existing `request_id` and `predictions_csv`. It contains a bounded source ZIP and `reproduction.json`; see PUBLIC_RESEARCH.md. Private-data endpoints retain their CSV contract. Review results are saved with the attempt. `review_flagged` and `review_pending` never include a score. A clear review returns a provisional score and `reproduction.status: "not_run"`.
+
+Authenticated project members can POST `/api/projects/{id}/attempts/{artifact_id}/review` to retry an incomplete review, up to three calls per attempt. They can GET the same path ending in `/code.zip` or `/predictions.csv` to download the saved files. Submission-only tokens cannot use these routes. Retries retain the original daily allowance charge and validate the saved hashes and challenge version.

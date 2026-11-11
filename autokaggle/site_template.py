@@ -176,6 +176,10 @@ def render_site(spec, readme, baseline):
     else:
         access = ["Choose prediction or code submissions before the access policy is confirmed.",
                   "Answer labels remain private. Final scores are withheld during development."]
+    if spec.get("research_mode") == "public_research":
+        access = [spec["access"]["disclosure"],
+                  "Submit predictions and the corresponding code ZIP. A clear source review permits a provisional development score.",
+                  "Source review does not verify reproduction. Final scores are withheld."]
     access_html = "".join("<li>" + _text(line) + "</li>" for line in access)
     execution = spec.get("execution") or {}
     resource_heading = "Worker limits" if mode == "code" else "Proposed resources"

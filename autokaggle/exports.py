@@ -10,6 +10,7 @@ import zipfile
 from .core.datasets import write_partitions
 from .onboarding_setup import redact_private
 from .scope_exports import public_scopes, scope_text
+from .research_policy import is_public, DISCLOSURE
 
 
 def description(project):
@@ -27,6 +28,9 @@ def description(project):
         "## Resource estimate", "", f"Compute: {a['compute_budget'] or 'Unknown'}", "", f"Model tokens: {a['token_budget'] or 'Unknown'}", "",
         "Scope: one credible attempt, including experiments and final evaluation.", "",
         "## Status", "", "Local prototype package. Scientific validity needs organizer review. A passed audit does not prove that leakage is absent.", ""]
+    if is_public(project):
+        lines.append("\n## Public-data research\n\n" + DISCLOSURE)
+        lines = [line.replace("all test rows and labels remain private", "test answers are withheld here but available publicly elsewhere") for line in lines]
     notes = scope_text(public_scopes(project))
     if notes:
         lines.extend([notes, ""])
@@ -139,6 +143,8 @@ if __name__ == "__main__":
 
 
 def package(project, source: Path, directory: Path):
+    if is_public(project):
+        raise ValueError("For public-data research, use Draft & package to build the workflow ZIP with code submission and review instructions.")
     work = directory / "package_work"
     if work.exists():
         shutil.rmtree(work)

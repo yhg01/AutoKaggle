@@ -658,7 +658,7 @@ def _saved_project_context(project):
         dataset["columns"] = [{key: column[key] for key in ("name", "dtype") if key in column}
                               for column in source["columns"][:200] if isinstance(column, dict)]
     answers = project.get("answers") or {}
-    declared = {key: answers[key] for key in ("objective", "prediction_unit", "success_criterion", "data_origin", "labels_public", "rights", "compute_budget", "token_budget")
+    declared = {key: answers[key] for key in ("objective", "prediction_unit", "success_criterion", "data_origin", "labels_public", "research_mode", "rights", "compute_budget", "token_budget")
                 if answers.get(key) not in (None, "", "unknown")}
     design = project.get("design") or {}
     configuration = {key: design[key] for key in ("target", "task", "metric", "split", "group_column", "time_column", "exclude_columns") if key in design}
@@ -746,7 +746,7 @@ def _provider(project, kind, context, reserve):
         with OpenAI(timeout=120, max_retries=0) as client:
             response = client.responses.create(model=advisor.model_name(), reasoning={"effort": effort},
                 instructions=instructions, input=provider_input,
-                max_output_tokens=10000 if kind == "scope" else 1500 if kind == "source" else 1600,
+                max_output_tokens=10000 if kind == "scope" else 3500 if kind == "source" else 1600,
                 text={"format": {"type": "json_schema", "name": "onboarding_" + kind, "strict": True, "schema": schema}})
         trace.update(observability.response_record(response))
     if response.status != "completed" or not response.output_text:

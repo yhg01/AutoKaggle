@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import advisor, conversation, environments, onboarding_setup, workflow, notifications, submissions, observability, workspace, sources
+from . import advisor, conversation, environments, onboarding_setup, workflow, notifications, submissions, observability, workspace, sources, lite
 from .access import AccessGate
 from .email_auth import USER_COOKIE
 from .core import datasets
@@ -41,6 +41,7 @@ class AnswerPatch(StrictModel):
     success_criterion: str | None = None
     data_origin: Literal["private", "public", "synthetic", "unknown"] | None = None
     labels_public: Literal["yes", "no", "unknown"] | None = None
+    research_mode: Literal["private", "public_research"] | None = None
     rights: Literal["yes", "unknown"] | None = None
     compute_budget: str | None = None
     token_budget: str | None = None
@@ -68,6 +69,10 @@ class ProjectPatch(BaseModel):
 
 class AdviceRequest(StrictModel):
     kind: Literal["conversation", "review"] = "conversation"
+
+
+class OnboardingEntry(StrictModel):
+    entry_path: Literal["scratch", "speedrun"]
 
 
 class ExampleRequest(StrictModel):
@@ -125,6 +130,7 @@ class ReviewLogin(BaseModel):
 
 class PredictionSubmission(ConversationAction):
     predictions_csv: str = Field(min_length=1, max_length=5_000_000)
+    code_zip_base64: str = Field(default="", max_length=700_000)
 
 
 class CodeSubmission(ConversationAction):
@@ -170,7 +176,10 @@ def create_app(data_dir: Path | None = None):
     app.state.store = store
     notifications.initialize(store)
     submissions.initialize(store)
-    pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="autokaggle")
+    worker_count = int(os.getenv("AUTOKAGGLE_WORKERS", "2"))
+    if not 1 <= worker_count <= 8:
+        raise ValueError("AUTOKAGGLE_WORKERS must be between 1 and 8.")
+    pool = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="autokaggle")
     app.state.pool = pool
     hosts = ["localhost", "127.0.0.1", "[::1]", "testserver"]
     hosts += [h.strip() for h in os.getenv("AUTOKAGGLE_ALLOWED_HOSTS", "").split(",") if h.strip()]
@@ -187,7 +196,7 @@ def create_app(data_dir: Path | None = None):
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
-        if request.url.path.startswith(("/api/", "/challenge/")) or request.url.path in {"/", "/workbench", "/login", "/profile", "/review", "/internal"}:
+        if request.url.path.startswith(("/api/", "/challenge/")) or request.url.path in {"/", "/lite", "/workbench", "/login", "/profile", "/review", "/internal"}:
             response.headers["Cache-Control"] = "no-store"
         elif request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache"
@@ -207,6 +216,17 @@ def create_app(data_dir: Path | None = None):
         item = store.get(project_id, owner(request))
         if not item:
             raise HTTPException(404, "Challenge not found in this organizer session.")
+        if "lite" in item:
+            lite.require_member(access, request)
+            path = request.url.path
+            # The separate Lite contract must not be changed by Full interview tools.
+            prefix = f"/api/projects/{project_id}"
+            handoff_child = path.removeprefix(prefix + "/handoff/") if path.startswith(prefix + "/handoff/") else ""
+            shared = path in {prefix + "/privacy", prefix + "/handoff"} or (
+                request.method == "DELETE" and handoff_child and "/" not in handoff_child)
+            lite_route = path == prefix + "/lite" or path.startswith(prefix + "/lite/")
+            if not lite_route and not shared and not (request.method == "DELETE" and path == prefix):
+                raise HTTPException(409, "Open this internal experiment in AutoKaggle Lite.")
         return item
 
     def output(item):
@@ -306,7 +326,7 @@ def create_app(data_dir: Path | None = None):
 
     @app.get("/api/projects")
     def projects(request: Request):
-        return {"projects": store.list(owner(request))}
+        return {"projects": [item for item in store.list(owner(request)) if "lite" not in (store.get(item["id"], owner(request)) or {})]}
 
     @app.post("/api/projects")
     def create(body: ProjectPatch, request: Request, response: Response):
@@ -341,6 +361,7 @@ def create_app(data_dir: Path | None = None):
     def conversation_output(item, working=False):
         result = conversation.conversation_view(item)
         result.update(project_id=item["id"], title=item["title"],
+                      entry_path=item.get("_onboarding_entry"),
                       mode="model" if advisor.configured() else "rules",
                       contact_required=not bool(onboarding_setup.get(item)["organizer_email"]),
                       storage=workspace.consent_view(item))
@@ -348,6 +369,17 @@ def create_app(data_dir: Path | None = None):
             result["status"] = "working"
             result["can_retry"] = False
         return result
+
+    @app.patch("/api/projects/{project_id}/onboarding")
+    def onboarding_entry(project_id: str, body: OnboardingEntry, request: Request):
+        with editing(project_id, request) as item:
+            state = conversation.ensure_conversation(item)
+            if state.get("_inflight") or state.get("status") == "working" or item.get("_source_import", {}).get("status") in {"queued", "working"}:
+                raise HTTPException(409, "Wait for the current response before changing the starting path.")
+            # This is an entry preference, not a trust mode or readiness decision.
+            item["_onboarding_entry"] = body.entry_path
+            store.save(item)
+            return conversation_output(item)
 
     def require_contact(item):
         workspace.require_storage(item)
@@ -472,6 +504,8 @@ def create_app(data_dir: Path | None = None):
         directory = built(project_id, request)
         result = workflow.view(get(project_id, request))
         competition_type = onboarding_setup.get(get(project_id, request))["competition_type"]
+        from .research_policy import is_public
+        public_research = is_public(get(project_id, request))
         code_mode = competition_type == "code"
         environment_mode = competition_type == "environment"
         code_ready = any(c["id"] == "runner" and c["status"] == "pass" for c in result["checks"])
@@ -484,6 +518,11 @@ def create_app(data_dir: Path | None = None):
         submission_form = f'''<p>{submission_help}</p>
           <label>{file_label} <input type="file" id="prediction-file" accept="{file_accept}"></label>
           <button type="button" id="submit-predictions" {'disabled' if code_mode and not code_ready else ''}>Submit {'code' if code_mode else 'predictions'}</button>'''
+        if public_research:
+            submission_form = '''<p>Submit predictions and the corresponding code ZIP. Include reproduction.json from this challenge version. Maximum: 512 KiB ZIP, 96 KiB UTF-8 text, 32 files. Submitted text goes to the model service for review. A clear review permits a provisional score; reproduction remains unverified.</p>
+            <p><label>Prediction CSV <input type="file" id="prediction-file" accept=".csv,text/csv"></label></p>
+            <p><label>Code ZIP <input type="file" id="reproduction-code" accept=".zip,application/zip"></label></p>
+            <button type="button" id="submit-predictions">Submit predictions and code</button>'''
         if environment_mode:
             submission_form = f'''<p>Submit a GitHub repository with {environments.MANIFEST} at its root. A private repository must give this service access. The service freezes one commit and checks the manifest. {environments.EXECUTION_NOTICE}</p>
           <label>GitHub repository <input type="url" id="repository-url" placeholder="https://github.com/owner/repository"></label>
@@ -492,11 +531,12 @@ def create_app(data_dir: Path | None = None):
         controls = f'''<h2>Organizer review</h2><ul>{checks_html}</ul>
           <p><a href="/api/projects/{project_id}/workflow/package">Download research ZIP</a> ·
           <a href="/?project={project_id}&amp;view=review">Review and request changes</a></p>
-          <section id="submission" data-project="{project_id}" data-version="{result['version']}" data-type="{competition_type}">
+          <section id="submission" data-project="{project_id}" data-version="{result['version']}" data-type="{competition_type}" data-research="{str(public_research).lower()}">
           <h2>Try a development submission</h2>
           {submission_form}
           <button type="button" id="new-submission-attempt" hidden>New attempt</button>
-          <p id="submission-result" role="status"></p>
+          <p id="submission-result" role="status"></p><pre id="submission-review" role="status"></pre>
+          <button type="button" id="retry-code-review" hidden>Retry code review</button>
           <h2>Submission access for an agent</h2>
           <p>Create a token that can only submit development attempts. It cannot open organizer pages or download private data.
           Keep the token outside the ZIP. A new token replaces the prior preview token and keeps the same daily allowance.</p>
@@ -517,11 +557,34 @@ def create_app(data_dir: Path | None = None):
     def development_submission(project_id: str, body: PredictionSubmission, request: Request):
         with editing(project_id, request) as item:
             try:
-                return submissions.submit(store, item, body.request_id, body.predictions_csv)
+                return submissions.submit(store, item, body.request_id, body.predictions_csv, code_zip_base64=body.code_zip_base64)
             except submissions.LimitReached as exc:
                 raise HTTPException(429, str(exc)) from exc
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/api/projects/{project_id}/attempts/{artifact_id}/review")
+    def retry_attempt_review(project_id: str, artifact_id: str, request: Request):
+        with editing(project_id, request) as item:
+            try:
+                return submissions.retry_review(store, item, artifact_id)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/api/projects/{project_id}/attempts/{artifact_id}/{artifact}")
+    def attempt_artifact(project_id: str, artifact_id: str, artifact: str, request: Request):
+        get(project_id, request)
+        import re
+        if not re.fullmatch(r"[a-f0-9]{64}", artifact_id) or artifact not in {"code.zip", "predictions.csv"}:
+            raise HTTPException(404, "Artifact not found.")
+        with store.connection() as con:
+            row = con.execute("SELECT result FROM draft_submissions WHERE project=? AND request=?", (project_id, artifact_id)).fetchone()
+        if not row or json.loads(row[0]).get("artifact_id") != artifact_id:
+            raise HTTPException(404, "Artifact not found.")
+        path = store.directory(project_id) / "attempts" / artifact_id / artifact
+        if not path.is_file():
+            raise HTTPException(404, "Artifact not found.")
+        return FileResponse(path, filename=artifact)
 
     @app.post("/api/projects/{project_id}/workflow/code-submissions")
     def development_code_submission(project_id: str, body: CodeSubmission, request: Request):
@@ -558,7 +621,7 @@ def create_app(data_dir: Path | None = None):
 
     @app.post("/api/evaluation/{project_id}/submissions")
     def token_submission(project_id: str, body: PredictionSubmission, request: Request):
-        return evaluate_token(project_id, body.request_id, body.predictions_csv, request, "prediction")
+        return evaluate_token(project_id, body.request_id, body.predictions_csv, request, "prediction", body.code_zip_base64)
 
     @app.post("/api/evaluation/{project_id}/code-submissions")
     def token_code_submission(project_id: str, body: CodeSubmission, request: Request):
@@ -568,7 +631,7 @@ def create_app(data_dir: Path | None = None):
     def token_repository_submission(project_id: str, body: RepositorySubmission, request: Request):
         return evaluate_token(project_id, body.request_id, (body.repository_url, body.ref), request, "environment")
 
-    def evaluate_token(project_id, request_id, payload, request, kind):
+    def evaluate_token(project_id, request_id, payload, request, kind, code_zip_base64=""):
         header = request.headers.get("authorization", "")
         token = header[7:] if header.startswith("Bearer ") else ""
         authorized = submissions.authenticate(store, project_id, token)
@@ -584,7 +647,9 @@ def create_app(data_dir: Path | None = None):
             workspace.require_storage(authorized[0])
             if kind == "environment":
                 return submissions.submit_repository(store, authorized[0], request_id, payload[0], payload[1], authorized[1])
-            submit = submissions.submit_code if kind == "code" else submissions.submit
+            if kind == "prediction":
+                return submissions.submit(store, authorized[0], request_id, payload, authorized[1], code_zip_base64=code_zip_base64)
+            submit = submissions.submit_code
             return submit(store, authorized[0], request_id, payload, authorized[1])
         except RunnerUnavailable as exc:
             raise HTTPException(503, str(exc)) from exc
@@ -862,9 +927,17 @@ def create_app(data_dir: Path | None = None):
 
     @app.get("/")
     def chat_index(request: Request):
+        if os.getenv("AUTOKAGGLE_DEFAULT_INTERFACE", "full").lower() == "lite":
+            project_id = request.query_params.get("project")
+            return RedirectResponse("/lite" + ("?project=" + quote(project_id, safe="") if project_id else ""), status_code=303)
         if not access.can_open(request, store):
             return RedirectResponse("/login?next=" + quote(str(request.url.path) + ("?" + request.url.query if request.url.query else ""), safe=""), status_code=303)
         project_id = request.query_params.get("project")
+        if project_id:
+            saved = store.get(project_id, owner(request))
+            if saved and "lite" in saved:
+                lite.require_member(access, request)
+                return RedirectResponse("/lite?project=" + quote(project_id, safe=""), status_code=303)
         if project_id and request.query_params.get("view") == "review":
             item = get(project_id, request)
             if workflow.view(item).get("version"):
@@ -899,6 +972,7 @@ def create_app(data_dir: Path | None = None):
 
     workspace.register(app, store, access, get, editing, conversation_output)
     sources.register(app, store, pool, get, editing, conversation_output)
+    lite.register(app, store, pool, access, get, editing)
 
     (HERE / "static").mkdir(exist_ok=True)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")

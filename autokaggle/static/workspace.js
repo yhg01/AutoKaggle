@@ -1,16 +1,17 @@
 /* Session tools. Remote values are always inserted as text. */
 "use strict";
 (() => {
-  const ws = { id: null, conversation: null, busy: false, action: false, tab: "sessions", importRequest: null, importSignature: null, forgetRequest: null, timer: null };
+  const ws = { id: null, conversation: null, busy: false, action: false, tab: "sessions", importRequest: null, importSignature: null, forgetRequest: null, timer: null, sourceDraft: null };
   const $ = (id) => document.getElementById(id);
   const node = (tag, text, cls) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (cls) n.className = cls; return n; };
   const button = (text, action, cls = "button button-secondary") => { const n = node("button", text, cls); n.type = "button"; n.addEventListener("click", () => run(action)); return n; };
   const notify = (name, detail) => window.dispatchEvent(new CustomEvent("autokaggle:" + name, { detail }));
   const path = (tail = "") => "/api/projects/" + encodeURIComponent(ws.id) + tail;
   async function api(url, method = "GET", body) {
+    const multipart = typeof FormData !== "undefined" && body instanceof FormData;
     const response = await fetch(url, { method, credentials: "same-origin",
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      headers: body === undefined || multipart ? {} : { "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }) });
     const value = await response.json();
     if (!response.ok) {
       const error = new Error(typeof value.detail === "string" ? value.detail : "This action could not finish. Check the current session and retry."); error.status = response.status;
@@ -171,15 +172,38 @@
   async function sources() {
     section("Start from a paper and existing implementation", "Import public references, then review and edit a proposed starting brief. We read bounded text and selected repository files at a fixed commit. We do not execute repository code or import its datasets.");
     const job = await api(path("/sources"));
-    const paper = input("Paper or abstract link", "import-paper", "https://arxiv.org/abs/…", "url"); paper.value = job.paper_url || "";
-    const repo = input("Public GitHub repository", "import-repository", "https://github.com/owner/repository", "url"); repo.value = job.repository_url || "";
+    const paper = input("Paper or abstract link", "import-paper", "https://arxiv.org/abs/…", "url"); paper.value = ws.sourceDraft?.paper_url ?? job.paper_url ?? "";
+    const upload = input("Or upload a paper PDF (up to 16 MB)", "import-paper-file", "", "file"); upload.accept = ".pdf,application/pdf";
+    if (job.uploaded_paper) body.append(node("p", "Saved paper: " + job.uploaded_paper.title + ". Leave the paper link blank to use this file.", "source-progress"));
+    const repo = input("Public GitHub repository", "import-repository", "https://github.com/owner/repository", "url"); repo.value = ws.sourceDraft?.repository_url ?? job.repository_url ?? "";
+    const rememberSources = () => { ws.sourceDraft = { paper_url: paper.value.trim(), repository_url: repo.value.trim() }; };
+    paper.addEventListener("input", rememberSources); repo.addEventListener("input", rememberSources);
     const importing = ["queued", "working"].includes(job.status);
-    paper.disabled = importing; repo.disabled = importing;
-    const progress = node("p", job.stage || "Add either link, or both.", "source-progress"); progress.setAttribute("role", "status"); body.append(progress);
+    paper.disabled = importing; repo.disabled = importing; upload.disabled = importing;
+    upload.addEventListener("change", () => run(async () => {
+      const file = upload.files?.[0];
+      try {
+        requireIdle();
+        if (ws.conversation?.storage?.required) throw new Error("Accept Data & privacy before uploading research.");
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith(".pdf") || file.size > 16 * 1048576) throw new Error("Choose a PDF file no larger than 16 MB.");
+        rememberSources(); notice("Uploading and reading the paper…");
+        const form = new FormData(); form.append("file", file);
+        await api(path("/sources/paper"), "POST", form);
+        ws.sourceDraft.paper_url = ""; ws.importRequest = null; ws.importSignature = null;
+        await show("sources");
+      } finally {
+        // Let the researcher select the same file again after an upload error.
+        upload.value = "";
+      }
+    }));
+    const progress = node("p", job.stage || "For Speedrun, add the paper and its repository. You can also start with one source.", "source-progress"); progress.setAttribute("role", "status"); body.append(progress);
     const start = button(job.status === "failed" ? "Retry import" : job.status === "ready" ? "Import again" : "Import references", async () => {
+      requireIdle();
       if (ws.conversation?.storage?.required) throw new Error("Accept Data & privacy before importing research.");
-      if (!paper.value.trim() && !repo.value.trim()) throw new Error("Provide a paper or repository link.");
-      const signature = JSON.stringify([paper.value.trim(), repo.value.trim()]);
+      if (!paper.value.trim() && !repo.value.trim() && !job.uploaded_paper) throw new Error("Provide a paper link, PDF, or repository link.");
+      rememberSources();
+      const signature = JSON.stringify([paper.value.trim(), repo.value.trim(), job.uploaded_paper?.sha256]);
       if (!ws.importRequest || signature !== ws.importSignature || ["failed", "ready"].includes(job.status)) ws.importRequest = crypto.randomUUID();
       ws.importSignature = signature;
       await api(path("/sources"), "POST", { paper_url: paper.value.trim(), repository_url: repo.value.trim(), request_id: ws.importRequest });
@@ -189,7 +213,7 @@
     if (job.status === "ready" && job.proposal) {
       section(job.proposal.title, "This is a proposal. Edit it before the interview treats it as your starting definition. Source claims have not been reproduced.");
       const label = node("label", "Your starting brief"); label.htmlFor = "source-brief";
-      const brief = node("textarea"); brief.id = "source-brief"; brief.rows = 9; brief.maxLength = 12000; brief.value = job.proposal.brief;
+      const brief = node("textarea"); brief.id = "source-brief"; brief.rows = 9; brief.maxLength = 6000; brief.value = job.proposal.brief;
       body.append(label, brief);
       const gaps = node("ul"); for (const q of job.proposal.open_questions || []) gaps.append(node("li", q)); body.append(gaps);
       let applyRequest = null;
@@ -237,6 +261,22 @@
       const value = attempt.result || {};
       row.append(node("strong", attempt.day + " · " + attempt.version),
         node("p", [value.status, value.metric, typeof value.score === "number" ? String(value.score) : null, value.detail].filter(Boolean).join(" · ")));
+      if (value.review) {
+        row.append(node("p", `Code review: ${value.review.status}. ${value.review.summary}`));
+        for (const finding of value.review.findings || []) row.append(node("pre", `${finding.file}: ${finding.reason}\nEvidence: ${finding.evidence}`));
+      }
+      if (value.status === "review_pending" && value.review_attempts < 3 && value.artifact_id) {
+        row.append(button("Retry code review", async () => {
+          await api(path(`/attempts/${value.artifact_id}/review`), "POST"); await attempts();
+        }));
+      }
+      if (value.artifact_id) {
+        for (const file of ["code.zip", "predictions.csv"]) {
+          const link = node("a", "Download " + file);
+          link.href = path("") + `/attempts/${value.artifact_id}/${file}`;
+          row.append(link, node("span", " "));
+        }
+      }
       body.append(row);
     }
     if (!result.attempts.length) body.append(node("p", "No submission attempts are saved yet."));
@@ -251,6 +291,10 @@
     body.append(revise);
     if (revise.disabled) body.append(node("p", "Create a working draft before starting a revision."));
   }
+  window.addEventListener("autokaggle:sources", () => {
+    if (ws.busy || ws.action || !ws.id) return;
+    run(() => open(ws.conversation?.storage?.required ? "privacy" : "sources"));
+  });
   window.addEventListener("autokaggle:state", (event) => {
     const changed = ws.id !== event.detail.projectId;
     ws.id = event.detail.projectId; ws.conversation = event.detail.conversation; ws.busy = event.detail.busy; ws.canCreate = event.detail.canCreate;
@@ -261,6 +305,6 @@
     profileLink.setAttribute("aria-label", "Edit your researcher name");
     banner.hidden = !ws.conversation?.storage?.required;
     manager.disabled = false;
-    if (changed) { ws.importRequest = null; ws.importSignature = null; clearTimeout(ws.timer); if (dialog.open) run(() => show(ws.tab)); }
+    if (changed) { ws.sourceDraft = null; ws.importRequest = null; ws.importSignature = null; clearTimeout(ws.timer); if (dialog.open) run(() => show(ws.tab)); }
   });
 })();

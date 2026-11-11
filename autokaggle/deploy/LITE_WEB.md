@@ -1,0 +1,266 @@
+# Internal Lite deployment
+
+Lite uses a separate service on the existing AutoKaggle Civo cluster in London.
+It has its own source, administrator key, database, and 1 GiB persistent volume.
+Full keeps its existing deployment and data.
+
+- Cluster: `ecc962fa-2f4c-4a3f-96c4-179af273fb7a`, region `lon1`.
+- Namespace: `autokaggle-web`.
+- Deployment and Service: `lite`.
+- Persistent claim: `lite-data`.
+- Host: `lite.ecc962fa-2f4c-4a3f-96c4-179af273fb7a.k8s.civo.com`.
+- Entry: [AutoKaggle Lite](https://lite.ecc962fa-2f4c-4a3f-96c4-179af273fb7a.k8s.civo.com/lite).
+
+The root address redirects to `/lite`. Full keeps its normal entry on the
+original host. Both services use one process and one replica for SQLite and
+application locks. Lite has five bounded background workers for concurrent
+interviews. Each project still has its own write lock. Do not scale replicas without changing the storage and lock
+model first.
+
+
+## Current release — 9 November 2026, 02:19 UTC
+
+Internal remains on its separate Civo host and persistent volume. The release
+uses the shared application from the isolated `autokaggle-speedrun` worktree.
+
+Source SHA256:
+
+```text
+358a9485e98b14819127025e183a4b3a845ccb9c826ef1b490b405e2edb4c37e
+```
+
+The immutable ConfigMap is `lite-source-358a9485e98b1481`. The previous source
+is `lite-source-6c008a62f2f31bb1`, with SHA256
+`6c008a62f2f31bb118b78a3103c57a281ad1095f89ed264886f08bb247264cc0`.
+Keep that source available for rollback.
+
+All five saved sessions were idle before restart. The database backup is
+`/data/backups/pre-internal-three-paths-20261109T021529Z.sqlite3`.
+Its integrity check passed. Its SHA256 is
+`a0abe649f3a36b183867e599b813908f94e39085ad7accf7dd76bded41625e3b`.
+
+After rollout, all 70 deployed source files matched the approved archive.
+All five saved project bodies had the same hashes. All seven saved reports
+remained present. SQLite integrity, TLS, the separate 1 GiB volume, approved
+member access, and anonymous access denial passed. The existing member list,
+private credentials, and one-replica setting were preserved. The root address
+still leads to `/lite`. The login redirect now also sends `Cache-Control:
+no-store`.
+
+Full retained generation 19 and source
+`4d4392ef37f7bd885d44bf0967407efe760b51155d7ace0a03790f3d597ae05f`.
+Its complete deployment specification matched the record taken before release.
+This release does not deploy the new Full Speedrun entry to the Full service.
+
+Before release, 1,347 Python tests and 250 client checks passed. Live OpenRouter
+checks passed for Full source import and ordinary interview entry. Local
+Internal checks passed for ESOL and FreeSolv import, proposal review, ZIP and
+config download, seeded sample execution, and result logging. A later change
+preserved retry identifiers for existing URL-only imports; its 18 focused
+source checks passed. These local checks are separate from the deployed
+workflow check recorded below.
+
+The normal deploy helper encountered field ownership from the previous
+`kubectl-patch` source update. The running service stayed on the old source.
+The release then used a guarded JSON patch for only the source ConfigMap
+reference and matching source annotation. The patch checked both old values
+before replacement. No broad ownership override was used.
+
+The deployed Internal API workflow also passed. One disposable ESOL session
+used two live OpenRouter calls with `openai/gpt-6.1-sol` and medium reasoning.
+The source import proposed 22 fields. The test accepted an explicit engineering
+contract for 96 public molecular records. Both downloaded ZIPs contained the
+12 expected files, and each config matched its ZIP. Each version supplied
+three visible seeds. Rebuilding the same version preserved its seeds.
+
+The downloaded runner executed a training-target mean control on the local
+CPU. The service accepted the measured records. A retry reused the saved
+result, and a report with a missing seed was rejected. The website preview
+returned successfully. A later budget revision blocked old downloads until
+review and rebuild. The new package had a new contract version. Both measured
+reports retained their correct version references.
+
+The disposable project was deleted after these checks. The original five
+sessions and seven reports remained. The temporary operator session was
+revoked, and its local token file was removed. No sign-in email was sent.
+
+These are API and local execution checks. Browser testing could not run
+because browser control was disabled. No scientific reference was reproduced.
+The batch adapter remains a template in the generated ZIP; this test supplied
+its recorded adapter, data, and prediction fixture separately. The server
+logged structurally checked results and did not independently reproduce them.
+
+Private release receipts are under
+`autokaggle/test-results/internal-civo-2026-11-09/`. They include the before
+and after state, backup result, running file checks, and preservation checks.
+Do not publish private session files or test data from that directory.
+
+## Previous readiness release — 5 November 2026, 18:12 UTC
+
+The readiness gate update is deployed as source SHA256:
+
+```text
+6c008a62f2f31bb118b78a3103c57a281ad1095f89ed264886f08bb247264cc0
+```
+
+The ConfigMap is `lite-source-6c008a62f2f31bb1`. The previous source is
+`lite-source-f9afaf4350b84dd8`, with SHA256
+`f9afaf4350b84dd871055c9145e873c50c2e8c79f6da665b60c2a44324562a97`.
+Use those recorded values for a source rollback if needed.
+
+Before the update, all five sessions were idle. The backup at
+`/data/backups/pre-lite-readiness-20261105T181117Z.sqlite3` passed integrity
+validation. After rollout, all five saved project-body hashes and both saved
+reports matched. Full's Deployment was unchanged. The new model schema and
+private model configuration were present. Earlier built packages became stale
+and require assessment and rebuilding under the new readiness rule.
+
+Release verification passed 1,281 Python tests and 58 Lite/login client checks.
+The three existing numeric-warning cases were retained. The
+private operational receipts are `readiness-release-before.json` and
+`readiness-release-after.json` in `autokaggle/test-results/lite-deploy/`.
+
+The final read-only check passed at 18:15 UTC. All five projects were idle, with
+ready packages, no recorded open decisions, and a saved result for the current
+challenge version. Seven reports remained in the store, including two reports
+from earlier versions. Each current report had `evidence_checked` status and
+`independently_reproduced=false`. No training or independent reproduction was
+performed by this deployment check.
+
+HTTPS health, private login, member access, and anonymous denial for the known
+project downloads passed. The SQLite integrity check returned `ok`. The Lite
+replica was ready and its separate 1 GiB volume was bound. Full's specification
+and generation matched the original record. The source digest was unchanged.
+The credential-free receipt is `final-operational-receipt.json` in the same
+local test-results directory.
+
+## Initial release — 5 November 2026
+
+The first Lite deployment passed HTTPS health, the root redirect, anonymous
+access denial, member access, configured email sign-in, five-worker startup,
+and SQLite integrity checks. Full's Deployment specification and generation
+matched the record taken before this release. No Full restart or researcher
+record change was needed. No email was sent by these checks.
+
+Source SHA256:
+
+```text
+f9afaf4350b84dd871055c9145e873c50c2e8c79f6da665b60c2a44324562a97
+```
+
+The immutable source ConfigMap is `lite-source-f9afaf4350b84dd8`. The private
+operational receipt is in `autokaggle/test-results/lite-deploy/release.json`.
+The first live imports found a deployment error: Lite reads
+`OPENROUTER_API_KEY`, while the original web deployer supplied only
+`OPENAI_API_KEY`. The Lite Secret now supplies both names to the same private
+key. A regression test checks the Secret and its container reference. Nine
+deployment checks pass.
+
+The correction restarted only Lite. The backup at
+`/data/backups/pre-lite-model-key-20261105T175939Z.sqlite3` passed integrity
+validation. All five saved project-body hashes matched after restart. The
+existing Retry action resumed the saved imports. Five working sessions were
+observed together at 18:01:57 UTC with five configured workers. This records
+concurrent application jobs; it does not inspect the model provider's internal
+scheduling.
+
+These checks establish deployment and access behavior. The five published-task
+interviews and submissions are recorded separately after their live runs.
+
+## Access and services
+
+Private mode and storage consent are enabled. The initial lab member is
+`boldcoscientist@gmail.com`. Email sign-in alone does not grant Lite membership.
+Add only approved lab addresses to `AUTOKAGGLE_LITE_MEMBERS`. The deployer keeps
+the current membership list unless `--members` is supplied. Project ownership
+and collaborator checks still apply after membership is checked.
+
+The Lite administrator key is saved in the private local file
+`$HOME/.config/autokaggle/lite-web.env`, with mode 0600. It differs from the Full
+administrator key. Keep keys and session cookies out of Git and test reports.
+The service reuses the approved Gmail sending Secret. It uses OpenRouter model
+`openai/gpt-6.1-sol` with medium conversation reasoning.
+
+The application runs as a non-root user. Its root filesystem is read-only.
+It has no Kubernetes service account token, host mounts, or Civo credentials.
+The network policy permits ingress traffic from the existing ingress nodes,
+DNS, and public HTTPS for approved application services. This web service does
+not execute participant code. Report checks do not establish independent
+reproduction.
+
+## Release
+
+From the repository root, use the project Python environment:
+
+```sh
+python -m autokaggle.deploy.lite_web tls
+python -m autokaggle.deploy.lite_web deploy --model-env /absolute/path/to/private/.env
+python -m autokaggle.deploy.lite_web status
+python -m autokaggle.deploy.lite_web expose
+```
+
+The certificate uses the installed `autokaggle-letsencrypt` Issuer. The deployer
+refuses to expose the route until the certificate and deployment are available.
+It uses a temporary private kubeconfig for the fixed cluster. It does not change
+the operator's current context.
+
+For an approved membership change, use `deploy --members` with comma-separated
+email addresses. An empty value limits access to administrators. Membership
+updates restart Lite because the setting enters its deployment hash.
+
+The source ConfigMap is immutable and named `lite-source-<digest prefix>`.
+The source archive excludes local data, environment files, and test results.
+Secrets are sent on standard input. Source updates must retain the claim,
+private credentials, and one replica. Back up the SQLite database before an
+update. The initial deployment starts with an empty database.
+
+Before a release, check the generated source archive and run the affected tests.
+After release, check HTTPS, anonymous denial, allowed-member access, email
+configuration, the generated downloads, and the live model workflow. Confirm
+that Full's deployment specification is unchanged. Record the release digest
+and test results. Do not include credentials in the record.
+
+## Test access
+
+The five-task validation uses a short-lived session for the approved sender
+account. An operator first confirms that the account already exists in Full's
+verified email-account table. The operator then creates the account and an
+eight-hour session in the separate Lite store. This sends no email and changes
+no Full account or researcher record. The session file is private and excluded
+from the release. It is not a new public login route.
+
+Normal researchers use email sign-in on the Lite host. A project URL identifies
+the saved session; it does not grant access. Users must also be approved lab
+members and have ownership or collaborator access to that project.
+
+## Restart and rollback
+
+Wait for active interviews to finish before a planned restart. A restart keeps
+saved records, but interrupts active model requests. The UI offers Retry for an
+interrupted request. Do not delete a project or ask the researcher to repeat the
+saved brief.
+
+Use the fixed-cluster helper from this repository for every operation:
+
+```python
+from autokaggle.deploy.probe_cluster import Kubectl, private_kubeconfig
+
+with private_kubeconfig() as config:
+    kube = Kubectl(config)
+    print(kube.run("rollout", "restart", "deployment/lite", "-n", "autokaggle-web"))
+```
+
+Before a source update, save the current source ConfigMap name and
+`autokaggle/source-sha256` annotation. Make a SQLite backup with SQLite's backup
+API and check `PRAGMA integrity_check`. Keep the backup on the persistent volume
+or in the approved private backup location.
+
+For a source rollback, patch only the `source` volume's ConfigMap reference and
+its matching source annotation in `deployment/lite`. Use the recorded values.
+Keep `lite-data`, the current keys, the allowlist, and the private-mode setting.
+Do not restore an old database as part of a source rollback. Do not patch
+`deployment/web`, which is Full.
+
+After restart or rollback, repeat health, login, membership, download, and model
+checks. Confirm the source annotation and compare saved project records. Old
+immutable source ConfigMaps can remain available for a later rollback.

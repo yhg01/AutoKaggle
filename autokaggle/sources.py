@@ -19,13 +19,14 @@ import threading
 import certifi
 from urllib.parse import quote, urljoin, urlsplit
 
-from fastapi import HTTPException, Request
+from fastapi import File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import advisor, conversation, onboarding_setup, workspace, observability
 from .store import now
 
 MAX_PAPER = 16 * 1024 * 1024
+MAX_BRIEF = 6000
 GITHUB_API_HOST = "api.github.com"
 
 
@@ -176,6 +177,23 @@ def paper(url):
             "truncated": truncated, "imported_at": now()}
 
 
+def uploaded_paper(data, filename):
+    if not data.startswith(b"%PDF") or len(data) > MAX_PAPER:
+        raise ValueError("Use a text PDF of at most 16 MiB.")
+    try:
+        result = subprocess.run([sys.executable, "-I", str(Path(__file__).with_name("source_reader.py"))],
+            input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20, check=True)
+        parsed = json.loads(result.stdout)
+        if not isinstance(parsed["text"], str) or len(parsed["text"].strip()) < 100:
+            raise ValueError
+    except (subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        raise ValueError("The PDF has too little readable text or exceeded extraction limits.") from None
+    title = Path(filename or "paper.pdf").name[:180]
+    return {"kind": "paper", "url": "uploaded:" + title, "title": title,
+            "sha256": hashlib.sha256(data).hexdigest(), "text": parsed["text"][:40000],
+            "truncated": bool(parsed.get("truncated")), "imported_at": now()}
+
+
 def parse_repository(url):
     parsed = source_syntax(url)
     parts = parsed.path.strip("/").removesuffix(".git").split("/")
@@ -185,7 +203,7 @@ def parse_repository(url):
     return parts[0], parts[1]
 
 
-def repository(url):
+def repository(url, include_execution=False):
     owner, repo = parse_repository(url)
     api = f"https://api.github.com/repos/{owner}/{repo}"
     metadata = json.loads(fetch(api)[0])
@@ -196,26 +214,40 @@ def repository(url):
     candidates = [entry["path"] for entry in tree.get("tree", []) if entry.get("type") == "blob"
                   and entry.get("size", 0) <= 200000
                   and re.search(r"(^|/)(readme[^/]*|license[^/]*|requirements[^/]*\.txt|pyproject\.toml|setup\.py|baseline\.py|train\.py|predict\.py|evaluate\.py)$", entry["path"], re.I)]
+    if include_execution:
+        candidates += [entry["path"] for entry in tree.get("tree", []) if entry.get("type") == "blob"
+            and entry.get("size", 0) <= 200000
+            and re.search(r"(^|/)(base|tasks?|metrics?|environment|adapter|config|evaluation)\.(py|json|ya?ml)$", entry["path"], re.I)]
+        candidates = list(dict.fromkeys(candidates))
     candidates.sort(key=lambda name: (0 if name.lower().startswith("readme") else 1, name.count("/"), name))
     files = []
-    for name in candidates[:8]:
+    file_limit = 12 if include_execution else 8
+    for name in candidates[:file_limit]:
         # Read blobs from the frozen commit. Symlinks are text; never follow or execute them.
         body, _, _ = fetch(f"https://raw.githubusercontent.com/{owner}/{repo}/{commit}/{quote(name, safe='/')}", 200000)
         text = body.decode("utf-8", errors="replace")
+        if include_execution and len(text) > 12000:
+            # Keep the opening context and bounded sections around generic execution hooks.
+            fragments = [text[:5000]]
+            for match in list(re.finditer(r"(?m)^\s*def (?:reset|step|seed|_get_information|_reward_fn|evaluate|compute|score)\b", text))[:7]:
+                fragments.append(text[max(0, match.start()-80):match.start()+1200])
+            excerpt = "\n[... bounded source excerpt ...]\n".join(fragments)[:14000]
+        else:
+            excerpt = text[:12000 if include_execution else 7000]
         files.append({"path": name, "sha256": hashlib.sha256(body).hexdigest(),
-                      "text": text[:7000], "truncated": len(text) > 7000})
+                      "text": excerpt, "truncated": len(excerpt) < len(text)})
     if not files:
         raise ValueError("The repository has no readable README, environment, or starter files within the import bounds.")
     return {"kind": "repository", "url": f"https://github.com/{owner}/{repo}", "commit": commit,
             "description": metadata.get("description"), "license": (metadata.get("license") or {}).get("spdx_id"),
-            "files": files, "truncated": bool(tree.get("truncated")) or len(candidates) > 8,
+            "files": files, "truncated": bool(tree.get("truncated")) or len(candidates) > file_limit or any(f["truncated"] for f in files),
             "imported_at": now()}
 
 
 def proposal_schema():
     return {"type": "object", "additionalProperties": False, "properties": {
         "title": {"type": "string", "maxLength": 160},
-        "brief": {"type": "string", "maxLength": 2200},
+        "brief": {"type": "string", "maxLength": MAX_BRIEF},
         "open_questions": {"type": "array", "maxItems": 4, "items": {"type": "string", "maxLength": 200}}},
         "required": ["title", "brief", "open_questions"]}
 
@@ -226,7 +258,7 @@ def proposal(project, records, reserve):
         return {"title": "Starting point from existing research",
                 "brief": "I want to build a challenge from these references:\n" + links
                     + "\nPlease help define the scientific question, inputs, outputs, and evaluation. "
-                    "The repository is a starting implementation; its results have not been reproduced.",
+                    "The repository is a source reference; implementation availability and reported results need review.",
                 "open_questions": ["Rules mode: edit this brief to define the intended task before continuing."]}
     traces = project.get("_model_traces", [])
     previous_id = traces[-1]["id"] if traces else None
@@ -237,7 +269,7 @@ def proposal(project, records, reserve):
         "The researcher must explicitly approve the brief before it becomes interview evidence."}, reserve)
     if (not isinstance(result, dict) or set(result) != {"title", "brief", "open_questions"}
             or not isinstance(result["title"], str) or len(result["title"]) > 160
-            or not isinstance(result["brief"], str) or not result["brief"].strip() or len(result["brief"]) > 2200
+            or not isinstance(result["brief"], str) or not result["brief"].strip() or len(result["brief"]) > MAX_BRIEF
             or not isinstance(result["open_questions"], list) or len(result["open_questions"]) > 4
             or any(not isinstance(q, str) or len(q) > 200 for q in result["open_questions"])):
         observability.mark_validation(project, previous_id, "rejected", 1, "invalid_source_proposal")
@@ -261,10 +293,12 @@ class ApplyRequest(BaseModel):
 
 def view(project):
     job = project.get("_source_import")
-    if not job:
-        return {"status": "not_started"}
-    return {key: copy.deepcopy(job[key]) for key in (
-        "id", "status", "stage", "paper_url", "repository_url", "proposal", "error", "attempts", "applied", "sources") if key in job}
+    result = {key: copy.deepcopy(job[key]) for key in (
+        "id", "status", "stage", "paper_url", "repository_url", "proposal", "error", "attempts", "applied", "sources") if key in job} if job else {"status": "not_started"}
+    if project.get("_source_paper"):
+        result["uploaded_paper"] = {key: project["_source_paper"][key]
+            for key in ("title", "url", "sha256", "truncated", "imported_at")}
+    return result
 
 
 def register(app, store, pool, get, editing, conversation_output):
@@ -287,6 +321,8 @@ def register(app, store, pool, get, editing, conversation_output):
         try:
             if job["paper_url"]:
                 records.append(paper(job["paper_url"]))
+            elif job.get("uploaded_paper"):
+                records.append(copy.deepcopy(job["uploaded_paper"]))
             if job["repository_url"]:
                 if update("Reading the frozen repository") is None:
                     return
@@ -322,10 +358,28 @@ def register(app, store, pool, get, editing, conversation_output):
     def read_sources(project_id: str, request: Request):
         return view(get(project_id, request))
 
+    @app.post("/api/projects/{project_id}/sources/paper")
+    def upload_paper(project_id: str, request: Request, file: UploadFile = File(...)):
+        try:
+            with editing(project_id, request) as item:
+                prior = item.get("_source_import", {})
+                state = conversation.ensure_conversation(item)
+                if prior.get("status") in {"queued", "working"} or state.get("_inflight") or state.get("status") == "working":
+                    raise HTTPException(409, "Wait for the current action before replacing its paper.")
+                try:
+                    record = uploaded_paper(file.file.read(MAX_PAPER + 1), file.filename)
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from exc
+                item["_source_paper"] = record
+                # A previous proposal does not describe this newly uploaded paper.
+                item["_source_import"] = {"status": "not_started", "attempts": prior.get("attempts", 0)}
+                store.save(item)
+                return view(item)
+        finally:
+            file.file.close()
+
     @app.post("/api/projects/{project_id}/sources")
     def import_sources(project_id: str, body: ImportRequest, request: Request):
-        if not body.paper_url.strip() and not body.repository_url.strip():
-            raise HTTPException(422, "Provide a paper link, a public GitHub repository, or both.")
         try:
             for url in (body.paper_url.strip(), body.repository_url.strip()):
                 if url:
@@ -333,8 +387,14 @@ def register(app, store, pool, get, editing, conversation_output):
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         with editing(project_id, request) as item:
+            if not body.paper_url.strip() and not body.repository_url.strip() and not item.get("_source_paper"):
+                raise HTTPException(422, "Provide a paper link or PDF, a public GitHub repository, or both.")
             prior = item.get("_source_import", {})
-            fingerprint = hashlib.sha256(json.dumps([body.paper_url.strip(), body.repository_url.strip()]).encode()).hexdigest()
+            upload = item.get("_source_paper") if not body.paper_url.strip() else None
+            identity = [body.paper_url.strip(), body.repository_url.strip()]
+            if upload:
+                identity.append(upload["sha256"])
+            fingerprint = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
             if prior.get("request_id") == body.request_id:
                 if prior.get("fingerprint") != fingerprint:
                     raise HTTPException(409, "This request ID identifies a different import.")
@@ -347,6 +407,7 @@ def register(app, store, pool, get, editing, conversation_output):
             job_id = secrets.token_hex(16)
             item["_source_import"] = {"id": job_id, "request_id": body.request_id, "fingerprint": fingerprint,
                 "paper_url": body.paper_url.strip(), "repository_url": body.repository_url.strip(),
+                "uploaded_paper": copy.deepcopy(upload),
                 "status": "queued", "stage": "Queued", "attempts": attempts, "error": None, "applied": False}
             store.save(item)
             result = view(item)
@@ -369,6 +430,7 @@ def register(app, store, pool, get, editing, conversation_output):
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
             job["applied"] = True
+            item["_onboarding_entry"] = "speedrun"
             workspace.stamp_answers(item, existing_ids, store.author_label(project_id, app.state.access.owner(request)))
             conversation.sync_legacy_answers(item)
             store.save(item)
@@ -379,6 +441,7 @@ def register(app, store, pool, get, editing, conversation_output):
         with editing(project_id, request) as item:
             store.record_erasure(project_id, "content")
             item.pop("_source_import", None)
+            item.pop("_source_paper", None)
             item.pop("_model_traces", None)
             store.save(item)
         store.checkpoint()

@@ -1,0 +1,357 @@
+/* BOLD AutoKaggle Lite. Source and model content is rendered as text. */
+"use strict";
+(() => {
+  const $ = id => document.getElementById(id);
+  const groups = [
+    ["objective", "Research question", "The claim and useful outcome"],
+    ["sources", "Data & environment", "Sources, versions, and access"],
+    ["submission", "Submitted artifact", "What another researcher supplies"],
+    ["evaluation", "Evaluation", "Metric, seeds, and stopping rules"],
+    ["resources", "Resources", "Training and evaluation limits"],
+    ["provenance", "Reproduction", "Commands, dependencies, and evidence"]
+  ];
+  const state = { id: null, data: null, access: null, busy: false, loading: false, auth: false, generation: 0, poll: null, dialog: null, messageKey: "", pending: new Map() };
+  const dialog = $("detail-dialog"), content = $("dialog-content");
+  const path = (tail = "", id = state.id) => `/api/projects/${encodeURIComponent(id)}/lite${tail}`;
+  const el = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined && text !== null) n.textContent = String(text); if (className) n.className = className; return n; };
+  const readable = value => typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const human = key => String(key).replaceAll("_", " ").replace(/^./, c => c.toUpperCase());
+  function stored(key, value) { try { if (arguments.length > 1) { if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, value); } else return sessionStorage.getItem(key); } catch (_) {} return null; }
+  function draftKey() { return "autokaggle-lite-draft:" + state.id; }
+  function busy() { return state.busy || state.loading || state.data?.status === "working"; }
+  function ready() { return !!state.id && !!state.data && !state.auth; }
+  function notice(text = "", error = false) { $("notice").textContent = text; $("notice").hidden = !text; $("notice").className = "notice" + (error ? " error" : ""); }
+  function modalError(text = "") { $("dialog-error").textContent = text; $("dialog-error").hidden = !text; }
+  function safeURL(value, internal = false) {
+    if (typeof value !== "string" || !value) return null;
+    try { const u = new URL(value, location.origin); if (!["http:", "https:"].includes(u.protocol) || u.username || u.password) return null; if (internal && (u.origin !== location.origin || !u.pathname.startsWith(path() + "/"))) return null; return internal ? u.pathname + u.search : u.href; } catch (_) { return null; }
+  }
+  async function api(url, options = {}) {
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 45000);
+    try {
+      const response = await fetch(url, { credentials: "same-origin", ...options, headers: { ...(options.body && !(options.body instanceof FormData) ? { "Content-Type": "application/json" } : {}), ...options.headers }, signal: controller.signal });
+      let data; try { data = await response.json(); } catch (_) { throw new Error("The server returned an unexpected response. Refresh the session and try again."); }
+      if (!response.ok) { const detail = data.detail; const error = new Error(typeof detail === "string" ? detail : Array.isArray(detail) ? detail.map(x => x.msg || "Invalid input").join("; ") : "The request could not be completed."); error.status = response.status; throw error; }
+      return data;
+    } catch (error) { if (error.name === "AbortError") throw new Error("The connection timed out. The request may still be running. Retry to recover its result."); if (error instanceof TypeError) throw new Error("The connection was interrupted. Your text stays here. Retry when the connection returns."); throw error; }
+    finally { clearTimeout(timer); }
+  }
+  function controls() {
+    const active = ready(), blocked = busy();
+    for (const id of ["sources-button", "send-message", "build-package", "retry-request", "continue-round"]) $(id).disabled = !active || blocked;
+    $("message-input").disabled = !active || blocked;
+    $("send-message").disabled ||= !$("message-input").value.trim();
+    $("package-button").disabled = !active;
+    $("results-button").disabled = !active;
+    for (const id of ["new-button", "sessions-button", "welcome-start"]) $(id).disabled = state.auth || state.busy || state.loading || (id !== "sessions-button" && state.access?.can_create_projects === false);
+    $("review-proposals").disabled = !active || blocked;
+    $("refresh-session").hidden = !state.id || state.auth; $("refresh-session").disabled = state.busy || state.loading;
+    $("thinking").hidden = !blocked;
+    $("thinking-text").textContent = state.loading ? "Opening the saved session…" : state.data?.stage || "Saving your request…";
+    $("composer-hint").textContent = !active ? "Create a session to start." : blocked ? "Your request is in progress. You can return to this session later." : "Enter to send · Shift + Enter for a new line";
+    $("session-state").textContent = state.data?.status === "working" ? "Agent working" : state.data?.package?.status === "stale" ? "Package needs an update" : state.data?.ready ? "Definition recorded" : "Internal draft";
+    for (const button of content.querySelectorAll("[data-mutation]")) button.disabled = blocked || state.auth || (button.dataset.packageRequired === "true" && state.data?.package?.status !== "ready");
+  }
+  function clearPrivate() {
+    state.generation++; clearTimeout(state.poll); state.data = null; state.busy = false; state.loading = false; state.messageKey = "";
+    $("messages").replaceChildren(); $("message-input").value = ""; $("proposal-banner").hidden = true; $("recovery-banner").hidden = true; $("welcome").hidden = false; $("challenge-title").textContent = "Sign in to continue your research.";
+    content.replaceChildren(); if (dialog.open) dialog.close(); renderChecklist(); controls();
+  }
+  function authFailure() {
+    try { for (let i = sessionStorage.length - 1; i >= 0; i--) { const key = sessionStorage.key(i); if (key?.startsWith("autokaggle-lite-")) sessionStorage.removeItem(key); } } catch (_) {}
+    clearPrivate(); state.auth = true; controls();
+    $("sign-in").hidden = false; $("sign-in").href = "/login?next=" + encodeURIComponent("/lite" + (state.id ? "?project=" + encodeURIComponent(state.id) : ""));
+    notice("Your sign-in ended. Sign in again to reopen your saved session.", true);
+  }
+  async function failure(error) {
+    if (error.status === 401) { authFailure(); return; }
+    if (error.status === 404 && state.access?.private_mode) {
+      try { const access = await api("/api/access"); if (access.auth_kind === "anonymous") { authFailure(); return; } } catch (_) {}
+    }
+    const message = error.message || "The connection stopped. Try again.";
+    if (dialog.open) modalError(message); else notice(message, true);
+  }
+  function button(text, action, primary = false, mutation = false) {
+    const n = el("button", text, "button " + (primary ? "primary" : "secondary")); n.type = "button"; if (mutation) n.dataset.mutation = "true";
+    n.addEventListener("click", () => action()); return n;
+  }
+  function field(label, id, type = "text", help = "") {
+    const wrap = el("label", null, "field"), input = el(type === "textarea" ? "textarea" : "input"); input.id = id;
+    if (type !== "textarea") input.type = type; wrap.append(el("span", label), input); if (help) wrap.append(el("small", help)); return { wrap, input };
+  }
+  function showDialog(kind, title, kicker = "YOUR RESEARCH") {
+    state.dialog = kind; modalError(); $("dialog-title").textContent = title; $("dialog-kicker").textContent = kicker; content.replaceChildren();
+    if (!dialog.open) dialog.showModal();
+  }
+  function pendingID(action, payload) {
+    const key = "autokaggle-lite-request:" + (state.id || "new") + ":" + action, fingerprint = JSON.stringify(payload);
+    let saved; try { saved = JSON.parse(stored(key) || "null"); } catch (_) {}
+    if (!saved || saved.fingerprint !== fingerprint) { saved = { fingerprint, id: crypto.randomUUID() }; stored(key, JSON.stringify(saved)); }
+    return { id: saved.id, key };
+  }
+  async function mutate(tail, payload, { after, label, withID = true } = {}) {
+    if (busy() || !ready()) return;
+    const generation = state.generation, request = withID ? pendingID(tail, payload) : null;
+    state.busy = true; modalError(); notice(label || "Saving…"); controls();
+    try {
+      const data = await api(path(tail), { method: "POST", body: JSON.stringify({ ...payload, ...(request ? { request_id: request.id } : {}) }) });
+      if (generation !== state.generation) return;
+      if (request) stored(request.key, null);
+      state.data = data; render(); notice(); if (after) after(data); schedule();
+    } catch (error) { if (generation === state.generation) await failure(error); }
+    finally { if (generation === state.generation) { state.busy = false; controls(); } }
+  }
+  function renderChecklist() {
+    const checks = state.data?.checklist || [], list = $("checklist"); list.replaceChildren();
+    let done = 0;
+    for (let i = 0; i < groups.length; i++) {
+      const [id, title, hint] = groups[i], item = checks.find(x => x.id === id), complete = !!item && item.total > 0 && item.resolved >= item.total;
+      if (complete) done++;
+      const n = el("button", null, "check-item" + (complete ? " complete" : "")); n.type = "button"; n.disabled = !state.data; n.id = "check-" + id;
+      n.setAttribute("aria-label", title + ": " + (item ? `${item.resolved} of ${item.total} details recorded` : hint));
+      n.append(el("span", complete ? "✓" : String(i + 1).padStart(2, "0"), "check-icon"));
+      const copy = el("span", null, "check-copy"); copy.append(el("strong", item?.title || title), el("span", item ? `${item.resolved}/${item.total} details recorded` : hint));
+      n.append(copy, el("span", "›", "check-chevron")); n.addEventListener("click", () => showCard(id)); list.append(n);
+    }
+    $("coverage").value = done; $("coverage").textContent = `${done} of 6`;
+    $("coverage-label").textContent = state.data ? `${done} of 6 areas defined · select one for evidence` : "The agent records evidence as you go.";
+    $("readiness-title").textContent = state.data?.ready ? "Ready to prepare the package" : state.data ? "Only the missing decisions remain" : "Start with what you know";
+    $("readiness-detail").textContent = state.data?.ready ? "The contract is defined. The package records how to run and report the experiment." : "A reference baseline is optional. Open decisions stay visible until resolved.";
+  }
+  function render() {
+    const data = state.data; if (!data) { renderChecklist(); controls(); return; }
+    $("challenge-title").textContent = data.title || "Untitled research"; document.title = (data.title || "Research") + " · BOLD AutoKaggle Lite";
+    $("welcome").hidden = true;
+    const messages = data.messages || [], key = JSON.stringify(messages);
+    if (state.messageKey !== key) {
+      const transcript = $("transcript"), nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 120;
+      const root = $("messages"); root.replaceChildren();
+      for (const message of messages) {
+        const row = el("article", null, "message " + (message.role === "user" ? "user" : message.role === "source" ? "import" : "assistant")), role = el("div", null, "message-role");
+        if (message.role !== "user") { const mark = el("img"); mark.src = "/static/bold-butterfly.svg"; mark.alt = ""; role.append(mark); }
+        role.append(el("span", message.role === "user" ? "You" : "BOLD AutoKaggle Lite")); row.append(role, el("div", message.content || "", "message-content")); root.append(row);
+      }
+      if (!messages.length) root.append(el("p", "Share your research question, or add a paper and repository to start from existing work.", "empty"));
+      if (nearBottom || !state.messageKey) transcript.scrollTop = transcript.scrollHeight; state.messageKey = key;
+    }
+    $("proposal-banner").hidden = !data.proposal; $("proposal-summary").textContent = data.proposal?.summary || "Review the source-backed proposal before adding it to the definition.";
+    const limit = (data.model?.round_calls || 0) >= (data.model?.limit || 30), failed = data.status === "error";
+    $("recovery-banner").hidden = !limit && !failed; $("retry-request").hidden = !failed || limit; $("continue-round").hidden = !limit;
+    $("recovery-title").textContent = limit ? "This interview round is complete" : "Your answers are saved";
+    $("recovery-detail").textContent = limit ? "Continue with the saved context for another bounded round. Open decisions still need a recorded answer." : "The agent could not finish its last request. Retry it without adding your answer again.";
+    $("result-count").textContent = data.results?.length ? `(${data.results.length})` : "";
+    renderChecklist(); controls();
+    if (data.status === "error") notice(data.error || "The agent could not finish this request. Your saved definition is still available. Retry the request or add a correction.", true);
+  }
+  function schedule(delay = 1500) {
+    clearTimeout(state.poll); if (state.data?.status !== "working" || state.auth) return;
+    const generation = state.generation; state.poll = setTimeout(async () => {
+      try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; render(); schedule(); }
+      catch (error) { if (generation === state.generation) { await failure(error); if (!state.auth) schedule(5000); } }
+    }, delay);
+  }
+  async function reload() {
+    const generation = state.generation; try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; notice(); render(); schedule(); } catch (error) { if (generation === state.generation) { await failure(error); if (!state.auth) schedule(5000); } }
+  }
+  async function openSession(id) {
+    if (state.id) stored(draftKey(), $("message-input").value);
+    const generation = ++state.generation; clearTimeout(state.poll); state.id = id; state.data = null; state.messageKey = ""; state.loading = true; state.auth = false;
+    $("messages").replaceChildren(); $("welcome").hidden = true; $("proposal-banner").hidden = true; $("challenge-title").textContent = "Opening your research…"; $("message-input").value = stored(draftKey()) || ""; renderChecklist(); controls();
+    history.replaceState(null, "", "/lite?project=" + encodeURIComponent(id));
+    try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; notice(); render(); schedule(); }
+    catch (error) { if (generation === state.generation) { $("challenge-title").textContent = "Session unavailable"; await failure(error); } }
+    finally { if (generation === state.generation) { state.loading = false; controls(); } }
+  }
+  function showNew() {
+    showDialog("new", "Start a research session", "BOLD INTERNAL");
+    content.append(el("p", "Use a paper and repository to start quickly. Your email identifies this session and keeps it available when you return."));
+    const form = el("form"), title = field("Working title (optional)", "new-title"), email = field("Researcher email", "new-email", "email");
+    title.input.maxLength = 180; email.input.required = true; email.input.autocomplete = "email"; email.input.maxLength = 254;
+    form.append(title.wrap, email.wrap);
+    const label = el("label", null, "checkbox-row"), check = el("input"); check.type = "checkbox"; check.id = "storage-accepted"; check.required = true;
+    label.append(check, el("span", "I agree to storage of this session and processing of research text and source excerpts by the configured model service."));
+    const privacy = el("a", "Read the data-storage notice"); privacy.href = "/privacy"; privacy.target = "_blank"; privacy.rel = "noopener noreferrer";
+    const submit = el("button", "Create session →", "button primary"); submit.type = "submit"; submit.dataset.mutation = "true";
+    const actions = el("div", null, "dialog-actions"); actions.append(submit); form.append(label, privacy, actions); content.append(form);
+    form.addEventListener("submit", async event => {
+      event.preventDefault(); if (state.busy || !check.checked) return;
+      const generation = state.generation; state.busy = true; controls(); modalError();
+      try {
+        const data = await api("/api/lite/projects", { method: "POST", body: JSON.stringify({ title: title.input.value.trim(), organizer_email: email.input.value.trim(), storage_accepted: true }) });
+        if (generation !== state.generation) return; dialog.close(); state.busy = false; await openSession(data.id); showSources();
+      } catch (error) { if (generation === state.generation) await failure(error); }
+      finally { if (generation === state.generation) { state.busy = false; controls(); } }
+    });
+    email.input.focus();
+  }
+  async function showSessions() {
+    showDialog("sessions", "Your research sessions"); content.append(el("p", "Loading saved sessions…", "empty"));
+    const generation = state.generation;
+    try {
+      const result = await api("/api/lite/projects"); if (generation !== state.generation || state.dialog !== "sessions" || !dialog.open) return; content.replaceChildren();
+      for (const project of result.projects || []) {
+        const row = el("article", null, "session-record"), text = el("div"); text.append(el("strong", project.title || "Untitled research"));
+        const date = project.updated_at ? new Date(project.updated_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+        text.append(el("p", [date, project.id === state.id ? "Current session" : "Saved session"].filter(Boolean).join(" · "))); const actions = el("div", null, "session-actions"); actions.append(button("Resume →", async () => { dialog.close(); await openSession(project.id); }));
+        if (project.can_delete) { const remove = el("button", "Delete", "text-button"); remove.type = "button"; remove.addEventListener("click", () => showDelete(project)); actions.append(remove); } row.append(text, actions); content.append(row);
+      }
+      if (!(result.projects || []).length) content.append(el("p", "No Lite sessions yet. Create one to begin.", "empty"));
+      if (state.access?.can_create_projects !== false) { const actions = el("div", null, "dialog-actions"); actions.append(button("New research session", showNew, true)); content.append(actions); }
+    } catch (error) { if (generation === state.generation) await failure(error); }
+  }
+  function showDelete(project) {
+    showDialog("delete", "Delete this research session?", "PERMANENT DELETION");
+    content.append(el("p", `This deletes “${project.title || "Untitled research"}”, its conversation, sources, packages, results, and access grants. It cannot recall downloaded files. Backups remain subject to the storage notice.`));
+    const form = el("form"), confirm = field("Type DELETE to confirm", "delete-confirm"); confirm.input.required = true; confirm.input.autocomplete = "off"; form.append(confirm.wrap);
+    const actions = el("div", null, "dialog-actions"), submit = el("button", "Delete session permanently", "button danger"); submit.type = "submit"; submit.dataset.mutation = "true"; actions.append(submit, button("Cancel", showSessions)); form.append(actions); content.append(form);
+    form.addEventListener("submit", async event => {
+      event.preventDefault(); if (busy()) return; if (confirm.input.value !== "DELETE") { modalError("Type DELETE to confirm this permanent deletion."); return; }
+      const generation = state.generation; state.busy = true; controls(); modalError();
+      try {
+        await api(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE", body: JSON.stringify({ confirm: true }) });
+        if (generation !== state.generation) return;
+        try { for (let i = sessionStorage.length - 1; i >= 0; i--) { const key = sessionStorage.key(i); if (key === "autokaggle-lite-draft:" + project.id || key?.startsWith("autokaggle-lite-request:" + project.id + ":")) sessionStorage.removeItem(key); } } catch (_) {}
+        state.busy = false;
+        if (project.id === state.id) { clearPrivate(); state.id = null; $("challenge-title").textContent = "Start from the research you have."; document.title = "BOLD AutoKaggle Lite"; history.replaceState(null, "", "/lite"); controls(); }
+        await showSessions(); notice("The live session and its access grants were deleted.");
+      } catch (error) { if (generation === state.generation) await failure(error); }
+      finally { state.busy = false; controls(); }
+    }); controls();
+  }
+  function sourceRecords() {
+    const list = el("div");
+    for (const source of state.data?.sources || []) {
+      const row = el("article", null, "source-record"); row.append(el("strong", human(source.kind || "Source")));
+      const url = safeURL(source.url); if (url) { const a = el("a", source.url); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; const p = el("p"); p.append(a); row.append(p); }
+      else row.append(el("p", source.title || source.filename || source.name || "Uploaded paper"));
+      if (source.commit) row.append(el("small", "Frozen commit: " + source.commit)); if (source.sha256) row.append(el("small", "SHA-256: " + source.sha256));
+      if (source.truncated) row.append(el("small", "Only a bounded excerpt was read.")); list.append(row);
+    } return list;
+  }
+  function showSources() {
+    if (!ready()) return; showDialog("sources", "Start from a paper and repository", "WARM START");
+    content.append(el("p", "The agent reads the paper and selected repository files. Review its proposal before the extracted facts become part of your definition."));
+    const form = el("form"), paper = field("Paper URL", "paper-url", "url", "A public paper, abstract, or direct PDF link."), repo = field("Public GitHub repository", "repository-url", "url", "The import records the exact commit it reads."), pdf = field("Or upload a paper PDF", "paper-file", "file", "PDF only, up to 16 MB. This is a reference paper, not a dataset."), brief = field("What do you want to investigate? (optional)", "source-brief", "textarea", "State what should change or improve beyond the source work.");
+    pdf.input.accept = ".pdf,application/pdf"; brief.input.maxLength = 30000; paper.input.placeholder = "https://arxiv.org/abs/…"; repo.input.placeholder = "https://github.com/owner/repository";
+    form.append(paper.wrap, repo.wrap, pdf.wrap, brief.wrap);
+    const submit = el("button", "Read sources and propose a definition →", "button primary"); submit.type = "submit"; submit.dataset.mutation = "true"; const actions = el("div", null, "dialog-actions"); actions.append(submit); form.append(actions); content.append(form);
+    if (state.data.sources?.length) { content.append(el("h3", "Saved sources", "section-label"), sourceRecords()); }
+    form.addEventListener("submit", async event => {
+      event.preventDefault(); if (busy()) return; modalError(); const file = pdf.input.files?.[0];
+      if (!paper.input.value.trim() && !repo.input.value.trim() && !file && !state.data.sources?.length) { modalError("Add a paper URL, a PDF, or a public GitHub repository."); return; }
+      if (file && (!file.name.toLowerCase().endsWith(".pdf") || file.size > 16 * 1024 * 1024)) { modalError("Choose a PDF file of 16 MB or less."); return; }
+      if (file) {
+        const generation = state.generation; state.busy = true; controls();
+        try { const formData = new FormData(); formData.append("file", file); const data = await api(path("/paper"), { method: "POST", body: formData }); if (generation !== state.generation) return; state.data = data; render(); }
+        catch (error) { if (generation === state.generation) await failure(error); return; }
+        finally { if (generation === state.generation) { state.busy = false; controls(); } }
+      }
+      await mutate("/import", { paper_url: paper.input.value.trim(), repository_url: repo.input.value.trim(), brief: brief.input.value.trim() }, { label: "Reading the source material…", after: () => { dialog.close(); } });
+    }); controls();
+  }
+  function showOpenDecisions(decisions, description) {
+    if (!decisions?.length) return;
+    const section = el("section", null, "extraction-notes"), list = el("ul");
+    section.append(el("h3", "Required decisions are still open"), el("p", description));
+    for (const decision of decisions) list.append(el("li", `${human(decision.field)}: ${decision.reason}`));
+    section.append(list); content.append(section);
+  }
+  function showProposals() {
+    const proposal = state.data?.proposal; if (!proposal) return; showDialog("proposal", "Review the proposed definition", "SOURCE-BACKED PROPOSAL");
+    content.append(el("p", proposal.summary || "Confirm that these details describe your intended experiment. Imported text can contain errors."));
+    if (proposal.validation_notes?.length) {
+      const notes = el("section", null, "extraction-notes"); notes.append(el("h3", "Some proposed values need a decision"), el("p", "The valid details are kept below. These values need correction before they can be recorded."));
+      const list = el("ul"); for (const note of proposal.validation_notes) list.append(el("li", `${human(note.field)}: ${note.reason}`)); notes.append(list); content.append(notes);
+    }
+    showOpenDecisions(proposal.open_decisions, "You can save the defined details. The remaining decisions must be resolved before you can build the package.");
+    for (const [key, value] of Object.entries(proposal.contract || {})) { if (value === "") continue; const row = el("article", null, "fact-record"); row.append(el("strong", human(key)), el("p", key === "max_steps" && value === null ? "No step limit. The declared time limit still applies." : readable(value))); const evidence = proposal.evidence?.[key]; if (evidence) row.append(el("p", `${{source: "Source evidence", researcher: "Researcher statement", suggestion: "Agent suggestion — requires your decision"}[evidence.basis] || "Evidence"}: ${evidence.excerpt || readable(evidence)}`, "evidence")); content.append(row); }
+    if (proposal.question) { content.append(el("h3", "Still to decide", "section-label"), el("p", proposal.question)); }
+    content.append(el("h3", "Sources read", "section-label"), sourceRecords());
+    const actions = el("div", null, "dialog-actions");
+    actions.append(button(proposal.open_decisions?.length ? "Save defined details" : "Accept this definition", () => mutate("/accept", { proposal_id: proposal.id }, { withID: false, after: () => dialog.close() }), true, true), button("Request a change", () => { dialog.close(); $("message-input").value = "Please change the proposed definition: "; $("message-input").focus(); controls(); }), button("Discard proposal", () => mutate("/discard", { proposal_id: proposal.id }, { withID: false, after: () => dialog.close() }), false, true)); content.append(actions); controls();
+  }
+  function showCard(id) {
+    const item = state.data?.checklist?.find(x => x.id === id); if (!item) return;
+    showDialog("card", item.title || human(id), `${item.resolved} OF ${item.total} DETAILS RECORDED`);
+    content.append(el("p", item.summary || "The agent records the supported details and asks about the remaining decisions."));
+    showOpenDecisions(item.open_decisions, "The saved details remain available. Answer these decisions in the chat to complete this area.");
+    const fields = Object.keys(item.fields || {});
+    for (const key of fields) { const value = state.data.contract?.[key]; const row = el("article", null, "fact-record"); row.append(el("strong", human(key)), el("p", key === "max_steps" && Object.hasOwn(state.data.contract || {}, key) && value === null ? "No step limit. The declared time limit still applies." : value === undefined || value === "" || value === null ? "Not recorded" : readable(value))); const evidence = state.data.evidence?.[key]; if (evidence) row.append(el("p", `${{source: "Source evidence", researcher: "Researcher statement", suggestion: "Accepted agent suggestion"}[evidence.basis] || "Evidence"}: ${evidence.excerpt || readable(evidence)}`, "evidence")); content.append(row); }
+    if (item.missing?.length) { content.append(el("h3", "Remaining decisions", "section-label")); const ul = el("ul"); for (const missing of item.missing) ul.append(el("li", human(missing))); content.append(ul); }
+    if (!fields.length && !item.summary) content.append(el("pre", JSON.stringify(state.data.contract, null, 2), "contract"));
+    const actions = el("div", null, "dialog-actions"); actions.append(button("Discuss or correct this", () => { dialog.close(); $("message-input").value = `About ${item.title || human(id)}: `; $("message-input").focus(); controls(); })); content.append(actions);
+  }
+  function artifactLink(text, value, download = false) {
+    const href = safeURL(value, true); if (!href) return null; const a = el("a", text, "button secondary"); a.href = href;
+    if (download) a.download = ""; else { a.target = "_blank"; a.rel = "noopener noreferrer"; } return a;
+  }
+  function showPackage() {
+    if (!ready()) return; showDialog("package", "Research package", "EVALUATION CONTRACT");
+    const pack = state.data.package || {}, available = pack.status === "ready";
+    const descriptions = { ready: "The package matches the current definition. Run it on your own approved resources and return the result report.", stale: "The definition has changed. Prepare a new package before running or reporting another attempt.", not_built: "Prepare a versioned package after the required experiment decisions are recorded." };
+    content.append(el("div", descriptions[pack.status] || descriptions.not_built, "package-status"));
+    if (pack.version) content.append(el("p", "Version " + pack.version, "version"));
+    content.append(el("p", "The package contains the README, participant instructions, evaluation contract, fixed evaluation seeds, runner, and submission manifest. Lite evaluation runs on researcher-controlled machines."));
+    const actions = el("div", null, "dialog-actions");
+    if (available) for (const [text, url, download] of [["Download ZIP ↓", pack.url, true], ["Download config ↓", pack.config_url, true], ["View challenge ↗", pack.preview_url, false], ["Read README ↗", pack.readme_url, false]]) { const a = artifactLink(text, url, download); if (a) actions.append(a); }
+    actions.append(button(pack.status === "stale" ? "Update research package" : available ? "Rebuild package" : "Prepare research package", () => mutate("/build", {}, { label: "Preparing the research package…", after: showPackage }), true, true)); content.append(actions);
+    content.append(el("h3", "Recorded contract", "section-label"), el("pre", JSON.stringify(state.data.contract || {}, null, 2), "contract"));
+    if (!state.data.ready) { content.append(el("h3", "Required decisions are still open", "section-label")); const ul = el("ul"); for (const item of state.data.checklist || []) for (const missing of item.missing || []) ul.append(el("li", `${item.title}: ${human(missing)}`)); content.append(ul); }
+    controls();
+  }
+  function resultLevel(result) {
+    const value = result.evidence_level || result.evidence_status || result.verification_status || result.status;
+    if (value === "independently_reproduced") return { text: "Independently reproduced", className: "verified" };
+    if (value === "evidence_checked") return { text: "Evidence checked · researcher-run", className: "reported" };
+    return { text: "Researcher-reported · not independently verified", className: "reported" };
+  }
+  function showResults() {
+    if (!ready()) return; showDialog("results", "Results and evidence", "RESEARCHER-RUN EVALUATION");
+    content.append(el("p", "Run the package on your own machine, then upload its JSON result report. The service checks the contract and records the supplied evidence. It does not rerun your model."));
+    const form = el("form"), report = field("Run report JSON", "result-file", "file", "Use the report written by the packaged runner. Include its manifest and a result for every required seed, including failures."); report.input.accept = ".json,application/json"; report.input.required = true;
+    const preview = el("p", "Select a report to inspect it before submission.", "hint"), submit = el("button", "Record result and evidence", "button primary"); submit.type = "submit"; submit.dataset.mutation = "true"; submit.dataset.packageRequired = "true"; let parsed = null;
+    report.input.addEventListener("change", async () => {
+      parsed = null; modalError(); const file = report.input.files?.[0]; if (!file) return;
+      try { if (file.size > 16 * 1024 * 1024) throw new Error("Use a JSON report of 16 MB or less."); const result = JSON.parse(await file.text()); if (!result || typeof result.manifest !== "object" || !result.manifest || Array.isArray(result.manifest) || !Array.isArray(result.results)) throw new Error("The report needs a manifest object and a results array."); parsed = result; preview.textContent = `${result.results.length} episode records · challenge version ${result.manifest.challenge_version || result.challenge_version || "missing"}. The server checks the manifest and seed coverage when you submit.`; } catch (error) { modalError(error instanceof SyntaxError ? "The file is not valid JSON. Upload the report written by the runner." : error.message); preview.textContent = "Choose a valid run report."; }
+    });
+    const actions = el("div", null, "dialog-actions"); actions.append(submit); form.append(report.wrap, preview, actions); content.append(form);
+    if (state.data.package?.status !== "ready") { submit.disabled = true; content.append(el("p", "Prepare the current research package before recording an attempt.", "hint")); }
+    form.addEventListener("submit", event => { event.preventDefault(); if (!parsed) { modalError("Select a valid run report first."); return; } if (state.data.package?.status !== "ready") { modalError("Prepare the current package first."); return; } mutate("/results", { manifest: parsed.manifest, results: parsed.results }, { label: "Checking the submitted report…", after: showResults }); });
+    content.append(el("h3", "Saved attempts", "section-label"));
+    for (const result of state.data.results || []) {
+      const row = el("article", null, "result-record"), level = resultLevel(result); row.append(el("span", level.text, "badge " + level.className));
+      row.append(el("h3", result.received_at || result.created_at ? new Date(result.received_at || result.created_at).toLocaleString() : "Saved attempt"));
+      const summary = result.summary || result.result || {}; row.append(el("p", readable(summary))); if (result.version || result.challenge_version) row.append(el("small", "Challenge version: " + (result.version || result.challenge_version)));
+      if (result.manifest?.artifact_sha256 || result.artifact_sha256) row.append(el("small", "Artifact SHA-256: " + (result.manifest?.artifact_sha256 || result.artifact_sha256))); if (result.limitations) row.append(el("p", result.limitations)); content.append(row);
+    }
+    if (!state.data.results?.length) content.append(el("p", "No results have been recorded.", "empty")); controls();
+  }
+  async function sendMessage() {
+    const message = $("message-input").value.trim(); if (!message || busy() || !ready()) return;
+    await mutate("/message", { message }, { label: "Sending your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
+  }
+  async function signOut() {
+    if (state.busy) return; state.busy = true; controls();
+    try { const access = await api("/api/access"); await api("/api/access/logout", { method: "POST", headers: { "X-CSRF-Token": access.csrf_token }, body: "{}" });
+      try { for (let i = sessionStorage.length - 1; i >= 0; i--) { const key = sessionStorage.key(i); if (key?.startsWith("autokaggle-lite-")) sessionStorage.removeItem(key); } localStorage.setItem("autokaggle-session-ended", String(Date.now())); } catch (_) {}
+      authFailure();
+    } catch (error) { await failure(error); } finally { state.busy = false; controls(); }
+  }
+  $("message-form").addEventListener("submit", event => { event.preventDefault(); sendMessage(); });
+  $("message-input").addEventListener("input", () => { if (state.id) stored(draftKey(), $("message-input").value); controls(); });
+  $("message-input").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); } });
+  $("close-dialog").addEventListener("click", () => dialog.close());
+  for (const [id, action] of [["new-button", showNew], ["welcome-start", showNew], ["sessions-button", showSessions], ["sources-button", showSources], ["review-proposals", showProposals], ["package-button", showPackage], ["results-button", showResults], ["sign-out", signOut], ["refresh-session", reload], ["retry-request", () => mutate("/retry", {})], ["continue-round", () => mutate("/continue", {})], ["build-package", () => mutate("/build", {}, { after: showPackage })]]) $(id).addEventListener("click", action);
+  window.addEventListener("storage", event => { if (event.key === "autokaggle-session-ended") authFailure(); });
+  window.addEventListener("focus", () => { if (ready() && !state.busy && !state.loading) reload(); });
+  async function start() {
+    renderChecklist(); controls();
+    try { state.access = await api("/api/access"); $("sign-out").hidden = !state.access.private_mode || state.access.auth_kind === "anonymous";
+      if (state.access.private_mode && state.access.auth_kind === "anonymous") { state.id = new URLSearchParams(location.search).get("project"); authFailure(); return; }
+      const id = new URLSearchParams(location.search).get("project"), destination = location.hash;
+      if (id) { await openSession(id); if (state.data && destination === "#results") showResults(); }
+      else controls();
+    } catch (error) { await failure(error); }
+  }
+  start();
+})();
