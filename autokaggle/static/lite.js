@@ -360,7 +360,9 @@
     if (release) {
       const e = release.evidence, tag = e.tag;
       content.append(el("h3", "Tested release", "section-label"), el("p", `Evaluator version ${release.evaluator_version}, commit ${e.commit}. The example ${e.fixture} has expected fitness ${e.expected_fitness}; the fresh clone scored ${e.observed_fitness}.`));
-      content.append(el("pre", `git clone evaluator.bundle evaluator && cd evaluator && git checkout ${tag}\npython -m venv .venv && . .venv/bin/activate\npython -m pip install -r requirements.lock\npython fetch_assets.py\n${e.command}    # expected fitness ${e.expected_fitness}\npython evaluate.py --artifact PATH --output results.json`, "contract"));
+      const pub = release.published, link = pub && safeURL(pub.url);
+      if (link) { const p = el("p", "Published to the private GitHub repository "), a = el("a", pub.repository + " ↗"); a.href = link; a.target = "_blank"; a.rel = "noopener noreferrer"; p.append(a, el("span", ` at ${pub.tag}.` + (pub.address_recorded ? "" : " This release was built before its repository address was set, so its lock file does not name this repository. Rebuild and publish again to record it."))); content.append(p); }
+      content.append(el("pre", `git clone ${link ? link + ".git" : "evaluator.bundle"} evaluator && cd evaluator && git checkout ${tag}\npython -m venv .venv && . .venv/bin/activate\npython -m pip install -r requirements.lock\npython fetch_assets.py\n${e.command}    # expected fitness ${e.expected_fitness}\npython evaluate.py --artifact PATH --output results.json`, "contract"));
     }
     const shown = release || latest;
     if (shown?.tests?.length) { content.append(el("h3", release ? "Fresh-clone tests" : "Tests from the last build", "section-label")); const ul = el("ul", null, "test-list"); for (const t of shown.tests) { const li = el("li", null, t.passed ? "test-pass" : "test-fail"); li.append(el("strong", (t.passed ? "✓ " : "✗ ") + human(t.name)), el("span", " — " + t.detail)); ul.append(li); } content.append(ul); }
@@ -369,10 +371,15 @@
     const actions = el("div", null, "dialog-actions");
     if (release) for (const [text, url, download] of [["Download release ↓", release.bundle_url, true], ["Download YAML config ↓", release.config_url, true], ["Read README ↗", release.readme_url, false]]) { const a = artifactLink(text, url, download); if (a) actions.append(a); }
     const start = button(release ? "Rebuild evaluator" : "Build evaluator", buildEvaluator, true, true);
-    start.disabled = evaluatorActive(view) || !view.available || !view.contract.accepted || busy(); actions.append(start); content.append(actions);
+    start.disabled = evaluatorActive(view) || !view.available || !view.contract.accepted || busy(); actions.append(start);
+    const publishing = view.publishing;
+    if (release && publishing?.available) { const send = button(release.published ? "Publish again" : "Publish to GitHub", publishEvaluator, false, true); send.disabled = evaluatorActive(view) || busy(); actions.append(send); }
+    content.append(actions);
+    if (release && publishing?.available && !release.published) content.append(el("p", publishing.repository ? `Publishing updates the private repository ${publishing.repository.name}.` : `Publishing creates a private repository under ${publishing.owner} and pushes the tested commit unchanged.`, "hint"));
+    else if (release && publishing?.owner && !publishing.available) content.append(el("p", publishing.reason, "hint"));
     if (!view.available) content.append(el("p", view.unavailable_reason || "Evaluator builds are not available on this server.", "hint"));
     else if (!view.contract.accepted) content.append(el("p", "Resolve and accept the open contract decisions first.", "hint"));
-    else content.append(el("p", `A build may use up to ${view.settings.minutes} minutes and ${view.settings.requests} model requests. It publishes nothing. The release stays in this session until a separate publishing step.`, "hint"));
+    else content.append(el("p", `A build may use up to ${view.settings.minutes} minutes and ${view.settings.requests} model requests. It publishes nothing. The release stays in this session until it is published.`, "hint"));
   }
   async function loadEvaluator() {
     const generation = state.generation; clearTimeout(state.evaluatorPoll);
@@ -392,6 +399,15 @@
       const view = await api(path("/evaluator/build"), { method: "POST", body: JSON.stringify({ request_id: request.id }) }); if (generation !== state.generation) return;
       stored(request.key, null); state.evaluator = view; state.busy = false; renderEvaluator(view); reload();
       if (evaluatorActive(view)) state.evaluatorPoll = setTimeout(loadEvaluator, 3000);
+    } catch (error) { if (generation === state.generation) await failure(error); }
+    finally { if (generation === state.generation) { state.busy = false; controls(); } }
+  }
+  async function publishEvaluator() {
+    if (busy() || !ready()) return;
+    const generation = state.generation; state.busy = true; modalError(); controls();
+    try {
+      const view = await api(path("/evaluator/publish"), { method: "POST", body: "{}" }); if (generation !== state.generation) return;
+      state.evaluator = view; state.busy = false; renderEvaluator(view);
     } catch (error) { if (generation === state.generation) await failure(error); }
     finally { if (generation === state.generation) { state.busy = false; controls(); } }
   }

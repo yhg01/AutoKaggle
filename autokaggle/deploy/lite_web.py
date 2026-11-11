@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 
 from dotenv import dotenv_values
@@ -21,7 +22,16 @@ from .probe_cluster import Kubectl, private_kubeconfig
 HOST = "lite." + web.HOST
 BASE_URL = "https://" + HOST
 PRIVATE_ENV = Path.home() / ".config/autokaggle/lite-web.env"
+GITHUB_ENV = Path.home() / ".config/autokaggle/lite-github.env"
 MEMBERS = "boldcoscientist@gmail.com"
+
+
+def github_settings():
+    """The optional GitHub token for evaluator publishing, read from its own private file. It enters only the Secret."""
+    token = (dotenv_values(GITHUB_ENV).get("AUTOKAGGLE_LITE_GITHUB_TOKEN") or "").strip() if GITHUB_ENV.exists() else ""
+    if token and not re.fullmatch(r"[A-Za-z0-9_]{20,255}", token):
+        raise ValueError("The private GitHub file must hold one token in AUTOKAGGLE_LITE_GITHUB_TOKEN.")
+    return {"AUTOKAGGLE_LITE_GITHUB_TOKEN": token} if token else {}
 
 
 def private_settings(model_env: Path):
@@ -38,10 +48,12 @@ def private_settings(model_env: Path):
         os.fchmod(handle.fileno(), 0o600)
         handle.write("AUTOKAGGLE_ADMIN_ACCESS_CODE=" + admin + "\n")
         handle.write("AUTOKAGGLE_PUBLIC_BASE_URL=" + BASE_URL + "\n")
-    return {"AUTOKAGGLE_ADMIN_ACCESS_CODE": admin, "OPENAI_API_KEY": key, "OPENROUTER_API_KEY": key}
+    return {"AUTOKAGGLE_ADMIN_ACCESS_CODE": admin, "OPENAI_API_KEY": key, "OPENROUTER_API_KEY": key, **github_settings()}
 
 
-def resources(source, digest, private, node_ips, *, members=MEMBERS):
+def resources(source, digest, private, node_ips, *, members=MEMBERS, github_owner=""):
+    if github_owner and not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", github_owner):
+        raise ValueError("The GitHub owner must be one account or organization name.")
     names = {
         web.HOST: HOST, "web-no-access": "lite-no-access", "web-data": "lite-data",
         "source-" + digest[:16]: "lite-source-" + digest[:16],
@@ -70,6 +82,8 @@ def resources(source, digest, private, node_ips, *, members=MEMBERS):
             item["data"]["AUTOKAGGLE_LITE_MEMBERS"] = members
             item["data"]["AUTOKAGGLE_DEFAULT_INTERFACE"] = "lite"
             item["data"]["AUTOKAGGLE_WORKERS"] = "5"
+            if github_owner:
+                item["data"]["AUTOKAGGLE_LITE_GITHUB_OWNER"] = github_owner
         if item["kind"] == "Deployment":
             pod = item["spec"]["template"]["spec"]
             pod["containers"][0]["resources"] = {
@@ -77,7 +91,7 @@ def resources(source, digest, private, node_ips, *, members=MEMBERS):
                 "limits": {"cpu": "2", "memory": "2Gi"},
             }
             item["spec"]["template"]["metadata"]["annotations"]["autokaggle/settings-sha256"] = hashlib.sha256(
-                json.dumps({"private": private, "host": HOST, "members": members, "workers": 5}, sort_keys=True).encode()
+                json.dumps({"private": private, "host": HOST, "members": members, "workers": 5, "github_owner": github_owner}, sort_keys=True).encode()
             ).hexdigest()
     return items
 
@@ -106,6 +120,7 @@ def main():
     parser.add_argument("command", choices=["tls", "deploy", "expose", "status"])
     parser.add_argument("--model-env", type=Path, default=web.ROOT / ".env")
     parser.add_argument("--members", help="Approved lab emails, comma separated. Existing membership is preserved when omitted.")
+    parser.add_argument("--github-owner", help="Account or organization for evaluator repositories. Preserved when omitted. An empty value turns publishing off.")
     args = parser.parse_args()
     with private_kubeconfig() as config:
         kube = Kubectl(config)
@@ -121,9 +136,11 @@ def main():
             configs = kube.json("get", "configmaps", "-n", web.NAMESPACE)["items"]
             prior = next((x.get("data", {}) for x in configs if x["metadata"]["name"] == "lite-config"), {})
             members = args.members if args.members is not None else prior.get("AUTOKAGGLE_LITE_MEMBERS", MEMBERS)
-            for item in resources(source, digest, private, addresses, members=members):
+            owner = args.github_owner if args.github_owner is not None else prior.get("AUTOKAGGLE_LITE_GITHUB_OWNER", "")
+            for item in resources(source, digest, private, addresses, members=members, github_owner=owner):
                 kube.run("apply", "--server-side", "--field-manager=autokaggle-lite", "-f", "-", document=item)
-            print(json.dumps({"host": HOST, "source_sha256": digest, "source_bytes": len(source)}))
+            print(json.dumps({"host": HOST, "source_sha256": digest, "source_bytes": len(source), "github_owner": owner or None,
+                              "github_token": "AUTOKAGGLE_LITE_GITHUB_TOKEN" in private}))
         elif args.command == "expose":
             cert = kube.json("get", "certificate", "autokaggle-lite-tls", "-n", web.NAMESPACE)
             if not any(x.get("type") == "Ready" and x.get("status") == "True"

@@ -58,7 +58,9 @@ def test_model_secret_supports_lite_and_existing_model_clients(tmp_path, monkeyp
     model = tmp_path / "model.env"
     model.write_text("OPENROUTER_API_KEY=test-only-key\n")
     monkeypatch.setattr(lite_web, "PRIVATE_ENV", tmp_path / "private.env")
+    monkeypatch.setattr(lite_web, "GITHUB_ENV", tmp_path / "absent-github.env")
     private = lite_web.private_settings(model)
+    assert "AUTOKAGGLE_LITE_GITHUB_TOKEN" not in private
     assert private["OPENROUTER_API_KEY"] == "test-only-key"
     assert private["OPENAI_API_KEY"] == "test-only-key"
     items = lite_web.resources(b"source", "a" * 64, private, ["192.0.2.10"])
@@ -69,3 +71,55 @@ def test_model_secret_supports_lite_and_existing_model_clients(tmp_path, monkeyp
     refs = deployment["spec"]["template"]["spec"]["containers"][0]["envFrom"]
     assert {"secretRef": {"name": "lite-secrets"}} in refs
     assert all("test-only-key" not in str(item) for item in items if item["kind"] == "ConfigMap")
+
+
+def test_github_token_enters_only_the_secret_and_the_owner_only_the_config(tmp_path, monkeypatch):
+    from autokaggle.deploy import lite_web
+    model = tmp_path / "model.env"
+    model.write_text("OPENROUTER_API_KEY=test-only-key\n")
+    token = "github_pat_" + "A1b2C3d4_" * 9
+    github = tmp_path / "github.env"
+    github.write_text("# private\nAUTOKAGGLE_LITE_GITHUB_TOKEN=" + token + "\n")
+    monkeypatch.setattr(lite_web, "PRIVATE_ENV", tmp_path / "private.env")
+    monkeypatch.setattr(lite_web, "GITHUB_ENV", github)
+    private = lite_web.private_settings(model)
+    assert private["AUTOKAGGLE_LITE_GITHUB_TOKEN"] == token
+    assert token not in (tmp_path / "private.env").read_text()
+    items = lite_web.resources(b"source", "a" * 64, private, ["192.0.2.10"], github_owner="bold-lab-ai")
+    assert next(x for x in items if x["kind"] == "Secret")["stringData"]["AUTOKAGGLE_LITE_GITHUB_TOKEN"] == token
+    config = next(x for x in items if x["metadata"]["name"] == "lite-config")["data"]
+    assert config["AUTOKAGGLE_LITE_GITHUB_OWNER"] == "bold-lab-ai"
+    assert all(token not in str(x) for x in items if x["kind"] != "Secret")
+    # The owner is part of the restart hash. Without an owner the setting is absent and publishing stays off.
+    hashed = lambda x: next(i for i in x if i["kind"] == "Deployment")["spec"]["template"]["metadata"]["annotations"]["autokaggle/settings-sha256"]
+    plain = lite_web.resources(b"source", "a" * 64, private, ["192.0.2.10"])
+    assert hashed(plain) != hashed(items)
+    assert "AUTOKAGGLE_LITE_GITHUB_OWNER" not in next(x for x in plain if x["metadata"]["name"] == "lite-config")["data"]
+    import pytest
+    with pytest.raises(ValueError):
+        lite_web.resources(b"source", "a" * 64, private, ["192.0.2.10"], github_owner="not a name")
+    github.write_text("AUTOKAGGLE_LITE_GITHUB_TOKEN=two words\n")
+    with pytest.raises(ValueError):
+        lite_web.github_settings()
+
+
+def test_hosted_source_bundle_starts_without_the_build_image_and_pins_the_git_library(tmp_path):
+    import io, os, subprocess, sys, tarfile
+    from autokaggle.deploy import web
+    source, _ = web.bundle()
+    with tarfile.open(fileobj=io.BytesIO(source)) as archive:
+        names = archive.getnames()
+        archive.extractall(tmp_path / "app", filter="data")
+    assert "autokaggle/lite_publish.py" in names and "autokaggle/deploy/lite-build.Dockerfile" not in names
+    lock = (tmp_path / "app/autokaggle/deploy/web-requirements.lock").read_text().split()
+    assert "dulwich==1.2.20" in lock and "urllib3==2.8.0" in lock
+    code = ("import json, pathlib, sys\nfrom fastapi.testclient import TestClient\nfrom autokaggle import lite_build\nfrom autokaggle.app import create_app\n"
+            "app = create_app(pathlib.Path(sys.argv[1]))\nruntime = lite_build.default_runtime()\n"
+            "with TestClient(app) as client:\n    page = client.get('/lite').status_code\n"
+            "print(json.dumps({'kind': runtime.kind, 'available': runtime.available(), 'page': page}))\napp.state.pool.shutdown(wait=True)\n")
+    env = {**os.environ, "PYTHONPATH": str(tmp_path / "app"), "AUTOKAGGLE_PRIVATE_MODE": "0", "PYTHONDONTWRITEBYTECODE": "1"}
+    done = subprocess.run([sys.executable, "-c", code, str(tmp_path / "data")], cwd=tmp_path / "app", env=env, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr[-2000:]
+    import json
+    started = json.loads(done.stdout.strip().splitlines()[-1])
+    assert started == {"kind": "docker", "available": [False, "Evaluator builds are not installed on this server."], "page": 200}

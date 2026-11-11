@@ -3,7 +3,8 @@
 A coding agent implements the evaluator in a disposable workspace. The
 application then assembles a release from validated files, commits it, and
 scores its fixtures from a fresh clone in a clean runtime. A build is ready
-only when that clone test passes. Publishing is a separate step.
+only when that clone test passes. Publishing to GitHub is a separate step; see
+lite_publish.py.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import lite, lite_acceptance as acceptance, lite_providers as providers
+from . import lite, lite_acceptance as acceptance, lite_providers as providers, lite_publish as publishing
 from .lite_gateway import Gateway
 from .store import now
 
@@ -40,6 +41,7 @@ RESERVED = {"evaluate", "run", "fetch_assets", "gym_adapter", "check", "loader"}
 ACTIVE = {"queued", "building", "testing"}
 PROMPT = "Read BUILD_TASK.md in this directory and complete the task it describes. Work only in this directory."
 _RUNNING: set[str] = set()
+_PUBLISHING: set[str] = set()
 _SLOTS = threading.BoundedSemaphore(max(1, int(os.getenv("AUTOKAGGLE_LITE_BUILD_CONCURRENCY", "1"))))
 _IMAGE = threading.Lock()
 
@@ -124,17 +126,29 @@ class DockerRuntime:
             import pwd
             account = pwd.getpwuid(os.getuid()).pw_name  # The real account; USER can be unset or wrong under a service manager.
         except (ImportError, KeyError):
-            account = getpass.getuser()
+            try:
+                account = getpass.getuser()
+            except (KeyError, OSError):  # A container user with no account entry, as in the hosted pod.
+                account = f"uid{os.getuid()}" if hasattr(os, "getuid") else "user"
         user = re.sub(r"[^a-z0-9_.-]", "", account.lower()) or "user"
         self.user = user
-        self.tag = f"{user}_autokaggle-lite-build:{_sha(self.dockerfile.read_bytes())[:12]}"
+        self._tag = None
         self._checked = (0.0, (False, ""))
+
+    @property
+    def tag(self):
+        # Read on first use. A hosted source bundle carries no build image definition, and the application must still start.
+        if self._tag is None:
+            self._tag = f"{self.user}_autokaggle-lite-build:{_sha(self.dockerfile.read_bytes())[:12]}"
+        return self._tag
 
     def available(self):
         if time.monotonic() - self._checked[0] < 30:
             return self._checked[1]
         result = (False, "Evaluator builds need Docker on this server, and Docker is not available.")
-        if shutil.which("docker"):
+        if not self.dockerfile.is_file():
+            result = (False, "Evaluator builds are not installed on this server.")
+        elif shutil.which("docker"):
             try:
                 if subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"], capture_output=True, timeout=15).returncode == 0:
                     result = (True, "")
@@ -287,6 +301,8 @@ def readme(spec, record, files):
     lines = [f"# {spec['title']} — evaluator", "",
              f"Evaluator version {spec['evaluator_version']} for BOLD AutoKaggle Lite contract `{spec['contract_version']}`.", "",
              "Clone this release, supply your own artifact, and run one command. It returns the fitness and a machine-readable result.", "",
+             *(["## Get this release", "", "```sh", f"git clone {spec['repository']}.git evaluator", "cd evaluator",
+                f"git checkout v{spec['evaluator_version']}", "```", ""] if spec.get("repository") else []),
              "## What is scored", "",
              f"- **Objective:** {c['objective']}",
              f"- **Artifact ({c['artifact_type']}):** {c['outputs']}",
@@ -493,6 +509,7 @@ def _work(store, identifier, build_id, runtime, chosen, key, command):
     if blockers or spec["contract_version"] != build["contract_version"]:
         raise ValueError("The contract changed before the build started. Start a new build.")
     spec["evaluator_version"] = build["evaluator_version"]
+    spec["repository"] = publishing.planned_address(item["lite_evaluator"])
     shutil.rmtree(job, ignore_errors=True)
     job.mkdir(parents=True, mode=0o700)
     prepare_workspace(job / "work", spec, record_bytes, item["lite"]["sources"])
@@ -582,13 +599,26 @@ def _work(store, identifier, build_id, runtime, chosen, key, command):
 
 def _public(build):
     result = {k: copy.deepcopy(build.get(k)) for k in ("id", "status", "stage", "evaluator_version", "contract_version", "contract_sha256",
-              "started_at", "finished_at", "blockers", "cause", "tests", "evidence", "model", "runtime", "agent_summary", "decisions")}
+              "started_at", "finished_at", "blockers", "cause", "tests", "evidence", "model", "runtime", "agent_summary", "decisions", "published")}
     if build["status"] in ACTIVE and build["id"] not in _RUNNING:
         result.update(status="failed", stage="Build interrupted", cause="The service restarted during this build. Start a new build.")
     return result
 
 
-def view(project, runtime):
+def publishing_view(state, github):
+    saved = state.get("github")
+    result = {"available": False, "reason": "", "owner": None, "repository": {"url": saved["url"], "name": saved["full_name"]} if saved else None}
+    try:
+        result["owner"] = publishing.owner() or None
+    except ValueError as exc:
+        return {**result, "reason": str(exc)}
+    if not result["owner"]:
+        return {**result, "reason": "Publishing to GitHub is not configured on this server."}
+    available, reason = github.available() if github else (False, "Publishing to GitHub is not configured on this server.")
+    return {**result, "available": available, "reason": reason}
+
+
+def view(project, runtime, github=None):
     state = project.get("lite_evaluator") or {"builds": [], "releases": 0}
     lite_view = lite.view(project)
     package = lite_view["package"]
@@ -618,7 +648,7 @@ def view(project, runtime):
     return {"status": status, "draft": status != "ready", "available": available, "unavailable_reason": reason,
             "contract": {"accepted": lite_view["ready"], "version": current, "package_status": package["status"],
                          "title": lite_view["contract"].get("title", project["title"])},
-            "release": release, "latest": other,
+            "release": release, "latest": other, "publishing": publishing_view(state, github),
             "earlier_releases": [{k: b[k] for k in ("evaluator_version", "contract_version", "finished_at")} | {"commit": b["evidence"]["commit"]} for b in earlier],
             "builds": len(builds), "settings": {k: settings()[k] for k in ("model", "effort", "minutes", "requests")} | {"runtime": runtime.kind, "provider": providers.label()}}
 
@@ -628,8 +658,14 @@ class Start(BaseModel):
     request_id: str = Field(min_length=8, max_length=100)
 
 
-def register(app, store, pool, access, get, editing, runtime=None, command=None):
+class Publish(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    new_repository: bool = False
+
+
+def register(app, store, pool, access, get, editing, runtime=None, command=None, github=None):
     runtime = runtime or default_runtime()
+    github = github or publishing.default_client()
 
     def lite_get(identifier, request):
         item = get(identifier, request)
@@ -639,7 +675,7 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None)
 
     @app.get("/api/projects/{project_id}/lite/evaluator")
     def read(project_id: str, request: Request):
-        return view(lite_get(project_id, request), runtime)
+        return view(lite_get(project_id, request), runtime, github)
 
     @app.post("/api/projects/{project_id}/lite/evaluator/build")
     def start(project_id: str, body: Start, request: Request):
@@ -647,7 +683,7 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None)
         with editing(project_id, request) as item:
             state = _state(item)
             if body.request_id in state["requests"]:
-                return view(item, runtime)
+                return view(item, runtime, github)
             if any(b["status"] in ACTIVE and b["id"] in _RUNNING for b in state["builds"]):
                 raise HTTPException(409, "An evaluator build is already running for this problem.")
             if item["lite"]["status"] == "working":
@@ -674,17 +710,53 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None)
                              cause="A decision or input that affects scoring is missing.")
             state["builds"].append(build)
             state["requests"][body.request_id] = build["id"]
+            state.setdefault("repository_name", publishing.repository_name(project_id, spec["title"]))
             if not blockers:
                 _RUNNING.add(build["id"])
             store.save(item)
-            result = view(item, runtime)
+            result = view(item, runtime, github)
         if not blockers:
             pool.submit(work, store, project_id, build["id"], runtime, settings(), key, command)
         return result
 
+    @app.post("/api/projects/{project_id}/lite/evaluator/publish")
+    def publish(project_id: str, request: Request, body: Publish | None = None):
+        """Push the tested release for the current contract to this problem's private GitHub repository."""
+        lite_get(project_id, request)
+        with editing(project_id, request) as item:
+            current = view(item, runtime, github)
+            release = current["release"]
+            if not release:
+                raise HTTPException(409, "There is no tested evaluator for the current contract. Build the evaluator first.")
+            if not current["publishing"]["available"]:
+                raise HTTPException(503, current["publishing"]["reason"])
+            if project_id in _PUBLISHING:
+                raise HTTPException(409, "This evaluator is already being published.")
+            _PUBLISHING.add(project_id)
+            state = _state(item)
+            name = state.setdefault("repository_name", publishing.repository_name(project_id, current["contract"]["title"]))
+            saved, account = state.get("github"), current["publishing"]["owner"]
+            store.save(item)
+        try:
+            repository = publishing.ensure_repository(project_id, current["contract"]["title"], name, saved, github, account,
+                                                      replace=bool(body and body.new_repository))
+            with store.lock(project_id):  # Save the repository before the push, so a retry reuses it.
+                item = _reload(store, project_id)
+                item["lite_evaluator"]["github"] = {k: repository[k] for k in ("id", "full_name", "url")} | {"saved_at": now()}
+                store.save(item)
+            pushed = publishing.push_release(store.directory(project_id) / "lite-evaluator" / "repo.git", repository,
+                                             release["evidence"]["commit"], release["evaluator_version"], github)
+            _update(store, project_id, release["id"], published={**pushed, "repository_id": repository["id"], "repository": repository["full_name"],
+                                                                 "url": repository["url"], "published_at": now(), "by": github.account()})
+        except publishing.PublishError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        finally:
+            _PUBLISHING.discard(project_id)
+        return view(lite_get(project_id, request), runtime, github)
+
     def release_file(project_id, request, name):
         item = lite_get(project_id, request)
-        release = view(item, runtime)["release"]
+        release = view(item, runtime, github)["release"]
         if not release:
             raise HTTPException(409, "There is no tested evaluator for the current contract. Build the evaluator first.")
         return store.directory(project_id) / "lite-evaluator" / "releases" / f"v{release['evaluator_version']}" / name

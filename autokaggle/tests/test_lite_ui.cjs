@@ -90,3 +90,21 @@ test("A ready evaluator shows the bound release, its measured fitness, and the s
  h.handler=async url=>url.endsWith("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;
  await h.click("evaluator-button");const text=h.$("dialog-content").textContent;
  assert.match(text,/Ready/);assert.match(text,/git checkout v2/);assert.match(text,/expected fitness 1/);assert.match(text,/Download release/);assert.match(text,/Rebuild evaluator/);assert.match(text,/version 1 \(contract v0\)/);assert.match(text,/with deepseek-v4-pro on DeepSeek/);});
+test("A tested release is published on request and then shows its private repository",async()=>{const h=harness();await flush();
+ const build={status:"ready",evaluator_version:1,contract_version:"v1",tests:[],published:null,evidence:{commit:"c".repeat(40),tag:"v1",fixture:"fixtures/valid/p.csv",expected_fitness:1,observed_fitness:1,command:"python evaluate.py --artifact fixtures/valid/p.csv"},
+  bundle_url:"/api/projects/p1/lite/evaluator/bundle",config_url:"/api/projects/p1/lite/evaluator/config",readme_url:"/api/projects/p1/lite/evaluator/readme.md"};
+ let view=evaluatorView({status:"ready",draft:false,release:build,builds:1,publishing:{available:true,reason:"",owner:"bold-test",repository:null}});
+ h.handler=async(url,options)=>{if(url.endsWith("/lite/evaluator/publish")){assert.equal(options.method,"POST");view=evaluatorView({...view,release:{...build,published:{url:"https://github.com/bold-test/lite-eval-t-12345678",repository:"bold-test/lite-eval-t-12345678",tag:"v1",address_recorded:false}},publishing:{available:true,reason:"",owner:"bold-test",repository:{url:"https://github.com/bold-test/lite-eval-t-12345678",name:"bold-test/lite-eval-t-12345678"}}});}
+  return url.includes("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;};
+ await h.click("evaluator-button");let text=h.$("dialog-content").textContent;
+ assert.match(text,/git clone evaluator\.bundle evaluator/);assert.match(text,/creates a private repository under bold-test/);
+ await h.clickText("Publish to GitHub");text=h.$("dialog-content").textContent;
+ assert.equal(h.calls.filter(c=>c.url.endsWith("/lite/evaluator/publish")).length,1);
+ assert.match(text,/Published to the private GitHub repository bold-test\/lite-eval-t-12345678/);assert.match(text,/git clone https:\/\/github\.com\/bold-test\/lite-eval-t-12345678\.git evaluator/);
+ assert.match(text,/lock file does not name this repository/);assert.match(text,/Publish again/);});
+test("The evaluator dialog offers no publishing control when the server has none",async()=>{const h=harness();await flush();
+ const build={status:"ready",evaluator_version:1,contract_version:"v1",tests:[],published:null,evidence:{commit:"c".repeat(40),tag:"v1",fixture:"f",expected_fitness:1,observed_fitness:1,command:"python evaluate.py --artifact f"},bundle_url:"/api/projects/p1/lite/evaluator/bundle",config_url:"/api/projects/p1/lite/evaluator/config",readme_url:"/api/projects/p1/lite/evaluator/readme.md"};
+ const view=evaluatorView({status:"ready",draft:false,release:build,builds:1,publishing:{available:false,reason:"Publishing needs a GitHub login on this server. Sign in with gh, or provide GH_TOKEN.",owner:"bold-test",repository:null}});
+ h.handler=async url=>url.endsWith("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;
+ await h.click("evaluator-button");const text=h.$("dialog-content").textContent;
+ assert.doesNotMatch(text,/Publish to GitHub/);assert.match(text,/Publishing needs a GitHub login on this server/);});

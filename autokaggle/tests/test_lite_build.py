@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 import httpx
 import pytest
 
-from autokaggle import lite, lite_acceptance as acceptance, lite_build, lite_providers
+from autokaggle import lite, lite_acceptance as acceptance, lite_build, lite_providers, lite_publish
 from autokaggle.app import create_app
 from autokaggle.lite_gateway import Gateway
 
@@ -525,3 +525,290 @@ def test_gateway_applies_deepseek_reasoning_and_requests_stream_usage():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def fake_hub(kind, root, login="lab-bot"):
+    """GitHub stand-in. Each repository is a bare Git directory, so the real push and ref checks of either client run against it."""
+    base = lite_publish.GitHub if kind == "command" else lite_publish.TokenGitHub
+
+    class Fake(base):
+        def __init__(self):
+            self.root, self.login, self.repos, self.created = Path(root), login, {}, []
+            self.root.mkdir(parents=True, exist_ok=True)
+            self.command, self._token = "gh", "unused-token"
+
+        def environment(self):
+            return {"PATH": os.environ["PATH"]}
+
+        def available(self):
+            return True, ""
+
+        def account(self):
+            return self.login
+
+        def repository(self, reference):
+            kind, _, rest = reference.partition("/")
+            for repo in self.repos.values():
+                if (kind == "repositories" and str(repo["id"]) == rest) or (kind == "repos" and repo["full_name"].lower() == rest.lower()):
+                    return dict(repo)
+            return None
+
+        def create(self, account, name, description):
+            repo = {"id": 1000 + len(self.created), "full_name": f"{account}/{name}", "owner": account, "name": name,
+                    "url": f"https://github.com/{account}/{name}", "private": True, "description": description}
+            subprocess.run(["git", "init", "-q", "--bare", str(self.root / f"{repo['id']}.git")], check=True)
+            self.repos[repo["id"]] = repo
+            self.created.append(repo["full_name"])
+            return dict(repo)
+
+        def git_url(self, repository):
+            return str(self.root / f"{repository['id']}.git")
+
+        def git_options(self):
+            return []
+
+        def refs(self, identifier):
+            done = subprocess.run(["git", "for-each-ref", "--format=%(refname) %(objectname)"], cwd=self.root / f"{identifier}.git", capture_output=True, text=True, check=True)
+            return dict(line.split() for line in done.stdout.splitlines())
+
+    return Fake()
+
+
+@pytest.fixture(params=["command", "token"])
+def published(request, harness, monkeypatch, tmp_path):
+    if request.param == "token":
+        pytest.importorskip("dulwich")
+    hub = fake_hub(request.param, tmp_path / "github")
+    monkeypatch.setenv("AUTOKAGGLE_LITE_GITHUB_OWNER", "bold-test")
+    monkeypatch.setattr(lite_publish, "default_client", lambda: hub)
+    app = create_app(tmp_path / "publishing-app")
+    yield app, hub
+    app.state.pool.shutdown(wait=True)
+
+
+def test_publishing_creates_one_private_repository_and_pushes_the_tested_commit(published, monkeypatch, tmp_path):
+    app, hub = published
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        assert client.post(path + "/evaluator/publish").status_code == 409  # No tested release yet.
+        state = build(client, path)
+        assert state["publishing"] == {"available": True, "reason": "", "owner": "bold-test", "repository": None}
+        commit = state["release"]["evidence"]["commit"]
+        assert state["release"]["published"] is None and hub.created == []
+
+        done = client.post(path + "/evaluator/publish")
+        assert done.status_code == 200, done.text
+        record = done.json()["release"]["published"]
+        name = "lite-eval-toy-label-accuracy-" + identifier.replace("-", "")[:8]
+        assert hub.created == ["bold-test/" + name]
+        assert record["url"] == "https://github.com/bold-test/" + name and record["commit"] == commit and record["tag"] == "v1"
+        assert record["by"] == "lab-bot" and record["refs_pushed"] == 2 and record["address_recorded"] is True
+        assert done.json()["publishing"]["repository"] == {"url": record["url"], "name": "bold-test/" + name}
+        assert hub.repos[1000]["private"] and identifier in hub.repos[1000]["description"]
+        assert hub.refs(1000) == {"refs/heads/main": commit, "refs/tags/v1": commit}
+
+        # A collaborator clones the published repository. It is the tested commit and it names its own address.
+        clone = tmp_path / "from-github"
+        subprocess.run(["git", "clone", "-q", hub.git_url(hub.repos[1000]), str(clone)], check=True)
+        subprocess.run(["git", "checkout", "-q", "v1"], cwd=clone, check=True, capture_output=True)
+        assert json.loads((clone / "evaluator.lock.json").read_text())["repository"] == record["url"]
+        assert f"git clone {record['url']}.git evaluator" in (clone / "README.md").read_text()
+        scored = subprocess.run([sys.executable, "evaluate.py", "--artifact", "fixtures/valid/predictions.csv"], cwd=clone, capture_output=True, text=True)
+        answer = json.loads(scored.stdout.strip().splitlines()[-1])
+        assert scored.returncode == 0 and answer["fitness"] == 1.0 and answer["evaluator_revision"] == commit
+        assert json.loads((clone / "results.json").read_text())["manifest"]["code_repository"] == record["url"]
+
+        # A retry reuses the same repository and pushes nothing.
+        again = client.post(path + "/evaluator/publish").json()["release"]["published"]
+        assert hub.created == ["bold-test/" + name] and again["refs_pushed"] == 0 and again["commit"] == commit
+
+        # A new contract version becomes a new release in the same repository, even after the title changed.
+        revise(client, monkeypatch, path, title="Renamed toy problem", evaluation_count=4)
+        second = build(client, path)
+        assert second["release"]["evaluator_version"] == 2 and second["release"]["published"] is None
+        later = client.post(path + "/evaluator/publish").json()["release"]["published"]
+        newer = second["release"]["evidence"]["commit"]
+        assert hub.created == ["bold-test/" + name] and later["address_recorded"] is True
+        assert hub.refs(1000) == {"refs/heads/main": newer, "refs/tags/v1": commit, "refs/tags/v2": newer}
+
+
+def test_publishing_never_overwrites_or_exposes_a_repository(published, monkeypatch, tmp_path):
+    app, hub = published
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        name = "lite-eval-toy-label-accuracy-" + identifier.replace("-", "")[:8]
+        build(client, path)
+        # A repository of that name which was not created for this problem is left alone.
+        foreign = hub.create("bold-test", name, "Someone else's work")
+        refused = client.post(path + "/evaluator/publish")
+        assert refused.status_code == 502 and "was not created for this problem" in refused.json()["detail"]
+        assert hub.refs(foreign["id"]) == {}
+        # A repository left by an interrupted first attempt is adopted through its description.
+        hub.repos[foreign["id"]]["description"] = lite_publish.MARKER + identifier
+        hub.repos[foreign["id"]]["private"] = False
+        public = client.post(path + "/evaluator/publish")
+        assert public.status_code == 502 and "is not private" in public.json()["detail"] and hub.refs(foreign["id"]) == {}
+        hub.repos[foreign["id"]]["private"] = True
+        first = client.post(path + "/evaluator/publish")
+        assert first.status_code == 200 and len(hub.created) == 1, first.text
+        commit = first.json()["release"]["published"]["commit"]
+
+        # Commits made outside the application are not overwritten.
+        other = tmp_path / "outside"
+        subprocess.run(["git", "clone", "-q", hub.git_url(foreign), str(other)], check=True)
+        (other / "extra.txt").write_text("edited by hand\n")
+        git = ["git", "-c", "user.name=someone", "-c", "user.email=someone@example.org"]
+        subprocess.run([*git, "add", "."], cwd=other, check=True)
+        subprocess.run([*git, "commit", "-q", "-m", "manual edit"], cwd=other, check=True)
+        subprocess.run([*git, "push", "-q", "origin", "HEAD:main"], cwd=other, check=True, capture_output=True)
+        manual = hub.refs(foreign["id"])["refs/heads/main"]
+        revise(client, monkeypatch, path, evaluation_count=4)
+        build(client, path)
+        diverged = client.post(path + "/evaluator/publish")
+        assert diverged.status_code == 502 and "Nothing was overwritten" in diverged.json()["detail"], diverged.text
+        assert hub.refs(foreign["id"]) == {"refs/heads/main": manual, "refs/tags/v1": commit}
+
+        # A removed repository is not replaced silently.
+        del hub.repos[foreign["id"]]
+        gone = client.post(path + "/evaluator/publish")
+        assert gone.status_code == 502 and "no longer exists" in gone.json()["detail"] and len(hub.created) == 1
+        fresh = client.post(path + "/evaluator/publish", json={"new_repository": True})
+        assert fresh.status_code == 200 and len(hub.created) == 2, fresh.text
+        assert fresh.json()["release"]["published"]["repository_id"] == 1001
+        assert set(hub.refs(1001)) == {"refs/heads/main", "refs/tags/v1", "refs/tags/v2"}
+
+
+def test_publishing_is_off_without_an_owner_and_flags_releases_built_before_it(harness, monkeypatch, tmp_path):
+    app, mode, _ = harness
+    hub = fake_hub("command", tmp_path / "github")
+    monkeypatch.setattr(lite_publish, "default_client", lambda: hub)
+    app = create_app(tmp_path / "second-app")
+    try:
+        with TestClient(app) as client:
+            identifier, path = accepted(client, monkeypatch)
+            state = build(client, path)
+            assert state["publishing"]["available"] is False and state["publishing"]["owner"] is None
+            off = client.post(path + "/evaluator/publish")
+            assert off.status_code == 503 and "not configured" in off.json()["detail"] and hub.created == []
+            monkeypatch.setenv("AUTOKAGGLE_LITE_GITHUB_OWNER", "not a name")
+            assert "one GitHub account" in client.get(path + "/evaluator").json()["publishing"]["reason"]
+            # The release was built before an owner was set. It is published unchanged and the gap is stated.
+            monkeypatch.setenv("AUTOKAGGLE_LITE_GITHUB_OWNER", "bold-test")
+            record = client.post(path + "/evaluator/publish").json()["release"]["published"]
+            assert record["commit"] == state["release"]["evidence"]["commit"]
+            assert record["address_recorded"] is False and record["lock_repository"] == lite_publish.LOCAL
+    finally:
+        app.state.pool.shutdown(wait=True)
+
+
+def test_github_client_uses_the_gh_command_and_bounds_its_errors(tmp_path, monkeypatch):
+    calls = tmp_path / "calls.jsonl"
+    stub = tmp_path / "gh"
+    stub.write_text(f"""#!{sys.executable}
+import json, sys
+args = sys.argv[1:]
+body = sys.stdin.read() if "--input" in args else ""
+open({str(calls)!r}, "a").write(json.dumps({{"args": args, "body": body}}) + "\\n")
+path = args[args.index("-X") + 2]
+repo = {{"id": 7, "full_name": "bold-test/x", "name": "x", "owner": {{"login": "bold-test"}}, "html_url": "https://github.com/bold-test/x", "private": True, "description": None}}
+if path == "user": print(json.dumps({{"login": "lab-bot"}}))
+elif path == "users/bold-test": print(json.dumps({{"type": "Organization"}}))
+elif path == "users/lab-bot": print(json.dumps({{"type": "User"}}))
+elif path == "users/stranger": print(json.dumps({{"type": "User"}}))
+elif path in ("orgs/bold-test/repos", "user/repos", "repos/bold-test/x"): print(json.dumps(repo))
+elif path == "repos/bold-test/missing": print('{{"message": "Not Found"}}'); sys.stderr.write("gh: Not Found (HTTP 404)\\n"); sys.exit(1)
+else: sys.stderr.write("gh: Bad credentials (HTTP 401)\\n"); sys.exit(1)
+""")
+    stub.chmod(0o755)
+    monkeypatch.setenv("GH_TOKEN", "server-secret")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "provider-secret")
+    hub = lite_publish.GitHub(str(stub))
+    assert hub.available() == (True, "") and hub.account() == "lab-bot"
+    assert "OPENROUTER_API_KEY" not in hub.environment() and hub.environment()["GH_TOKEN"] == "server-secret"
+    assert hub.repository("repos/bold-test/missing") is None
+    assert hub.repository("repos/bold-test/x") == {"id": 7, "full_name": "bold-test/x", "owner": "bold-test", "name": "x",
+                                                   "url": "https://github.com/bold-test/x", "private": True, "description": ""}
+    assert hub.create("bold-test", "x", "d")["id"] == 7 and hub.create("lab-bot", "x", "d")["id"] == 7
+    sent = [json.loads(line) for line in calls.read_text().splitlines()]
+    created = [c for c in sent if "POST" in c["args"]]
+    assert [c["args"][c["args"].index("POST") + 1] for c in created] == ["orgs/bold-test/repos", "user/repos"]
+    assert all(json.loads(c["body"])["private"] is True and json.loads(c["body"])["auto_init"] is False for c in created)
+    assert "server-secret" not in calls.read_text()
+    with pytest.raises(lite_publish.PublishError, match="another person's account"):
+        hub.create("stranger", "x", "d")
+    with pytest.raises(lite_publish.PublishError, match="Bad credentials") as failure:
+        hub.repository("repositories/9")
+    assert "server-secret" not in str(failure.value)
+    assert hub.git_url({"full_name": "bold-test/x"}) == "https://github.com/bold-test/x.git"
+    assert lite_publish.GitHub(str(tmp_path / "absent")).available()[0] is False
+
+
+def test_repository_names_are_stable_and_distinct_per_problem(monkeypatch):
+    name = lite_publish.repository_name("25BC2D7D-2f5d-4232-a0ef-be0b696a651f", "  Fashion-MNIST: test accuracy!  ")
+    assert name == "lite-eval-fashion-mnist-test-accuracy-25bc2d7d"
+    assert lite_publish.repository_name("abcdef12-0000", "???") == "lite-eval-problem-abcdef12"
+    assert len(lite_publish.repository_name("abcdef12-0000", "x" * 300)) <= 100
+    assert lite_publish.repository_name("11111111-a", "Pendulum") != lite_publish.repository_name("22222222-a", "Pendulum")
+    monkeypatch.delenv("AUTOKAGGLE_LITE_GITHUB_OWNER", raising=False)
+    assert lite_publish.planned_address({"repository_name": "n"}) is None
+    monkeypatch.setenv("AUTOKAGGLE_LITE_GITHUB_OWNER", "bold-test")
+    assert lite_publish.planned_address({"repository_name": "n"}) == "https://github.com/bold-test/n"
+    assert lite_publish.planned_address({"repository_name": "n", "github": {"url": "https://github.com/bold-test/moved"}}) == "https://github.com/bold-test/moved"
+
+
+def test_token_client_reaches_github_over_https_without_any_command(monkeypatch):
+    seen = []
+    repo = {"id": 7, "full_name": "bold-test/x", "name": "x", "owner": {"login": "bold-test"}, "html_url": "https://github.com/bold-test/x", "private": True, "description": None}
+
+    def handler(request):
+        seen.append(request)
+        path = request.url.path
+        if path == "/user":
+            return httpx.Response(200, json={"login": "lab-bot"})
+        if path == "/users/bold-test":
+            return httpx.Response(200, json={"type": "Organization"})
+        if path in ("/orgs/bold-test/repos", "/repos/bold-test/x"):
+            return httpx.Response(201 if request.method == "POST" else 200, json=repo)
+        if path == "/repos/bold-test/missing":
+            return httpx.Response(404, json={"message": "Not Found"})
+        return httpx.Response(403, json={"message": "Resource not accessible by personal access token"})
+
+    hub = lite_publish.TokenGitHub("server-token", transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(lite_publish.subprocess, "run", lambda *a, **k: pytest.fail("The token client must not start a command."))
+    assert hub.account() == "lab-bot"
+    assert hub.repository("repos/bold-test/missing") is None
+    assert hub.repository("repos/bold-test/x")["url"] == "https://github.com/bold-test/x"
+    assert hub.create("bold-test", "x", "d")["id"] == 7
+    created = next(r for r in seen if r.method == "POST")
+    assert created.url == "https://api.github.com/orgs/bold-test/repos"
+    assert json.loads(created.content) == {"name": "x", "private": True, "description": "d", "auto_init": False, "has_wiki": False, "has_projects": False}
+    assert all(r.headers["Authorization"] == "Bearer server-token" and r.url.host == "api.github.com" for r in seen)
+    # A token that still awaits organization approval is refused with GitHub's own reason and no token text.
+    with pytest.raises(lite_publish.PublishError, match=r"Resource not accessible by personal access token \(HTTP 403\)") as failure:
+        hub.repository("repositories/9")
+    assert "server-token" not in str(failure.value)
+    assert hub.git_url({"full_name": "bold-test/x"}) == "https://github.com/bold-test/x.git"
+    if hub.available()[0]:  # The Git library is installed.
+        client, path = hub._remote({"full_name": "bold-test/x"})
+        assert "Http" in type(client).__name__ and path == b"/bold-test/x.git"
+    else:
+        assert "dulwich" in hub.available()[1]
+    broken = lite_publish.TokenGitHub("server-token", transport=httpx.MockTransport(lambda request: httpx.Response(401, json={"message": "Bad credentials"})))
+    assert broken.available() == (False, "The GitHub token on this server is not usable. It may have expired or may still await approval.") or "dulwich" in broken.available()[1]
+
+
+def test_a_server_token_selects_the_token_client(monkeypatch):
+    monkeypatch.delenv("AUTOKAGGLE_LITE_GITHUB_TOKEN", raising=False)
+    assert type(lite_publish.default_client()) is lite_publish.GitHub
+    monkeypatch.setenv("AUTOKAGGLE_LITE_GITHUB_TOKEN", " server-token ")
+    client = lite_publish.default_client()
+    assert type(client) is lite_publish.TokenGitHub and client._token == "server-token"
+    assert "AUTOKAGGLE_LITE_GITHUB_TOKEN" not in lite_publish.GitHub().environment()
+
+
+def test_container_runtime_can_be_described_for_a_user_with_no_account_entry(monkeypatch):
+    import getpass, pwd
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: (_ for _ in ()).throw(KeyError(uid)))
+    monkeypatch.setattr(getpass, "getuser", lambda: (_ for _ in ()).throw(KeyError("no account")))
+    runtime = lite_build.DockerRuntime()
+    assert runtime.user == f"uid{os.getuid()}" and runtime.tag.startswith(runtime.user + "_autokaggle-lite-build:")

@@ -33,18 +33,41 @@ The expected scores above were written by the same build job. These checks were 
 - With the `zero` failure rule, `evaluate.py` printed fitness 0.0 for an artifact on which no seed completed. It now prints no fitness and the status `no_completed_seed`.
 - The container and image names used the `USER` variable, which was wrong under the local service launcher. They now use the account that owns the process.
 
+## Published to GitHub — 11 November
+
+Publishing ran from a local Lite server with `AUTOKAGGLE_LITE_GITHUB_OWNER=yhg01` and the developer's own `gh` login. This is a trial under one personal account. Nothing was created in `bold-lab-ai`.
+
+| | Fashion-MNIST | Pendulum |
+| --- | --- | --- |
+| Private repository | `yhg01/lite-eval-fashion-mnist-f72b6091` | `yhg01/lite-eval-pendulum-f1db9f76` |
+| First publish | `v2`, built before an owner was set. Pushed unchanged; its lock file names `local:evaluator-release` and the dialog states this | Not published at `v1` |
+| Rebuilt with an owner set | `v3`, commit `3fd6d8864d3f3377cad9bb3922c849530dd3c28b`, 165 s, 29 model requests | `v2`, commit `ac42a4ce6fc3f420bc3b81aff3002b8a9639a6a2`, 164 s, 24 model requests |
+| Fresh-clone test of the rebuild | 10 of 10 checks | 10 of 10 checks |
+| Refs on GitHub after publishing | `main` and `v3` at the tested commit; `v1` and `v2` kept | `main` and `v2` at the tested commit; `v1` kept |
+| Lock file and README name the repository | Yes | Yes |
+
+A second publish of the same Pendulum release reused the repository and pushed nothing.
+
+Each repository was then cloned from GitHub into a clean directory on macOS with python.org Python 3.12, set up by its README steps, and checked against values that do not come from the build:
+
+- **Fashion-MNIST `v3`.** `fetch_assets.py` retrieved both declared files. The 5 November class-zero file scored 0.10000000000000002, the mean of three per-seed values of 0.1. A file with exactly 5,000 correct labels scored 0.5. A one-row file received no score.
+- **Pendulum `v2`.** The evaluator equalled a separate Gymnasium rollout for torque 0.0 (−1134.5448580798482), 2.0 (−1525.0564481201336), and −0.5 (−1277.2386274060827) on the ten contract seeds. Torque 5 received no score.
+- **Result files.** Each `results.json` names the GitHub address as `code_repository` and the tested commit as `code_revision`. The Lite results control accepted one upload per problem.
+
 ## Automated tests
 
-- The complete Python suite passed, with 17 tests in `tests/test_lite_build.py`. 61 Lite and login client checks passed.
+- The complete Python suite passed, with 22 tests in `tests/test_lite_build.py`. All 218 client checks passed.
 - With a stand-in agent that only writes the evaluator files, the pipeline passed in the local and Docker runtimes. Draft states, a contract change, the release file rules, the gateway limits, and provider selection are covered.
+- Publishing is covered with a GitHub stand-in whose repositories are local Git directories, so the real push and ref checks run. Covered: one repository per problem, reuse on retry, a second release in the same repository, a foreign repository of the same name, a repository that is not private, commits made outside the application, a removed repository, and a release built before an owner was set. The `gh` wrapper is tested against a stub command.
 - Browser, 10 November: accepted contract, a blocker, a failed build with the provider's 401, and a ready release with working downloads. That contract was seeded and that release came from the stand-in agent.
 
 ## Not tested
 
 - **The OpenRouter route, live.** It is unchanged code and its tests pass. A live interview or build with `openai/gpt-6.1-sol` still needs credit on that account.
 - **A checkpoint with model weights.** The loader path worked for a JSON policy. No PyTorch case was run.
-- **A browser view of a live build.** The live builds were started through the HTTP API.
-- **Larger or private assets, source builds of dependencies, GitHub, and BOLD OS.**
+- **A browser view of a live build or of the publishing control.** Both were driven through the HTTP API. The dialog is covered by client tests only.
+- **Publishing under `bold-lab-ai`.** The trial used a personal account. Organization creation rights were read from the API but no organization repository was created. Collaborator access, the lab template, and a hosted server with `GH_TOKEN` were not exercised.
+- **Larger or private assets, source builds of dependencies, and BOLD OS.**
 
 ## Repeat the live check
 
@@ -56,5 +79,7 @@ python autokaggle/test-results/lite-build-2026-11-10/onboard.py fashion_mnist
 python autokaggle/test-results/lite-build-2026-11-10/onboard.py pendulum
 python autokaggle/test-results/lite-build-2026-11-10/status.py --wait
 ```
+
+To repeat publishing, also set `AUTOKAGGLE_LITE_GITHUB_OWNER` when starting the server, then run `publish.py NAME --publish` and `from_github.py NAME` from the same directory.
 
 Omit `AUTOKAGGLE_LITE_PROVIDER` to use OpenRouter. Scripts, receipts, bundles, and local data are in the ignored `autokaggle/test-results/lite-build-2026-11-10/` directory.

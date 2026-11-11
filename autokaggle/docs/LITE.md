@@ -10,11 +10,11 @@ One accepted contract produces a private website preview, README, research ZIP, 
 
 **BOLD OS as the project home.** Collaborators start and resume Lite from BOLD OS. The Problem Bank holds the problem record and its status. Benchmarks links the problem to the evaluator repo and pinned version. Show incomplete work as a draft until the scoring test passes. Preserve the BOLD OS record IDs and repo ID so a retry updates the same records. Lite can supply the interview and build backend. The existing standalone preview is part of the current implementation and does not satisfy this requirement.
 
-These are merge requirements. The evaluator build and its clean-clone scoring check are implemented for local use; see **Build evaluator** below. Evaluator repository publishing on GitHub and a write integration for the BOLD OS sections are still needed.
+These are merge requirements. The evaluator build and its clean-clone scoring check are implemented for local use; see **Build evaluator** below. Publishing a tested release to a private GitHub repository is implemented; see **Publish to GitHub**. It has run only under one developer account. Publishing under `bold-lab-ai` with the lab's template and access list, and a write integration for the BOLD OS sections, are still needed.
 
 ## Build evaluator
 
-After a contract is accepted, **Evaluator → Build evaluator** produces a tested evaluator release for that exact contract version. It publishes nothing. See the [10 November build record](LITE_EVALUATOR_BUILD_2026-11-10.md) for what has and has not been tested.
+After a contract is accepted, **Evaluator → Build evaluator** produces a tested evaluator release for that exact contract version. A build publishes nothing; publishing is a separate action. See the [10 November build record](LITE_EVALUATOR_BUILD_2026-11-10.md) for what has and has not been tested.
 
 1. **Freeze.** The build reads the frozen `contract.json` of the current package and binds to its version and digest. It derives the metric direction: `success_rate`, `accuracy`, and `mean_score` are maximized; `rmse` and `mae` are minimized. A local-only source, private scoring targets, or a reserved adapter module name stops the build with a named decision before any model call.
 2. **Implement.** A coding agent (opencode, pinned in `deploy/lite-build.Dockerfile`) works in a disposable workspace. It writes the task adapter, an artifact loader for policies and checkpoints, `requirements.lock`, `assets.json`, three example artifacts, their expected scores, and a separate calculation of those scores. It must report a blocker instead of inventing a decision that affects scoring. The instructions are in `prompts/lite_build.md`.
@@ -42,6 +42,34 @@ Limits of this version:
 - Builds need Docker on the application host. The hosted Lite pod has no Docker, so the build control reports that builds are unavailable there. `AUTOKAGGLE_LITE_BUILD_RUNTIME=local` runs the agent as a host process for development only.
 - Dependencies install as wheels only unless `AUTOKAGGLE_LITE_BUILD_ALLOW_SDIST=1`. An artifact is one file. The five contract metrics are unchanged.
 - Settings: `AUTOKAGGLE_LITE_BUILD_MODEL` (default: the selected provider's Lite model), `AUTOKAGGLE_LITE_BUILD_EFFORT` (`medium`), `AUTOKAGGLE_LITE_BUILD_MINUTES` (30), `AUTOKAGGLE_LITE_BUILD_REQUESTS` (150), `AUTOKAGGLE_LITE_BUILD_CPUS` (2), `AUTOKAGGLE_LITE_BUILD_MEMORY_GB` (4), `AUTOKAGGLE_LITE_BUILD_CONCURRENCY` (1).
+
+## Publish to GitHub
+
+**Evaluator → Publish to GitHub** pushes the tested release for the current contract to a private repository for that problem. It is available when `AUTOKAGGLE_LITE_GITHUB_OWNER` names the account or organization that holds evaluator repositories and the server has a usable GitHub credential.
+
+- **One repository per problem.** The name is `lite-eval-<title>-<first eight characters of the problem ID>`. It is fixed at the first build and does not follow later title changes. The repository ID and URL are saved on the problem before the push, so a retry reuses the same repository.
+- **The tested commit, unchanged.** The push carries `main` and the `v<N>` release tags in one all-or-nothing push, without force. Afterwards the application reads the refs back from GitHub and requires the tested commit.
+- **Private only.** A new repository is created private. The application refuses to push to a repository that is not private.
+- **Nothing is overwritten.** A repository of the same name that was not created for the problem is refused. So is a repository whose `main` or release tags were changed outside the application.
+- **A removed repository is not replaced silently.** Publishing reports the saved repository as missing. `POST .../lite/evaluator/publish` with `{"new_repository": true}` creates a fresh one. Use it only when the saved repository was removed on purpose.
+- **The release names its repository.** A release built while an owner is configured records the repository address in `evaluator.lock.json` and in its README, and result files carry it as `code_repository`. A release built earlier records `local:evaluator-release`. It can still be published unchanged; the dialog states the gap. Rebuild to record the address.
+
+There are two ways to reach GitHub. The application picks one at start.
+
+- **A developer machine: the `gh` login.** The application runs `gh api` and lets `gh` answer Git's credential request for the one push. It never reads the token.
+- **A server: `AUTOKAGGLE_LITE_GITHUB_TOKEN`.** When this is set, the application calls the GitHub API over HTTPS and pushes with the `dulwich` library. It starts no `git` or `gh` program, so it works in the hosted pod, which has neither. Use a fine-grained token whose resource owner is the evaluator organization, with repository access "All repositories" and the repository permissions Administration (read and write) and Contents (read and write). A token that awaits organization approval is reported as GitHub's refusal when publishing is tried.
+
+In both cases the build container never receives the credential, and no error text includes it. The token client refuses a rewritten `main` itself, because a Git server would accept one.
+
+For hosted Lite, the deployer reads the token from the private file `$HOME/.config/autokaggle/lite-github.env` and places it only in the `lite-secrets` Secret. `deploy --github-owner NAME` sets the owner in `lite-config`; the owner is kept on later deployments unless the option is given again. See [the deployment record](../deploy/LITE_WEB.md). A personal login with access to unrelated repositories must not be placed on a shared server.
+
+Limits of this version:
+
+- Hosted Lite cannot build evaluators, because builds need Docker. It therefore has no tested release to publish yet. Its publishing configuration is in place for when hosted builds exist.
+- Repository access is not managed. The creator is the only member until someone adds collaborators on GitHub. The project's access list is not yet applied.
+- The lab-approved repository template and its project-tracking files are not applied.
+- BOLD OS Problem Bank and Benchmarks records are not written.
+- After a repository is transferred or renamed, publishing follows it by ID. Earlier releases keep the old address in their lock file.
 
 ## Start a session
 
@@ -143,6 +171,7 @@ All endpoints retain owner access checks and same-origin writes.
 | `POST .../lite/results` | Submit `request_id`, `manifest`, and all `results` records. |
 | `GET .../lite/evaluator` | Read the evaluator status, the current tested release, the last build's blockers, cause, and tests. |
 | `POST .../lite/evaluator/build` | Start a build with `request_id`. Prepares the package first if needed. 503 when builds are unavailable. |
+| `POST .../lite/evaluator/publish` | Push the tested release to the problem's private GitHub repository. Optional `new_repository`. 409 without a tested release, 503 when publishing is unavailable, 502 with the cause when GitHub or a safety check refuses. |
 | `GET .../lite/evaluator/bundle` | Download the tested release as a Git bundle. 409 unless a release matches the current contract. |
 | `GET .../lite/evaluator/config` | Download the release's `evaluation.yaml`. |
 | `GET .../lite/evaluator/readme.md` | Download the release's README. |
