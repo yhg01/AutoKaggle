@@ -18,7 +18,33 @@ interviews. Each project still has its own write lock. Do not scale replicas wit
 model first.
 
 
-## Current release — 5 November 2026, 18:12 UTC
+## Live source differs from this branch — checked 11 November 2026
+
+The record below is the last release made from this branch. It is not what is running. On 11 November the `lite`
+Deployment used ConfigMap `lite-source-358a9485e98b1481`, created on 9 November at 02:18 UTC, with source SHA256
+`358a9485e98b14819127025e183a4b3a845ccb9c826ef1b490b405e2edb4c37e`. That release was made from the separate
+`autokaggle-speedrun` checkout. Compared with this branch merged with `main`, the live source also has a
+`scratch` or `speedrun` starting path (`PATCH /api/projects/{id}/onboarding`) and an uploaded-paper import. Neither
+is in this branch or in `main`. This branch adds the evaluator build and publishing code, which the live source lacks.
+
+A release from this branch would remove those live features. Combine the two lines of work first, or accept that
+loss explicitly. The evaluator and publishing changes have not been deployed. On 11 November the five saved Lite
+sessions were idle and the database passed its integrity check.
+
+## GitHub publishing settings
+
+`deploy` reads an optional token from `$HOME/.config/autokaggle/lite-github.env` (`AUTOKAGGLE_LITE_GITHUB_TOKEN`) and
+places it only in the `lite-secrets` Secret. `deploy --github-owner NAME` sets `AUTOKAGGLE_LITE_GITHUB_OWNER` in
+`lite-config`. The owner is kept on later deployments unless the option is given again; an empty value turns
+publishing off. Both values enter the deployment's settings hash, so a change restarts Lite. The pinned runtime
+packages include `dulwich` and `urllib3` for the token route. Hosted Lite cannot build evaluators, so these settings
+have no effect until hosted builds exist. See [Publish to GitHub](../docs/LITE.md#publish-to-github).
+
+Before a release, rehearse the pod locally: run the pinned image with a read-only root as user 1000, extract the source
+archive, install `web-requirements.lock` with the init container's command, and start the application with the
+generated settings. On 11 November this rehearsal found two start failures that the tests had missed.
+
+## Last release from this branch — 5 November 2026, 18:12 UTC
 
 The readiness gate update is deployed as source SHA256:
 
