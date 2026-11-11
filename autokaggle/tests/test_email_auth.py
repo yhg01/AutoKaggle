@@ -111,6 +111,44 @@ def test_access_key_alone_cannot_sign_in(client):
     assert client.get("/api/projects").json()["projects"] == []
 
 
+def test_anonymous_key_attempts_cannot_lock_out_administrators(app, deliveries):
+    # Behind the ingress every browser shares a source address. Requests without a
+    # delivered code must not consume any administrator's key allowance.
+    with TestClient(app, base_url="https://testserver") as stranger:
+        for _ in range(access.ATTEMPT_LIMIT * 3):
+            result = stranger.post("/api/access/email/verify", json={"challenge_id": "x" * 43,
+                "code": "123456", "access_code": "wrong-key"}, headers=challenge(stranger))
+            assert result.status_code == 410
+    assert app.state.access._attempts == {}
+    with TestClient(app, base_url="https://testserver") as admin:
+        pending = request_code(admin, "admin@example.org").json()
+        result = admin.post("/api/access/email/verify", json={"challenge_id": pending["challenge_id"],
+            "code": deliveries[-1][1], "access_code": TEST_CODE}, headers=challenge(admin))
+        assert result.status_code == 200 and result.json()["is_admin"] is True
+
+
+def test_wrong_admin_keys_lock_only_that_email_address(app, deliveries):
+    with TestClient(app, base_url="https://testserver") as guesser:
+        pending = request_code(guesser, "guesser@example.org").json()
+        code = deliveries[-1][1]
+        payload = {"challenge_id": pending["challenge_id"], "code": code, "access_code": "wrong-key"}
+        for _ in range(access.ATTEMPT_LIMIT):
+            assert guesser.post("/api/access/email/verify", json=payload, headers=challenge(guesser)).status_code == 401
+        payload["access_code"] = TEST_CODE
+        locked = guesser.post("/api/access/email/verify", json=payload, headers=challenge(guesser))
+        assert locked.status_code == 429 and locked.headers["retry-after"] == str(access.ATTEMPT_WINDOW)
+        assert access.ADMIN_COOKIE not in guesser.cookies and email_auth.USER_COOKIE not in guesser.cookies
+        # The email code itself was never guessed, so plain sign-in still works.
+        plain = guesser.post("/api/access/email/verify", json={"challenge_id": pending["challenge_id"], "code": code},
+                             headers=challenge(guesser))
+        assert plain.status_code == 200 and plain.json()["is_admin"] is False
+    with TestClient(app, base_url="https://testserver") as admin:
+        pending = request_code(admin, "admin@example.org").json()
+        result = admin.post("/api/access/email/verify", json={"challenge_id": pending["challenge_id"],
+            "code": deliveries[-1][1], "access_code": TEST_CODE}, headers=challenge(admin))
+        assert result.status_code == 200 and result.json()["is_admin"] is True
+
+
 def test_unified_admin_sign_in_retains_own_workspace_and_plain_sign_in_removes_role(client, deliveries, monkeypatch):
     login(client, deliveries)
     own = client.post("/api/projects", json={"title": "Personal research"}).json()

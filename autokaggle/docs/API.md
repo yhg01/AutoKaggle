@@ -30,6 +30,13 @@ reset the five-attempt limit within ten minutes. Sends are limited to one per
 restarts. A 429 response includes `Retry-After`. Invalid input returns 400, an
 incorrect code returns 401, and expired, consumed, or replaced codes return 410.
 
+An optional `access_code` on verify, or on `POST /api/access/login`, requests
+administrator access. Key attempts count only after the request holds a pending,
+delivered email code or a live email session. Only incorrect keys count. The limit
+is five per email address in a rolling five-minute window, held in process memory.
+It is not keyed by client address, because every request reaches the application
+through the shared ingress. A wrong key leaves the email code unused.
+
 User sessions last up to 30 days and can be revoked. Codes and session tokens
 are stored as protected digests. HTTPS cookies are HttpOnly and SameSite. The
 verified account email fills the private organizer contact for new projects.

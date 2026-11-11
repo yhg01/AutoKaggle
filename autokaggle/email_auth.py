@@ -106,6 +106,23 @@ class EmailAuth:
             con.execute("UPDATE email_codes SET delivered=1 WHERE id=? AND used=0", (identifier,))
         return {"challenge_id": identifier, "expires_in": CODE_SECONDS, "resend_after": RESEND_SECONDS}
 
+    def email_key(self, email):
+        """Return the stable private key used for per-address limits."""
+        return self._digest("email", email.lower())
+
+    def challenge_email_key(self, identifier):
+        """Return the address key for a pending, delivered code, or None.
+
+        This does not consume or guess the code. It lets callers bind other
+        limits to the address that received the code, not to a client address.
+        """
+        if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", identifier):
+            raise HTTPException(400, "Enter the six-digit code from your email.")
+        with self.store.connection() as con:
+            row = con.execute("SELECT email_key FROM email_codes WHERE id=? AND expires>? AND used=0 AND delivered=1",
+                              (identifier, time.time())).fetchone()
+        return row[0] if row else None
+
     def verify(self, identifier, code):
         if (not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", identifier)
                 or not isinstance(code, str) or not re.fullmatch(r"[0-9]{6}", code)):

@@ -60,7 +60,8 @@ snapshot. No review data is persisted in browser storage.
 
 The login page has one Sign in button. Email verification is always required;
 checking Administrator access reveals an Access Key field. Both credentials are
-validated in one request. Reauthenticating the same email preserves its workspace
+validated in one request. Incorrect keys are limited to five per email address in
+five minutes; requests without a delivered email code do not count. Reauthenticating the same email preserves its workspace
 and cached drafts. An invalid key leaves the email code unused. The eight-hour elevated cookie is bound to the
 account owner. It cannot grant access without that email session or after an
 account switch. An access key alone cannot sign in. Legacy shared administrator
