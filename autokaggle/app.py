@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import advisor, conversation, environments, onboarding_setup, workflow, notifications, submissions, observability, workspace, sources, lite
+from . import advisor, conversation, environments, onboarding_setup, workflow, notifications, submissions, observability, workspace, sources, lite, lite_build, lite_providers
 from .access import AccessGate
 from .email_auth import USER_COOKIE
 from .core import datasets
@@ -916,7 +916,9 @@ def create_app(data_dir: Path | None = None):
 
     workspace.register(app, store, access, get, editing, conversation_output)
     sources.register(app, store, pool, get, editing, conversation_output)
+    lite_providers.install(lite)
     lite.register(app, store, pool, access, get, editing)
+    lite_build.register(app, store, pool, access, get, editing)
 
     (HERE / "static").mkdir(exist_ok=True)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")

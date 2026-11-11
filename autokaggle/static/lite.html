@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fb"><title>BOLD AutoKaggle Lite</title>
   <link rel="icon" href="/static/bold-butterfly.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/lite.css?v=20261105"><script src="/static/lite.js?v=20261105" defer></script>
+  <link rel="stylesheet" href="/static/lite.css?v=20261110"><script src="/static/lite.js?v=20261110" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#message-input">Skip to conversation</a>
@@ -29,7 +29,7 @@
         <label class="sr-only" for="message-input">Your reply or correction</label><textarea id="message-input" rows="2" maxlength="30000" placeholder="Describe your question, answer, or what you want to change…" disabled></textarea>
         <div class="composer-bottom"><span id="composer-hint">Create a session to start.</span><button id="send-message" class="button primary" type="submit" disabled>Send <span aria-hidden="true">↑</span></button></div>
       </form>
-      <footer class="conversation-tools"><button id="sources-button" class="button quiet" type="button" disabled><span aria-hidden="true">＋</span> Paper & repository</button><div><button id="package-button" class="button quiet" type="button" disabled>Research package</button><button id="results-button" class="button quiet" type="button" disabled>Results <span id="result-count"></span></button></div></footer>
+      <footer class="conversation-tools"><button id="sources-button" class="button quiet" type="button" disabled><span aria-hidden="true">＋</span> Paper & repository</button><div><button id="package-button" class="button quiet" type="button" disabled>Research package</button><button id="evaluator-button" class="button quiet" type="button" disabled>Evaluator</button><button id="results-button" class="button quiet" type="button" disabled>Results <span id="result-count"></span></button></div></footer>
     </section>
     <aside class="definition" aria-labelledby="definition-title"><div class="definition-heading"><span class="eyebrow">THE EXPERIMENT</span><h2 id="definition-title">Six decisions, one contract.</h2><p id="coverage-label">The agent records evidence as you go.</p><progress id="coverage" value="0" max="6" aria-label="Definition coverage">0 of 6</progress></div><div id="checklist" class="checklist"></div><div class="definition-footer"><strong id="readiness-title">Start with what you know</strong><p id="readiness-detail">A reference baseline is optional. The contract keeps open decisions visible.</p><button id="build-package" class="button secondary" type="button" disabled>Prepare research package <span aria-hidden="true">→</span></button></div></aside>
   </main>

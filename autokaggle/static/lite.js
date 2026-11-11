@@ -43,6 +43,7 @@
     $("send-message").disabled ||= !$("message-input").value.trim();
     $("package-button").disabled = !active;
     $("results-button").disabled = !active;
+    $("evaluator-button").disabled = !active;
     for (const id of ["new-button", "sessions-button", "welcome-start"]) $(id).disabled = state.auth || state.busy || state.loading || (id !== "sessions-button" && state.access?.can_create_projects === false);
     $("review-proposals").disabled = !active || blocked;
     $("refresh-session").hidden = !state.id || state.auth; $("refresh-session").disabled = state.busy || state.loading;
@@ -53,7 +54,7 @@
     for (const button of content.querySelectorAll("[data-mutation]")) button.disabled = blocked || state.auth || (button.dataset.packageRequired === "true" && state.data?.package?.status !== "ready");
   }
   function clearPrivate() {
-    state.generation++; clearTimeout(state.poll); state.data = null; state.busy = false; state.loading = false; state.messageKey = "";
+    state.generation++; clearTimeout(state.poll); clearTimeout(state.evaluatorPoll); state.evaluator = null; state.data = null; state.busy = false; state.loading = false; state.messageKey = "";
     $("messages").replaceChildren(); $("message-input").value = ""; $("proposal-banner").hidden = true; $("recovery-banner").hidden = true; $("welcome").hidden = false; $("challenge-title").textContent = "Sign in to continue your research.";
     content.replaceChildren(); if (dialog.open) dialog.close(); renderChecklist(); controls();
   }
@@ -337,11 +338,68 @@
       authFailure();
     } catch (error) { await failure(error); } finally { state.busy = false; controls(); }
   }
+  // Evaluator build. A separate saved record, loaded when its dialog opens.
+  const evaluatorText = {
+    not_built: ["Not built", "No evaluator exists for this contract yet. A build writes the scoring code, then tests it from a fresh clone."],
+    queued: ["Queued", "The build is waiting for a slot."],
+    building: ["Building", "A coding agent is implementing and testing the evaluator in a disposable workspace. This can take several minutes."],
+    testing: ["Testing", "The examples are being scored from a fresh clone in a clean environment."],
+    ready: ["Ready", "This evaluator passed its scoring test from a fresh clone. It is bound to the current contract."],
+    blocked: ["Draft · a decision is needed", "A decision or input that affects scoring is missing. Answer it in the conversation, accept the updated contract, then build again."],
+    failed: ["Draft · the build did not pass", "The evaluator stays a draft. The cause is shown below."],
+    stale: ["Draft · the contract changed", "The contract changed after the last tested evaluator. Build again for the current contract."]
+  };
+  const evaluatorActive = view => ["queued", "building", "testing"].includes(view?.status);
+  function renderEvaluator(view) {
+    if (state.dialog !== "evaluator" || !dialog.open) return; content.replaceChildren();
+    const [label, detail] = evaluatorText[view.status] || evaluatorText.not_built, release = view.release, latest = view.latest;
+    const status = el("div", null, "package-status"); status.append(el("strong", label + ". "), el("span", evaluatorActive(view) && latest?.stage ? latest.stage + "." : detail)); content.append(status);
+    content.append(el("p", view.contract.version ? "Accepted contract version " + view.contract.version : view.contract.accepted ? "The contract is accepted. Its package is prepared when the build starts." : "Accept the contract before building its evaluator.", "version"));
+    if (latest?.blockers?.length) { const box = el("div", null, "extraction-notes"); box.append(el("h3", "Decisions that affect scoring")); const ul = el("ul"); for (const item of latest.blockers) ul.append(el("li", human(item.field) + ": " + item.reason)); box.append(ul); content.append(box); }
+    else if (latest?.cause && !evaluatorActive(view)) { const box = el("div", null, "extraction-notes"); box.append(el("h3", "Why this build is not ready"), el("p", latest.cause)); content.append(box); }
+    if (release) {
+      const e = release.evidence, tag = e.tag;
+      content.append(el("h3", "Tested release", "section-label"), el("p", `Evaluator version ${release.evaluator_version}, commit ${e.commit}. The example ${e.fixture} has expected fitness ${e.expected_fitness}; the fresh clone scored ${e.observed_fitness}.`));
+      content.append(el("pre", `git clone evaluator.bundle evaluator && cd evaluator && git checkout ${tag}\npython -m venv .venv && . .venv/bin/activate\npython -m pip install -r requirements.lock\npython fetch_assets.py\n${e.command}    # expected fitness ${e.expected_fitness}\npython evaluate.py --artifact PATH --output results.json`, "contract"));
+    }
+    const shown = release || latest;
+    if (shown?.tests?.length) { content.append(el("h3", release ? "Fresh-clone tests" : "Tests from the last build", "section-label")); const ul = el("ul", null, "test-list"); for (const t of shown.tests) { const li = el("li", null, t.passed ? "test-pass" : "test-fail"); li.append(el("strong", (t.passed ? "✓ " : "✗ ") + human(t.name)), el("span", " — " + t.detail)); ul.append(li); } content.append(ul); }
+    if (shown?.model) content.append(el("p", `${release ? "Built" : "Last attempt"} by ${shown.model.agent} with ${shown.model.name} on ${shown.model.provider} (${shown.model.reasoning} reasoning, ${shown.model.requests} model requests) in a ${shown.runtime?.kind || "separate"} runtime.` + (release ? " Expected scores come from a separate calculation in the same build. Review each example's basis before relying on it." : ""), "hint"));
+    if (view.earlier_releases?.length) content.append(el("p", "Earlier tested releases are kept: " + view.earlier_releases.map(r => `version ${r.evaluator_version} (contract ${r.contract_version})`).join(", ") + ".", "hint"));
+    const actions = el("div", null, "dialog-actions");
+    if (release) for (const [text, url, download] of [["Download release ↓", release.bundle_url, true], ["Download YAML config ↓", release.config_url, true], ["Read README ↗", release.readme_url, false]]) { const a = artifactLink(text, url, download); if (a) actions.append(a); }
+    const start = button(release ? "Rebuild evaluator" : "Build evaluator", buildEvaluator, true, true);
+    start.disabled = evaluatorActive(view) || !view.available || !view.contract.accepted || busy(); actions.append(start); content.append(actions);
+    if (!view.available) content.append(el("p", view.unavailable_reason || "Evaluator builds are not available on this server.", "hint"));
+    else if (!view.contract.accepted) content.append(el("p", "Resolve and accept the open contract decisions first.", "hint"));
+    else content.append(el("p", `A build may use up to ${view.settings.minutes} minutes and ${view.settings.requests} model requests. It publishes nothing. The release stays in this session until a separate publishing step.`, "hint"));
+  }
+  async function loadEvaluator() {
+    const generation = state.generation; clearTimeout(state.evaluatorPoll);
+    try {
+      const view = await api(path("/evaluator")); if (generation !== state.generation) return;
+      const finished = evaluatorActive(state.evaluator) && !evaluatorActive(view); state.evaluator = view; renderEvaluator(view);
+      if (finished) reload();
+      if (evaluatorActive(view) && state.dialog === "evaluator" && dialog.open) state.evaluatorPoll = setTimeout(loadEvaluator, 3000);
+    } catch (error) { if (generation === state.generation) await failure(error); }
+  }
+  function showEvaluator() { if (!ready()) return; showDialog("evaluator", "Evaluator", "BUILD AND TEST"); content.append(el("p", "Loading the build record…", "hint")); loadEvaluator(); }
+  async function buildEvaluator() {
+    if (busy() || !ready()) return;
+    const generation = state.generation, request = pendingID("/evaluator/build", { version: state.evaluator?.contract?.version || "", builds: state.evaluator?.builds || 0 });
+    state.busy = true; modalError(); controls();
+    try {
+      const view = await api(path("/evaluator/build"), { method: "POST", body: JSON.stringify({ request_id: request.id }) }); if (generation !== state.generation) return;
+      stored(request.key, null); state.evaluator = view; state.busy = false; renderEvaluator(view); reload();
+      if (evaluatorActive(view)) state.evaluatorPoll = setTimeout(loadEvaluator, 3000);
+    } catch (error) { if (generation === state.generation) await failure(error); }
+    finally { if (generation === state.generation) { state.busy = false; controls(); } }
+  }
   $("message-form").addEventListener("submit", event => { event.preventDefault(); sendMessage(); });
   $("message-input").addEventListener("input", () => { if (state.id) stored(draftKey(), $("message-input").value); controls(); });
   $("message-input").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); } });
   $("close-dialog").addEventListener("click", () => dialog.close());
-  for (const [id, action] of [["new-button", showNew], ["welcome-start", showNew], ["sessions-button", showSessions], ["sources-button", showSources], ["review-proposals", showProposals], ["package-button", showPackage], ["results-button", showResults], ["sign-out", signOut], ["refresh-session", reload], ["retry-request", () => mutate("/retry", {})], ["continue-round", () => mutate("/continue", {})], ["build-package", () => mutate("/build", {}, { after: showPackage })]]) $(id).addEventListener("click", action);
+  for (const [id, action] of [["new-button", showNew], ["welcome-start", showNew], ["sessions-button", showSessions], ["sources-button", showSources], ["review-proposals", showProposals], ["package-button", showPackage], ["evaluator-button", showEvaluator], ["results-button", showResults], ["sign-out", signOut], ["refresh-session", reload], ["retry-request", () => mutate("/retry", {})], ["continue-round", () => mutate("/continue", {})], ["build-package", () => mutate("/build", {}, { after: showPackage })]]) $(id).addEventListener("click", action);
   window.addEventListener("storage", event => { if (event.key === "autokaggle-session-ended") authFailure(); });
   window.addEventListener("focus", () => { if (ready() && !state.busy && !state.loading) reload(); });
   async function start() {

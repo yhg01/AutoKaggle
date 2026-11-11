@@ -10,7 +10,38 @@ One accepted contract produces a private website preview, README, research ZIP, 
 
 **BOLD OS as the project home.** Collaborators start and resume Lite from BOLD OS. The Problem Bank holds the problem record and its status. Benchmarks links the problem to the evaluator repo and pinned version. Show incomplete work as a draft until the scoring test passes. Preserve the BOLD OS record IDs and repo ID so a retry updates the same records. Lite can supply the interview and build backend. The existing standalone preview is part of the current implementation and does not satisfy this requirement.
 
-These are merge requirements. The current Lite implementation still needs evaluator repo provisioning, the clean-clone scoring check, and a write integration for the BOLD OS sections.
+These are merge requirements. The evaluator build and its clean-clone scoring check are implemented for local use; see **Build evaluator** below. Evaluator repository publishing on GitHub and a write integration for the BOLD OS sections are still needed.
+
+## Build evaluator
+
+After a contract is accepted, **Evaluator → Build evaluator** produces a tested evaluator release for that exact contract version. It publishes nothing. See the [10 November build record](LITE_EVALUATOR_BUILD_2026-11-10.md) for what has and has not been tested.
+
+1. **Freeze.** The build reads the frozen `contract.json` of the current package and binds to its version and digest. It derives the metric direction: `success_rate`, `accuracy`, and `mean_score` are maximized; `rmse` and `mae` are minimized. A local-only source, private scoring targets, or a reserved adapter module name stops the build with a named decision before any model call.
+2. **Implement.** A coding agent (opencode, pinned in `deploy/lite-build.Dockerfile`) works in a disposable workspace. It writes the task adapter, an artifact loader for policies and checkpoints, `requirements.lock`, `assets.json`, three example artifacts, their expected scores, and a separate calculation of those scores. It must report a blocker instead of inventing a decision that affects scoring. The instructions are in `prompts/lite_build.md`.
+3. **Isolate.** The agent runs in a non-root container with no added capabilities and bounded CPU, memory, processes, and time. It receives a one-build token for a loopback gateway (`lite_gateway.py`). The gateway holds the provider key, allows only the configured model, sets the reasoning level, and caps the number of requests. Application, GitHub, and provider credentials never enter the container. Outbound network stays open for package and asset downloads.
+4. **Assemble.** The application builds the release itself. It takes only publishable agent files: top-level Python modules, `requirements.lock`, `assets.json`, `NOTES.md`, and `fixtures/`. It rejects links, large files, unpinned requirements, non-HTTPS assets, and a score calculation that imports the evaluator. It writes `evaluate.py`, `run.py`, `gym_adapter.py`, and `fetch_assets.py` from its own source, plus `README.md`, `evaluation.yaml`, the unchanged `contract.json`, and `evaluator.lock.json` with a SHA-256 for every file. The YAML and the runner's `contract.json` come from the same accepted contract.
+5. **Test from a fresh clone.** The candidate commit is cloned in a second clean container. Only `requirements.lock` is installed, into a new virtual environment. Declared assets are downloaded and verified. The test then runs the separate score calculation, scores the valid and the wrong example and compares each with its expected score, requires the wrong example to score worse, requires the invalid artifact to receive no score, and confirms that scoring left the checkout unchanged.
+6. **Release.** Only a passing clone test makes the build ready. The commit becomes `main` and receives the tag `v<N>`. Earlier releases stay in the repository. The build record binds the commit, contract version and digest, file lock, test report, runtime, model, and request count. A contract change makes the release stale; a new build is required. Failed and blocked builds stay drafts and show their cause.
+
+A collaborator downloads the release as a Git bundle, then runs:
+
+```sh
+git clone evaluator.bundle evaluator && cd evaluator && git checkout v1
+python -m venv .venv && . .venv/bin/activate
+python -m pip install -r requirements.lock
+python fetch_assets.py
+python evaluate.py --artifact PATH --output results.json
+```
+
+The last output line is JSON with `fitness`. `results.json` uses the existing Lite result format and can be uploaded through the results control. `evaluate.py` refuses a release file that differs from the lock, a missing asset, and a directory that is not a Git clone.
+
+Limits of this version:
+
+- Expected scores are established by a separate calculation written in the same build job. This is a consistency check with a written basis, not an independent party. Review each example's basis. A researcher-supplied reference example is not yet supported.
+- The container is not a security boundary against a determined attacker, and its network is open. Builds are for trusted lab contracts.
+- Builds need Docker on the application host. The hosted Lite pod has no Docker, so the build control reports that builds are unavailable there. `AUTOKAGGLE_LITE_BUILD_RUNTIME=local` runs the agent as a host process for development only.
+- Dependencies install as wheels only unless `AUTOKAGGLE_LITE_BUILD_ALLOW_SDIST=1`. An artifact is one file. The five contract metrics are unchanged.
+- Settings: `AUTOKAGGLE_LITE_BUILD_MODEL` (default: the selected provider's Lite model), `AUTOKAGGLE_LITE_BUILD_EFFORT` (`medium`), `AUTOKAGGLE_LITE_BUILD_MINUTES` (30), `AUTOKAGGLE_LITE_BUILD_REQUESTS` (150), `AUTOKAGGLE_LITE_BUILD_CPUS` (2), `AUTOKAGGLE_LITE_BUILD_MEMORY_GB` (4), `AUTOKAGGLE_LITE_BUILD_CONCURRENCY` (1).
 
 ## Start a session
 
@@ -29,6 +60,17 @@ A populated field can still contain an open decision. The model records each suc
 Each round permits 30 model calls. A provider failure preserves messages, accepted facts, and retrieved sources. **Retry** does not duplicate a message. A restart marks active work interrupted and permits retry. Researchers can resume or delete sessions.
 
 The revision agent receives the latest three saved result summaries, their versions, checks, and evidence limits. It can discuss failures and requested changes without repeating the initial interview. It does not receive raw artifacts or private artifact references through this result context.
+
+## Model provider
+
+`AUTOKAGGLE_LITE_PROVIDER` selects the model service for both the interview and the evaluator build. Set it at startup.
+
+| Value | Key | Default model | Notes |
+| --- | --- | --- | --- |
+| `openrouter` (default) | `OPENROUTER_API_KEY` | `AUTOKAGGLE_LITE_MODEL`, else `openai/gpt-6.1-sol` | The interview is the unchanged call in `lite.py`, with strict schema output. |
+| `deepseek` | `DEEPSEEK_API_KEY` | `AUTOKAGGLE_LITE_DEEPSEEK_MODEL`, else `deepseek-v4-pro` | DeepSeek has JSON output without a strict schema. The schema is placed in the prompt and one blank reply is retried. |
+
+Both routes send the same interview context and pass the same `parse_proposal` validation. The DeepSeek route lives in `lite_providers.py` and is installed at startup, so `lite.py` stays byte-identical and existing contract versions and seeds do not change. Medium reasoning maps to DeepSeek's `high`. For builds, the gateway forwards to the selected provider and the coding agent returns DeepSeek's reasoning text on later tool-call turns, as that API requires. The session view's model label in `lite.py` still names the OpenRouter model; each proposal and build record states the model that actually answered. Record the provider and model with every live test.
 
 ## Internal access
 
@@ -99,6 +141,11 @@ All endpoints retain owner access checks and same-origin writes.
 | `GET .../lite/preview` | View the private website template. |
 | `GET .../lite/readme.md` | Download the README. |
 | `POST .../lite/results` | Submit `request_id`, `manifest`, and all `results` records. |
+| `GET .../lite/evaluator` | Read the evaluator status, the current tested release, the last build's blockers, cause, and tests. |
+| `POST .../lite/evaluator/build` | Start a build with `request_id`. Prepares the package first if needed. 503 when builds are unavailable. |
+| `GET .../lite/evaluator/bundle` | Download the tested release as a Git bundle. 409 unless a release matches the current contract. |
+| `GET .../lite/evaluator/config` | Download the release's `evaluation.yaml`. |
+| `GET .../lite/evaluator/readme.md` | Download the release's README. |
 | `DELETE /api/projects/{id}` | Delete with `confirm: true`. |
 
 Queued requests return immediately. Poll the state endpoint while status is `working`. Repeated request IDs reuse the saved action. An ID with different input returns 409. Result retries reuse the saved result. A run that finishes after a revision can still submit evidence for its known built version. The service uses that version's frozen contract and marks the result historical. It does not score old evidence with new settings.
