@@ -22,7 +22,7 @@ POLICY_VERSION = "2026-11-06"
 NOTICE = (
     "BOLD AutoKaggle stores this session, its files, messages, model records, and generated "
     "artifacts on the service running this app. The hosted service is on Civo in London; local development stores data on the developer’s machine. Chat text and imported source excerpts "
-    "are sent to the configured model service through OpenRouter. Attached dataset files and private "
+    "are sent to the configured model provider. Attached dataset files and private "
     "test answers are not sent as interview attachments. Text you paste in chat is processed as chat content. "
     "When you ask the agent to look something up, it sends what it reads from your attached documents and links, summaries of your dataset, and "
     "its web search queries to those services. Documents are kept as text for the interview and do not enter the challenge package. Content is retained until you delete "
