@@ -32,3 +32,33 @@ def test_policy_blocks_private_network_and_application_port():
     assert policy['egress'][1]['ports']==[{'port':32768,'endPort':60999,'protocol':'TCP'}]
     role=next(i for i in items if i['kind']=='Role')
     assert all('secrets' not in r['resources'] and 'pods/exec' not in r['resources'] for r in role['rules'])
+
+
+def test_job_logs_are_available_before_completion_and_redacted(tmp_path,monkeypatch):
+    r=runtime(tmp_path,monkeypatch)
+    monkeypatch.setattr(r,'manifest',lambda *args: {})
+    monkeypatch.setattr('autokaggle.lite_kubernetes.time.sleep',lambda *args: None)
+    log=tmp_path/'agent.log'; polls=[]; actions=[]
+    def request(method,path,body=None,text=False):
+        actions.append((method,path))
+        if '/log?' in path:return 'build progress apiKey: ephemeral-secret'
+        if '/pods?' in path:return {'items':[{'metadata':{'name':'worker'}}]}
+        if method=='GET':
+            polls.append(path)
+            if len(polls)>1:
+                assert 'build progress' in log.read_text()
+                assert 'ephemeral-secret' not in log.read_text()
+                return {'status':{'succeeded':1,'conditions':[{'status':'True','type':'Complete'}]}}
+        return {}
+    monkeypatch.setattr(r,'request',request)
+    code,_=r.run([],{},'',{},60,log,'agent')
+    assert code==0 and actions[-1][0]=='DELETE'
+    assert len([p for m,p in actions if '/log?' in p])==2
+
+
+def test_missing_pod_logs_preserve_previous_snapshot(tmp_path,monkeypatch):
+    r=runtime(tmp_path,monkeypatch);log=tmp_path/'agent.log';log.write_text('saved output')
+    def request(*args,**kwargs):raise RuntimeError('pending pod')
+    monkeypatch.setattr(r,'request',request)
+    assert not r.capture_logs('job',log)
+    assert log.read_text()=='saved output'

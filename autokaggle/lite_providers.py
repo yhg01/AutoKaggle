@@ -1,13 +1,14 @@
 """Model providers for Lite. OpenRouter is the default; DeepSeek is an alternative.
 
 Select with AUTOKAGGLE_LITE_PROVIDER=openrouter or deepseek. The OpenRouter
-interview stays the unchanged code in lite.py. This module adds the DeepSeek
-interview call and the provider details the evaluator build needs.
+interview uses the same contract and validation as lite.py. This module adds
+private request records and the provider details the evaluator build needs.
 """
 from __future__ import annotations
 
 import json
 import os
+from . import lite_diagnostics as diagnostics
 
 HERE = os.path.dirname(__file__)
 PROVIDERS = {
@@ -101,7 +102,7 @@ def propose_deepseek(lite, state):
         response = None
         blank_count = 0
         for attempt in range(7):
-            response = client.chat.completions.create(model=model("deepseek"), messages=messages, response_format={"type": "json_object"},
+            response = diagnostics.request(state, client, model=model("deepseek"), messages=messages, response_format={"type": "json_object"},
                                                       extra_body=reasoning("deepseek", "medium"), max_tokens=16000,
                                                       **({"tools": repository_tools, "tool_choice": "auto" if attempt < 5 else "none"} if repository_tools else {}))
             if response.choices and getattr(response.choices[0].message, "tool_calls", None):
@@ -127,22 +128,37 @@ def propose_deepseek(lite, state):
             # DeepSeek documents that JSON output can come back blank. Ask once more before reporting a failure.
             if response.choices and (response.choices[0].message.content or "").strip():
                 try:
-                    return lite.parse_proposal(state, response)
+                    return diagnostics.parse(lite, state, response)
                 except ValueError:
                     # A schema repair may change representation, never the scientific facts.
                     messages.append({"role": "assistant", "content": response.choices[0].message.content})
                     messages.append({"role": "user", "content": "The response did not pass contract validation. Return the same supported facts in the exact JSON schema. Use only listed field names and enum values. open_decisions and resolved_decisions must be lists of {field, reason}. Do not fill a scientific gap or add new claims to repair formatting."})
-                    repaired = client.chat.completions.create(model=model("deepseek"), messages=messages,
+                    repaired = diagnostics.request(state, client, kind="lite schema repair", model=model("deepseek"), messages=messages,
                         response_format={"type": "json_object"}, extra_body=reasoning("deepseek", "medium"), max_tokens=16000)
-                    return lite.parse_proposal(state, repaired)
+                    return diagnostics.parse(lite, state, repaired)
             blank_count += 1
             if blank_count >= 2:
                 break
-    return lite.parse_proposal(state, response)
+    return diagnostics.parse(lite, state, response)
 
 
-def install(lite):
+def propose_openrouter(lite, state):
+    if not key("openrouter"):
+        raise ValueError(missing_key("openrouter"))
+    from openai import OpenAI
+    with OpenAI(api_key=key("openrouter"), base_url=PROVIDERS["openrouter"]["upstream"], timeout=150, max_retries=0) as client:
+        response = diagnostics.request(state, client, model=model("openrouter"),
+            messages=[{"role": "system", "content": (lite.HERE / "prompts/lite.md").read_text()},
+                      {"role": "user", "content": json.dumps(material(lite, state), ensure_ascii=False)}],
+            response_format={"type": "json_schema", "json_schema": {"name": "lite_proposal", "strict": True, "schema": lite.model_schema()}},
+            extra_body={"reasoning": {"effort": "medium"}}, max_tokens=6500)
+    return diagnostics.parse(lite, state, response)
+
+
+def install(lite, store=None):
     """Route the interview by provider without editing lite.py, whose bytes are part of every contract version."""
+    if store is not None:
+        diagnostics.bind(store)
     original_view = lite.view
     if not getattr(original_view, "_lite_provider_router", False):
         def view(project):
@@ -156,7 +172,7 @@ def install(lite):
         return
 
     def propose(state):
-        return propose_deepseek(lite, state) if selected() == "deepseek" else original(state)
+        return propose_deepseek(lite, state) if selected() == "deepseek" else propose_openrouter(lite, state)
 
     propose._lite_provider_router = True
     lite.propose = propose

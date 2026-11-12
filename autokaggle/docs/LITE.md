@@ -196,3 +196,17 @@ The agent asks for missing decisions in chat. Secondary functions are in **Sessi
 ### Downloaded evaluator ZIP
 
 The GitHub ZIP of a new release can run without a Git checkout. `revision.txt` uses Git's [archive substitution](https://git-scm.com/docs/gitattributes#_export_subst) to record the release commit. The scorer checks the release file digests before execution. The revision is provenance metadata, not a signature or proof of independent reproduction. The generic researcher-code runner still requires a clean Git checkout; the archive option applies only to a complete evaluator release with its matching lock and contract.
+
+## Administrator logs — 12 November 2026
+
+Open `/internal` on the Lite service with administrator access. Select a project.
+
+- **Conversation** shows the saved Lite messages in their original order.
+- **Model calls** shows newly recorded interview requests, responses, tool calls, duration, and token use. Select **Input** for the request and system instructions. An interview turn can include several model requests. The project list shows interview turns separately.
+- **Saved fields** separates the accepted contract from the current proposal. **Changes** shows accepted contract revisions.
+- **Execution** shows build status, errors, checks, and submitted results. Select a build, then **Agent log** or **Test log**. Running Civo jobs save log snapshots about every ten seconds. Click the log button again to load the latest snapshot. A pending pod or model response can have no output yet.
+- **Draft & artifacts** shows source records, packages, evaluator releases, and publication records. **Export** downloads the same redacted snapshot; build log text is loaded separately.
+
+Earlier Lite interviews did not save provider request/response records. Their saved messages and build records remain available. Do not infer historical request counts from the interview turn count. Missing model responses cannot be recovered.
+
+The service retains the latest 30 interview request records per project. Each text field is capped at 24,000 characters and marks truncation. The log viewer returns the latest 256 KiB of each saved build log. Credentials and email addresses are redacted. Hidden model reasoning is not saved by Lite. These diagnostics require administrator access and do not enter participant packages.

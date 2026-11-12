@@ -83,3 +83,14 @@ Deployed temporary email access on 12 November at 11:22 UTC from commit `5cf7668
 - [x] Deploy automatic publication to Civo Lite and verify all ten existing sessions were preserved.
 
 See `autokaggle/docs/AUTO_PUBLICATION_2026-11-12.md` for the live browser test, exact deployment, and GitHub permission blocker.
+
+## Lite administrator log repair
+
+- [x] Correct Lite project status and interview turn counts in the admin list.
+- [x] Show saved Lite messages, definitions, revisions, source records, packages, results, and evaluator builds.
+- [x] Capture new model requests and responses with private, bounded diagnostics.
+- [x] Add administrator-only build logs and update Civo logs during a running build.
+- [x] Check the UI with the affected saved session, a completed build, and a live DeepSeek interview.
+- [ ] Deploy after the existing Civo evaluator job finishes, then verify the live admin routes.
+
+See `autokaggle/docs/LITE_ADMIN_LOGS_2026-11-12.md` for cause, checks, and limits. Earlier Lite provider responses were not saved and cannot be recovered.

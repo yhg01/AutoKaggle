@@ -7,29 +7,32 @@ import os
 import re
 import time
 import uuid
+import stat
 from fastapi import Request, Query
 
 from .store import now
 
 LIMIT = 30
 TEXT_LIMIT = 24000
-PRIVATE_KEYS = {"organizer_email", "_setup_private_emails", "_participant", "_seed", "owner", "participant"}
+PRIVATE_KEYS = {"organizer_email", "_setup_private_emails", "_participant", "_seed", "owner", "participant", "reasoning_content"}
+LOG_LIMIT = 262144
 
 
 def scrub(value):
     """Remove credentials and correspondence addresses from diagnostic records."""
     if isinstance(value, dict):
-        return {k: ("[redacted]" if k in PRIVATE_KEYS or re.search(r"password|secret|credential|access_code|api_key|authorization|cookie|encrypted|token$", k, re.I)
+        return {k: ("[redacted]" if k in PRIVATE_KEYS or re.search(r"password|secret|credential|access_code|api_?key|authorization|cookie|encrypted|token$", k, re.I)
                     else scrub(v)) for k, v in value.items()}
     if isinstance(value, list):
         return [scrub(v) for v in value]
     if isinstance(value, str):
         value = re.sub(r"(?<![\w.+-])[\w.+-]{1,64}@[\w.-]{1,253}\.[A-Za-z]{2,63}", "[private email]", value)
-        for name in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "AUTOKAGGLE_ADMIN_ACCESS_CODE"):
+        for name in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "AUTOKAGGLE_ADMIN_ACCESS_CODE", "AUTOKAGGLE_LITE_GITHUB_TOKEN"):
             secret = os.getenv(name)
             if secret:
                 value = value.replace(secret, "[redacted credential]")
-        value = re.sub(r"(?i)\bBearer\s+\S+|\bsk-[A-Za-z0-9_-]+", "[redacted credential]", value)
+        value = re.sub(r"(?i)\bBearer\s+\S+|\bsk-[A-Za-z0-9_-]+|\bgithub_pat_[A-Za-z0-9_]+|\bgh[pousr]_[A-Za-z0-9_]+", "[redacted credential]", value)
+        value = re.sub(r'''(?i)((?:api_?key|authorization|password|access_token|refresh_token)["']?\s*[:=]\s*["']?)[^\s,"'{}]+''', r"\1[redacted]", value)
         value = re.sub(r"(?i)([?&](?:token|key|code|secret)=)[^\s&#\"<>]+", r"\1[redacted]", value)
         return value
     return value
@@ -104,7 +107,8 @@ def mark_validation(project, previous_id, status, attempt, code=None):
 def project_detail(item):
     allowed = ("id", "title", "brief", "created_at", "updated_at", "status", "revision", "answers",
                "design", "dataset", "analysis", "advice", "events", "harness", "prepared", "notices",
-               "conversation", "setup", "workflow", "_environment_approval", "_model_calls", "_model_traces")
+               "conversation", "setup", "workflow", "_environment_approval", "_model_calls", "_model_traces",
+               "lite", "lite_evaluator", "_lite_model_requests", "_lite_trace_started_at", "_lite_untraced_turns")
     return scrub({key: item[key] for key in allowed if key in item})
 
 
@@ -151,9 +155,12 @@ def register(app, access, store, static_dir):
         with store.connection() as con:
             con.create_function("casefold", 1, lambda value: value.casefold() if isinstance(value, str) else "")
             total = con.execute("SELECT count(*)" + join + where, parameters).fetchone()[0]
-            rows = con.execute("SELECT p.id, p.updated_at, json_extract(p.body, '$.title'), json_extract(p.body, '$.status'), json_extract(p.body, '$._model_calls'), json_extract(p.body, '$.conversation.status'), COALESCE(r.name,''), json_extract(p.body, '$.workflow.status')" + join + where + " ORDER BY p.updated_at DESC, p.id LIMIT ? OFFSET ?", (*parameters, limit, offset)).fetchall()
+            rows = con.execute("SELECT p.id, p.updated_at, json_extract(p.body, '$.title'), json_extract(p.body, '$.status'), json_extract(p.body, '$._model_calls'), json_extract(p.body, '$.conversation.status'), COALESCE(r.name,''), json_extract(p.body, '$.workflow.status'), json_type(p.body, '$.lite'), json_extract(p.body, '$.lite.status'), json_extract(p.body, '$.lite.model_calls'), json_extract(p.body, '$._lite_model_requests')" + join + where + " ORDER BY p.updated_at DESC, p.id LIMIT ? OFFSET ?", (*parameters, limit, offset)).fetchall()
         return {"total": total, "limit": limit, "offset": offset, "projects": [
-            {"id": r[0], "updated_at": r[1], "title": scrub(r[2]), "status": r[3], "model_calls": r[4] or 0, "conversation_status": r[5], "researcher_name": r[6], "workflow_status": r[7]}
+            {"id": r[0], "updated_at": r[1], "title": scrub(r[2]), "status": r[9] if r[8] else r[3],
+             "model_calls": r[11] if r[8] else r[4] or 0, "conversation_status": r[9] if r[8] else r[5],
+             "researcher_name": r[6], "workflow_status": r[7], "mode": "lite" if r[8] else "full",
+             "interview_turns": r[10] if r[8] else None}
             for r in rows]}
 
     @app.get("/api/internal/projects/{project_id}")
@@ -168,3 +175,33 @@ def register(app, access, store, static_dir):
         return {"project": project_detail(item), "review": review_data(store, item), "trace_limit": LIMIT,
                 "researcher": project_researcher(store, project_id),
                 "reasoning_note": "Only reasoning text returned by the provider is recorded. Hidden reasoning is unavailable. Older calls have no trace; records retain the latest 30 calls, with each text field capped at 24,000 characters."}
+
+    @app.get("/api/internal/projects/{project_id}/lite-builds/{build_id}/logs/{kind}")
+    def build_log(project_id: str, build_id: str, kind: str, request: Request):
+        require_admin(request)
+        if not re.fullmatch(r"[a-f0-9-]{32,36}", project_id) or not re.fullmatch(r"[a-f0-9]{16}", build_id) or kind not in {"agent", "test"}:
+            raise HTTPException(404, "Log not found.")
+        with store.connection() as con:
+            row = con.execute("SELECT body FROM projects WHERE id=?", (project_id,)).fetchone()
+        item = json.loads(row[0]) if row else {}
+        if not any(b.get("id") == build_id for b in item.get("lite_evaluator", {}).get("builds", [])):
+            raise HTTPException(404, "Build not found.")
+        root = store.directory(project_id).resolve()
+        path = root / "lite-evaluator" / "jobs" / build_id / f"{kind}.log"
+        if path.is_symlink() or any(p.is_symlink() for p in path.parents if p != root and root in p.parents):
+            raise HTTPException(404, "Log not found.")
+        try:
+            # Do not follow a final symlink or block on a FIFO created by a job.
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode):
+                    raise HTTPException(404, "Log not found.")
+                stream.seek(max(0, info.st_size - LOG_LIMIT))
+                data = stream.read(LOG_LIMIT)
+        except OSError:
+            raise HTTPException(404, "This build has no saved log of this type.") from None
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"build_id": build_id, "kind": kind, "text": scrub(data.decode("utf-8", errors="replace")),
+                             "total_bytes": info.st_size, "limit_bytes": LOG_LIMIT, "truncated": info.st_size > LOG_LIMIT,
+                             "note": "Saved log tail. Credentials and email addresses are redacted."}, headers={"Cache-Control": "no-store"})

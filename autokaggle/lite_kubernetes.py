@@ -80,22 +80,40 @@ class KubernetesRuntime:
                         'volumeMounts':mounted+[{'name':'tmp','mountPath':'/tmp'}]}],
                     'volumes':[{'name':'work','persistentVolumeClaim':{'claimName':self.claim}},{'name':'tmp','emptyDir':{'sizeLimit':'2Gi'}}]}}}}
 
+    def capture_logs(self, name, log):
+        """Save a bounded snapshot during a job. A pending pod may have no log yet."""
+        from .observability import scrub
+        try:
+            pods = self.request('GET', '/api/v1/namespaces/'+self.namespace+'/pods?labelSelector=job-name%3D'+name)
+            chunks = []
+            for pod in pods.get('items', []):
+                chunks.append(self.request('GET', '/api/v1/namespaces/'+self.namespace+'/pods/'+pod['metadata']['name']+'/log?tailLines=2000&limitBytes=2000000', text=True))
+            if chunks:
+                target = Path(log)
+                temporary = target.with_suffix('.log.tmp')
+                temporary.write_text(scrub('\n'.join(chunks)[-2000000:]))
+                os.replace(temporary, target)
+        except (RuntimeError, OSError, httpx.HTTPError):
+            # Log availability must not stop a valid evaluator run or erase its last snapshot.
+            return False
+        return True
+
     def run(self, argv, mounts, cwd, env, timeout, log, label):
         name='lite-build-'+label+'-'+secrets.token_hex(5)
         path='/apis/batch/v1/namespaces/'+self.namespace+'/jobs'
-        started=time.monotonic();code=None
+        started=time.monotonic();code=None;last_log=started-10
         self.request('POST',path,self.manifest(name,argv,mounts,cwd,env,timeout))
         try:
             while time.monotonic()-started < timeout+30:
                 job=self.request('GET',path+'/'+name)
+                if time.monotonic()-last_log >= 10:
+                    self.capture_logs(name, log)
+                    last_log=time.monotonic()
                 if any(c.get('status')=='True' and c.get('type') in {'Complete','Failed'} for c in job.get('status',{}).get('conditions',[])):
                     code=0 if job.get('status',{}).get('succeeded') else 1
                     break
                 time.sleep(3)
-            pods=self.request('GET','/api/v1/namespaces/'+self.namespace+'/pods?labelSelector=job-name%3D'+name)
-            with Path(log).open('a') as output:
-                for pod in pods.get('items',[]):
-                    output.write(self.request('GET','/api/v1/namespaces/'+self.namespace+'/pods/'+pod['metadata']['name']+'/log?tailLines=2000&limitBytes=2000000',text=True))
         finally:
+            self.capture_logs(name, log)
             self.request('DELETE',path+'/'+name,{'propagationPolicy':'Background'})
         return code,round(time.monotonic()-started,1)

@@ -71,3 +71,18 @@ test("requirement status tiles distinguish a saved missing assessment from an ab
   assert.equal(cells[1].value, null);
   assert.deepEqual(data, before);
 });
+test("Lite uses its own messages, contracts, history, builds and results", () => {
+  const data = {project: {lite: {messages: [{id:"lm1", role:"user", content:"Use LOBBench"}], contract:{objective:"Compare generators"}, accepted_evidence:{objective:{basis:"researcher",excerpt:"Compare generators"}}, proposal:{contract:{objective:"Unaccepted change"}}, history:[{previous_contract:{},contract:{objective:"Compare generators"}}], results:[{status:"submitted"}], sources:[{url:"https://example.org"}], status:"idle", model_calls:8}, lite_evaluator:{builds:[{id:"a123",status:"ready"}]}, _model_traces:[{id:"lc1",trigger:{message_id:"lm1"}}]}};
+  const original = structuredClone(data);
+  const messages = D.rows(data,"messages");
+  assert.equal(messages[0].path,"lite.messages[0]"); assert.equal(messages[0].at,undefined);
+  assert.equal(D.related(data,messages[0]).calls[0].id,"lc1");
+  const fields = D.rows(data,"fields");
+  assert.equal(fields[0].value.value,"Compare generators"); assert.equal(fields[0].status,"accepted");
+  assert.equal(fields.find(r=>r.id==="proposal").status,"proposed");
+  assert.equal(D.rows(data,"changes")[0].value.previous_contract.objective,undefined);
+  assert.equal(D.rows(data,"execution").filter(r=>r.type==="lite_build").length,1);
+  assert.equal(D.rows(data,"execution").filter(r=>r.type==="submission").length,1);
+  assert.ok(D.rows(data,"artifacts").some(r=>r.id==="sources"));
+  assert.deepEqual(data,original);
+});
