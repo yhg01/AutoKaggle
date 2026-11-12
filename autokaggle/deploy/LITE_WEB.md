@@ -333,3 +333,7 @@ python -m autokaggle.deploy.rollout web --model-env /private/deepseek.env
 Use `yhg01` for test publication. Set the production owner only after access is checked. No new node is rented. The Lite data volume is 10 GiB; repository imports stop before the disk is full.
 
 Civo volume expansion requires an offline volume. A larger PVC request does not prove the filesystem has grown. Stop Lite and wait for all build jobs and volume attachments to finish. Wait for controller expansion, then restart Lite and check the mounted capacity with `df`. Keep the private database backup. The 12 November expansion changed the existing Lite volume from 1 GiB to 10 GiB.
+
+## Temporary email access — 12 November 2026
+
+The owner approved access for any verified email while BOLD OS sign-in is prepared. Set `AUTOKAGGLE_LITE_ACCESS_POLICY=verified_email`; keep `AUTOKAGGLE_PRIVATE_MODE=1`. Existing member lists are retained but are not required in this mode. `members` restores the previous admission rule. The rollout command accepts `--lite-access-policy verified_email` only for the Lite service. It preserves the existing build runtime and other settings. See [the collaborator plan](../docs/LITE_BOLD_OS_AUTH_PLAN.md).

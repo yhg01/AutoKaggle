@@ -99,12 +99,19 @@ def initial():
 
 
 def require_member(access, request):
-    """Lite trust requires lab membership, not merely any verified email."""
+    """Apply the configured Lite access policy without changing project ownership."""
     if not access.enabled:
         return
     if access.is_admin(request):
         return
     identity = access.user(request)
+    policy = os.getenv("AUTOKAGGLE_LITE_ACCESS_POLICY", "members")
+    if policy not in {"members", "verified_email"}:
+        raise HTTPException(503, "Lite access is not configured correctly. Contact the administrator.")
+    if policy == "verified_email":
+        if identity and identity.get("email"):
+            return
+        raise HTTPException(401, "Sign in with your email to use AutoKaggle Lite.")
     allowed = {email.strip().lower() for email in os.getenv("AUTOKAGGLE_LITE_MEMBERS", "").split(",") if email.strip()}
     if not identity or identity.get("email", "").lower() not in allowed:
         raise HTTPException(403, "AutoKaggle Lite is for approved lab members. Ask an administrator to add your account.")

@@ -64,3 +64,7 @@ The owner requested GitHub and Google Drive links instead of a browser file uplo
 - Google Drive dataset links are currently recorded as references. AutoKaggle does not download those files into its dataset or attachment store. This differs from the older problem-intake service.
 - Lite result reporting currently requires the runner JSON report. A GitHub or Drive artifact URL in its manifest is a provenance reference; it does not import the report or independently verify the artifact. A result-report URL import is not implemented.
 - After the owner reported enabling browser access, a new attempt to open the deployed Lite origin was still denied by the browser permission gate. No website request or login occurred. The cause cannot be assigned to this chat from the available evidence. No alternate route was used to bypass the denial.
+
+## Temporary email access and BOLD OS handoff
+
+The owner approved temporary admission for any verified email while Slack/BOLD OS sign-in is prepared for 13 November. The collaborator plan is `autokaggle/docs/LITE_BOLD_OS_AUTH_PLAN.md`. The implementation uses `AUTOKAGGLE_LITE_ACCESS_POLICY=verified_email`; private mode, email-code verification, project ownership, and administrator controls remain enabled. The member-list mode remains available.

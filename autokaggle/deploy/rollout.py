@@ -14,7 +14,9 @@ from . import web, lite_jobs
 from .probe_cluster import private_kubeconfig, Kubectl
 
 
-def update(kube, service, source, digest, model, *, build_image=None, github_owner=None, github_token=None):
+def update(kube, service, source, digest, model, *, build_image=None, github_owner=None, github_token=None, lite_access_policy=None):
+    if lite_access_policy is not None and (service != 'lite' or lite_access_policy not in {'members', 'verified_email'}):
+        raise ValueError('The Lite access policy can only be changed on the Lite service.')
     namespace=web.NAMESPACE
     deployment=kube.json('get','deployment',service,'-n',namespace)
     pod=deployment['spec']['template']['spec']
@@ -46,6 +48,7 @@ print(json.dumps({'projects':len(rows),'backup':target.name,'bodies_sha256':hash
     settings={'OPENAI_BASE_URL':'https://api.deepseek.com','AUTOKAGGLE_MODEL':'deepseek-v4-pro',
               'AUTOKAGGLE_LITE_PROVIDER':'deepseek','AUTOKAGGLE_LITE_DEEPSEEK_MODEL':'deepseek-v4-pro'}
     if github_owner:settings['AUTOKAGGLE_LITE_GITHUB_OWNER']=github_owner
+    if lite_access_policy is not None:settings['AUTOKAGGLE_LITE_ACCESS_POLICY']=lite_access_policy
     changes={'volumes':[{'name':'source','configMap':{'name':name}}]}
     if build_image:
         if service!='lite' or '@sha256:' not in build_image:raise ValueError('Only Lite accepts an immutable build image.')
@@ -69,11 +72,12 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('service',choices=['web','lite']);p.add_argument('--model-env',type=Path,required=True)
     p.add_argument('--build-image');p.add_argument('--github-owner');p.add_argument('--github-env',type=Path)
+    p.add_argument('--lite-access-policy',choices=['members','verified_email'])
     a=p.parse_args();model=dotenv_values(a.model_env)
     if not model.get('DEEPSEEK_API_KEY'):raise ValueError('The private model file has no DeepSeek key.')
     token=(dotenv_values(a.github_env).get('AUTOKAGGLE_LITE_GITHUB_TOKEN') if a.github_env else None)
     source,digest=web.bundle()
     with private_kubeconfig() as config:
-        print(json.dumps(update(Kubectl(config),a.service,source,digest,model,build_image=a.build_image,github_owner=a.github_owner,github_token=token)))
+        print(json.dumps(update(Kubectl(config),a.service,source,digest,model,build_image=a.build_image,github_owner=a.github_owner,github_token=token,lite_access_policy=a.lite_access_policy)))
 
 if __name__=='__main__':main()

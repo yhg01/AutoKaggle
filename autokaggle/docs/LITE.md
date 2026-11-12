@@ -65,7 +65,7 @@ For hosted Lite, the deployer reads the token from the private file `$HOME/.conf
 
 Limits of this version:
 
-- Hosted builds require the Internal Kubernetes runtime described in `deploy/LITE_WEB.md`. They are for approved lab members. They do not run researcher training jobs.
+- Hosted builds require the Internal Kubernetes runtime described in `deploy/LITE_WEB.md`. Admission follows the configured Lite access policy. They do not run researcher training jobs.
 - Repository access is not managed. The creator is the only member until someone adds collaborators on GitHub. The project's access list is not yet applied.
 - The lab-approved repository template and its project-tracking files are not applied.
 - BOLD OS Problem Bank and Benchmarks records are not written.
@@ -102,7 +102,9 @@ Both routes send the same interview context and pass the same `parse_proposal` v
 
 ## Internal access
 
-In private deployments, set `AUTOKAGGLE_LITE_MEMBERS` to a comma-separated list of approved lab email addresses. A verified email alone does not establish lab membership. The list is empty by default; private Lite access then requires an administrator session. Ownership and collaborator checks still apply. Local development uses the existing local owner cookie.
+The owner approved temporary verified-email access on 12 November 2026, pending BOLD OS sign-in. Set `AUTOKAGGLE_LITE_ACCESS_POLICY=verified_email` for this mode; users still sign in with an email code and retain private project ownership. The Slack/BOLD OS replacement is specified in [the sign-in plan](LITE_BOLD_OS_AUTH_PLAN.md).
+
+With the default `AUTOKAGGLE_LITE_ACCESS_POLICY=members`, set `AUTOKAGGLE_LITE_MEMBERS` to a comma-separated list of approved lab email addresses. A verified email alone does not establish lab membership. The list is empty by default; private Lite access then requires an administrator session. Ownership and collaborator checks still apply. Local development uses the existing local owner cookie.
 
 Do not expose a server with private mode disabled. Lite does not silently convert Full sessions. Full model and dataset routes reject Lite project IDs. Full and Lite session lists are separate.
 
