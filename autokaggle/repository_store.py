@@ -54,7 +54,7 @@ def extract(archive, target):
                 raise ValueError('Repository archive contains a duplicate file.')
             seen.add(str(relative))
             total += member.size
-            if member.size > MAX_FILE or total > MAX_EXPANDED or len(entries) >= MAX_FILES:
+            if member.size < 0 or member.size > MAX_FILE or total > MAX_EXPANDED or len(entries) >= MAX_FILES:
                 raise ValueError('Repository exceeds the server source-storage limit (1 GiB, 40,000 files, 128 MiB per file).')
             dest = target / str(relative)
             dest.parent.mkdir(parents=True, exist_ok=True)

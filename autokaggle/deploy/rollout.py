@@ -28,8 +28,8 @@ rows=c.execute('select id,body from projects').fetchall()
 active=[]
 for i,b in rows:
  d=json.loads(b)
- for key in ('conversation','lite','onboarding'):
-  if d.get(key,{}).get('status') in ('working','running'):active.append(i)
+ for key in ('conversation','lite','onboarding','_source_import'):
+  if d.get(key,{}).get('status') in ('queued','working','running') or d.get(key,{}).get('_inflight'):active.append(i)
  if any(b.get('status') in ('queued','building','testing') for b in d.get('lite_evaluator',{}).get('builds',[])):active.append(i)
 if active:raise SystemExit('Active project jobs: retry after they finish.')
 target=p.parent/('backup-'+time.strftime('%Y%m%d-%H%M%S')+'.sqlite3')

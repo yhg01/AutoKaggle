@@ -331,3 +331,5 @@ python -m autokaggle.deploy.rollout web --model-env /private/deepseek.env
 ```
 
 Use `yhg01` for test publication. Set the production owner only after access is checked. No new node is rented. The Lite data volume is 10 GiB; repository imports stop before the disk is full.
+
+Civo volume expansion requires an offline volume. A larger PVC request does not prove the filesystem has grown. Stop Lite and wait for all build jobs and volume attachments to finish. Wait for controller expansion, then restart Lite and check the mounted capacity with `df`. Keep the private database backup. The 12 November expansion changed the existing Lite volume from 1 GiB to 10 GiB.

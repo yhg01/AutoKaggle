@@ -170,7 +170,7 @@
     } else body.append(node("p", "The session owner controls dataset and session deletion. You can leave the shared session from Share."));
   }
   async function sources() {
-    section("Start from a paper and existing implementation", "Import public references, then review and edit a proposed starting brief. We read bounded text and selected repository files at a fixed commit. We do not execute repository code or import its datasets.");
+    section("Start from a paper and existing implementation", "Import public references, then review and edit a proposed starting brief. We store the repository source at a fixed commit on the server, then read and search its files. We do not execute repository code or load its data into the evaluator.");
     const job = await api(path("/sources"));
     const paper = input("Paper or abstract link", "import-paper", "https://arxiv.org/abs/…", "url"); paper.value = ws.sourceDraft?.paper_url ?? job.paper_url ?? "";
     const upload = input("Or upload a paper PDF (up to 16 MB)", "import-paper-file", "", "file"); upload.accept = ".pdf,application/pdf";
@@ -220,6 +220,7 @@
       body.append(button(job.applied ? "Send revised starting brief" : "Use this starting brief", async () => {
         if (!brief.value.trim()) throw new Error("Write the brief you want to use.");
         if (!applyRequest || applyRequest.text !== brief.value.trim()) applyRequest = { id: crypto.randomUUID(), text: brief.value.trim() };
+        notice("Reading your starting brief and preparing the first question. This can take a few minutes.");
         await api(path("/sources/apply"), "POST", { brief: applyRequest.text, request_id: applyRequest.id });
         dialog.close(); notify("refresh");
       }, "button button-primary"));
