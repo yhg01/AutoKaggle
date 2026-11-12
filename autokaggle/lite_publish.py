@@ -258,7 +258,7 @@ class TokenGitHub(_Client):
                 seen = {name.decode(): value.decode() for name, value in remote.items()}
                 if any(seen.get(name) != before.get(name) for name in names):
                     raise PublishError(f"{repository['full_name']} changed while it was being published. Try again.")
-                return {**remote, **{name.encode(): local[name].encode() for name in names}}
+                return {name.encode(): local[name].encode() for name in names}
 
             try:
                 client, path = self._remote(repository)

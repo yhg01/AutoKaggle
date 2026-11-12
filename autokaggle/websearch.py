@@ -22,7 +22,7 @@ LINK = re.compile(r"\[([^\]]{1,300})\]\((https://[^\s)]+)\)")
 
 
 def available():
-    return "openrouter.ai" in os.getenv("OPENAI_BASE_URL", "") and bool(os.getenv("OPENAI_API_KEY"))
+    return any(host in os.getenv("OPENAI_BASE_URL", "") for host in ("openrouter.ai", "api.deepseek.com")) and bool(os.getenv("OPENAI_API_KEY"))
 
 
 def _results(text):
@@ -47,13 +47,22 @@ def search(query, *, model, client=None):
         raise ValueError("Web search is not available with the configured model provider.")
     body = {"model": model, "plugins": [{"id": "web", "max_results": MAX_RESULTS}],
             "messages": [{"role": "user", "content": INSTRUCTION + query}]}
+    deepseek = "api.deepseek.com" in os.getenv("OPENAI_BASE_URL", "")
+    if deepseek:
+        body = {"model": "deepseek-v4-pro", "input": INSTRUCTION + query,
+                "tools": [{"type": "web_search"}], "reasoning": {"effort": "none"}, "max_output_tokens": 1800}
     owned = client is None
     client = client or httpx.Client(timeout=90)
     try:
-        response = client.post(os.environ["OPENAI_BASE_URL"].rstrip("/") + "/chat/completions",
+        response = client.post(os.environ["OPENAI_BASE_URL"].rstrip("/") + ("/responses" if deepseek else "/chat/completions"),
                                headers={"Authorization": "Bearer " + os.environ["OPENAI_API_KEY"]}, json=body)
         response.raise_for_status()
-        text = response.json()["choices"][0]["message"].get("content") or ""
+        payload = response.json()
+        if deepseek:
+            text = "\n".join(part.get("text", "") for item in payload.get("output", []) if item.get("type") == "message"
+                             for part in item.get("content", []) if part.get("type") == "output_text")
+        else:
+            text = payload["choices"][0]["message"].get("content") or ""
     except (httpx.HTTPError, KeyError, IndexError, ValueError):
         raise ValueError("The web search failed.") from None
     finally:

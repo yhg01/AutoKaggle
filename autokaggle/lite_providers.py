@@ -104,6 +104,14 @@ def propose_deepseek(lite, state):
 
 def install(lite):
     """Route the interview by provider without editing lite.py, whose bytes are part of every contract version."""
+    original_view = lite.view
+    if not getattr(original_view, "_lite_provider_router", False):
+        def view(project):
+            result = original_view(project)
+            result["model"].update(configured=bool(key()), name=model(), provider=selected())
+            return result
+        view._lite_provider_router = True
+        lite.view = view
     original = lite.propose
     if getattr(original, "_lite_provider_router", False):
         return

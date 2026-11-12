@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import html
 import json
+import os
 from pathlib import Path
 import re
 import uuid
@@ -767,6 +768,10 @@ def _provider(project, kind, context, reserve):
             request = {"model": advisor.model_name(), "reasoning": {"effort": effort}, "instructions": instructions,
                        "max_output_tokens": 10000 if kind == "scope" else 3500 if kind == "source" else 1600,
                        "text": {"format": {"type": "json_schema", "name": "onboarding_" + kind, "strict": True, "schema": schema}}}
+            if "api.deepseek.com" in os.getenv("OPENAI_BASE_URL", ""):
+                # DeepSeek counts reasoning in this cap. The old 1,600–10,000 cap
+                # could end the response before it produced any JSON.
+                request["max_output_tokens"] = 32768
             if kind == "scope":
                 request["tools"] = lookup.tools()
             items, usage, turn, cache = provider_input, {"input_tokens": 0, "output_tokens": 0}, [], {}
