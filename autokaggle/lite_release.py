@@ -9,6 +9,7 @@ from email.message import EmailMessage
 import hashlib
 import json
 import os
+import re
 from urllib.parse import quote
 
 from . import notifications
@@ -63,9 +64,11 @@ def registry_payload(item, build):
     if any(validation.get(k) != "passed" for k in ("build", "contract_coverage", "code_review", "synthetic")):
         raise ValueError("Complete the software and contract checks first.")
     research = validation.get("research_evidence") or {}
-    if (validation.get("research_data") != "validated" or research.get("commit") != commit
+    if (validation.get("research_data") != "validated" or research.get("passed") is not True
+            or research.get("mode") != "research" or research.get("commit") != commit
             or research.get("contract_sha256") != contract or not research.get("reference_sha256")
-            or not research.get("report_sha256") or not research.get("checked_by")):
+            or not research.get("report_sha256") or not research.get("artifact_sha256")
+            or not re.fullmatch(r"controlled-runtime:[a-f0-9]{16}", str(research.get("checked_by", "")))):
         raise ValueError("Validation on the declared research data is still required.")
     if (approval.get("commit") != commit or approval.get("contract_sha256") != contract
             or approval.get("research_report_sha256") != research["report_sha256"] or not approval.get("approved_by")):

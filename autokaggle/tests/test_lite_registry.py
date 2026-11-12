@@ -13,8 +13,9 @@ def eligible():
     item = {"id": "example", "title": "Example", "lite": {"contract": {"objective": "Measure performance", "task_kind": "generation"}}}
     build = {"status": "ready", "evaluator_version": 1, "contract_sha256": "b"*64, "evidence": {"commit": "a"*40},
              "validation": {**{k: "passed" for k in ("build", "contract_coverage", "code_review", "synthetic")},
-                 "research_data": "validated", "research_evidence": {"commit": "a"*40, "contract_sha256": "b"*64,
-                     "reference_sha256": "c"*64, "report_sha256": "d"*64, "checked_by": "trusted-validation-job"}},
+                 "research_data": "validated", "research_evidence": {"passed": True, "mode": "research", "commit": "a"*40, "contract_sha256": "b"*64,
+                     "reference_sha256": "c"*64, "artifact_sha256": "e"*64, "report_sha256": "d"*64,
+                     "checked_by": "controlled-runtime:" + "f"*16}},
              "human_approval": {"commit": "a"*40, "contract_sha256": "b"*64, "research_report_sha256": "d"*64, "approved_by": "account-id"},
              "published": {"commit": "a"*40, "url": "https://github.com/example/evaluator", "zip_url": "https://github.com/example/evaluator/archive/a.zip"}}
     build["contract_version"] = lite.version(item["lite"]["contract"], [])
@@ -80,3 +81,12 @@ def test_new_research_approval_gets_new_receipt_key():
     after = lite_release.registry_payload(item, build)["idempotency_key"]
     assert after != before
     assert lite_release.registry_payload(item, build)["idempotency_key"] == after
+
+
+@pytest.mark.parametrize("field,value", [("passed", False), ("mode", "synthetic"),
+    ("checked_by", "researcher-reported"), ("artifact_sha256", "")])
+def test_registry_rejects_incomplete_or_reported_validation(field, value):
+    item, build = eligible()
+    build["validation"]["research_evidence"][field] = value
+    lite_release.queue_registration(item, build)
+    assert build["registry"]["status"] == "not_eligible"
