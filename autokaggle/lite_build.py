@@ -667,6 +667,9 @@ def _finish(store, identifier, build_id, job, status, **changes):
             text = ("The evaluator passed its contract checks and synthetic tests. Review the code and downloads. "
                     "Validation on the declared research data is still pending. What should we change in the implementation?"
                     if status == "ready" else "The evaluator remains a draft. " + str(changes.get("cause") or "A scientific decision is needed."))
+            if status == "blocked" and changes.get("blockers"):
+                questions = "\n".join(f"{row['field']}: {row['reason']}" for row in changes["blockers"])
+                text += "\n\nDecisions needed before rebuilding:\n" + questions[:6000]
             item["lite"]["messages"].append({"id": secrets.token_hex(8), "role": "assistant", "content": text,
                                                "kind": "evaluator_review", "build_id": build_id})
             store.save(item)

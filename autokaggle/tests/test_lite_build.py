@@ -266,6 +266,9 @@ def test_incomplete_builds_stay_draft_and_show_the_cause(harness, monkeypatch, a
             assert state["latest"]["blockers"] == [
                 {"field": "source_revision", "reason": "Which label release should scoring use? The two releases differ in 40 rows."},
                 {"field": "other", "reason": "An unknown field is kept as other."}]
+            saved_messages = client.get(path).json()["messages"]
+            assert "Which label release should scoring use?" in saved_messages[-1]["content"]
+            assert "source_revision:" in saved_messages[-1]["content"]
         repo = Path(app.state.store.directory(identifier)) / "lite-evaluator" / "repo.git"
         if repo.exists():
             refs = subprocess.run(["git", "for-each-ref"], env={**os.environ, "GIT_DIR": str(repo)}, capture_output=True, text=True).stdout
