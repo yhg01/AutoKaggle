@@ -20,7 +20,7 @@ Treat each generated verifier as a complete software project. The accepted scien
 - [ ] Run the full workflow on a copy of Kaito's LOB-Bench contract. Check all metric/output requirements, invalid window and feature cases, reference provenance, and an iteration. Clearly report licensed-data checks that cannot run.
 - [ ] Run general regression cases across prediction, environments, optimization, forecasting, and generation. Include live DeepSeek model calls, browser tests, clean-clone/ZIP execution, and failure tests.
 - [x] Review the OpenCode versus DeepSeek Harness choice using official sources. Do not attribute a contract/test design defect to a harness without evidence.
-- [ ] Update documentation, commit, push, and open a PR with verified evidence and remaining limits.
+- [x] Update documentation, commit, push, and open a PR with verified evidence and remaining limits. [PR #19](https://github.com/yhg01/AutoKaggle/pull/19) remains a draft while the LOB-Bench scientific decision and successful release run are pending.
 
 - [x] Register eligible releases in BOLD OS Problem Bank and Benchmarks only after a controlled research-data check and human approval. Keep stable project IDs and exact release commits.
 
@@ -40,12 +40,14 @@ Private researcher records, credentials, generated scratch data, and raw model l
 
 The owner deferred Kaito's licensed research-data validation. Do not claim that this run passed or register the problem as validated. The BOLD OS Research menu contains Soon placeholders for Problems bank and Benchmarks. The pages, write API, search, rules, and history are implemented and pushed in BOLD OS branch `codex/problem-bank-benchmarks`. That branch is not deployed and has no PR to main. AutoKaggle keeps eligible deliveries pending until an approved acting token and the deployed endpoint are configured.
 
-## Verification in progress
+## Verification result
 
 - AutoKaggle JavaScript: 281 tests passed.
 - Python full run: 1,570 passed, one skipped. After later revision and registration fixes, the build group passed 47 tests (one skipped), and the research/registration group passed 23 tests.
-- The copied LOB-Bench interview was opened through the browser. Its ZIP downloaded and passed the archive check. Coding feedback was submitted through the chat. The live DeepSeek/OpenCode job produced 73 contract requirements. Its separate review found missing generated-CSV checks and a feature-list test with no behavioral assertion. Repair and re-review are running.
+- The copied LOB-Bench interview was opened through the browser. Its 13-file research ZIP downloaded and passed the archive check. Coding feedback and reopening worked. Three bounded coding rounds retained draft code but did not complete the separate review before their time allowance ended. No evaluator repository was published from these incomplete checks.
+- The fourth live DeepSeek/OpenCode round reused all 73 frozen requirements. It checked the pinned source and reported the OFI diagnostic conflict as a researcher decision. The browser showed **Draft · a decision is needed**. This round used 49 model requests and 339.2 seconds. The contract and original session were unchanged. See `autokaggle/docs/LOB_BENCH_QUALITY_REVIEW.md`.
+- A regression check also confirms that specific build decisions enter the saved conversation, so the scientific interview retains them. All five affected draft/failure tests passed.
 - Gmail accepted a transport test sent only to the owner's account. Invitation content, saved send status, and duplicate protection passed integration tests. The local preview does not use production email sign-in; the complete deployed invitation journey is not claimed.
 - BOLD OS: 195 tests and the site build passed. The demo Firebase test passed registration, simultaneous retries, permissions, search, and database-rule checks. Browser checks covered both pages, notes, archive/restore, sign-out, another member's read-only controls, and light/dark/mobile layouts.
 - The AutoKaggle registration sender also passed against the local BOLD OS HTTP receiver, with a clearly labelled synthetic integration record. Both records and the exact-commit receipt were saved. A repeated delivery reused the receipt. This is an integration test, not a validation claim about Kaito's data.
-- Work is committed per solved sub-problem. The AutoKaggle PR remains to be opened after final checks.
+- Work is committed and pushed per solved sub-problem. AutoKaggle PR #19 is a draft. BOLD OS branch `codex/problem-bank-benchmarks` has no PR to main. Neither branch is deployed. The unchecked end-to-end items above are not claimed as complete.
