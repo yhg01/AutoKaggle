@@ -49,9 +49,9 @@ def evaluate(seed, manifest, contract):
 (work / "requirements.lock").write_text("# standard library only\n")
 (work / "assets.json").write_text("[]")
 for name, labels in (("valid", [0, 1, 1, 0, 1]), ("wrong", [0, 1, 1, 1, 0])):
-    (work / "fixtures" / name).mkdir(parents=True)
+    (work / "fixtures" / name).mkdir(parents=True, exist_ok=True)
     (work / "fixtures" / name / "predictions.csv").write_text("id,label\n" + "".join(f"{i},{v}\n" for i, v in enumerate(labels)))
-(work / "fixtures" / "invalid").mkdir()
+(work / "fixtures" / "invalid").mkdir(exist_ok=True)
 (work / "fixtures" / "invalid" / "predictions.csv").write_text("row,guess\n0,1\n")
 valid = 0.9 if mode == "wrong-expectation" else 1.0
 (work / "fixtures" / "expected.json").write_text(json.dumps({"tolerance": 1e-9, "cases": {
@@ -74,6 +74,17 @@ if mode == "edit-trusted":
     (work / "evaluate.py").write_text("print('{\"fitness\": 1.0}')\n")
     (work / "extra.txt").write_text("not publishable")
 (work / "BUILD_REPORT.json").write_text(json.dumps({"status": "ready", "summary": "Built a five-row accuracy scorer.", "blockers": [], "decisions": ["Used csv from the standard library."]}))
+c = json.loads((work / "contract.json").read_text())["contract"]
+requirements = [{"id": f"R{i:03d}", "field": k, "quote": v if isinstance(v, str) else json.dumps(v, sort_keys=True),
+                 "kind": "protocol", "behavior": "Check the toy scoring behavior."}
+                for i, (k, v) in enumerate(c.items(), 1) if k != "title"]
+(work / "quality.json").write_text(json.dumps({"schema": "bold.lite.quality.v1", "requirements": requirements,
+    "result_requirements": {"metrics": [], "outputs": [], "reference_required": False}}))
+(work / "coverage.json").write_text(json.dumps({r["id"]: ["test_adapter.Scores.test_score"] for r in requirements}))
+(work / "tests").mkdir(exist_ok=True)
+(work / "tests/test_adapter.py").write_text('import unittest\nimport toy_adapter\nclass Scores(unittest.TestCase):\n def test_score(self):\n  self.assertEqual(toy_adapter.evaluate(1,{"artifact_path":"fixtures/valid/predictions.csv"},{})["score"],1.0)\n')
+(work / "REVIEW.json").write_text(json.dumps({"status": "pass", "summary": "Test stand-in review, not live evidence.", "findings": [],
+    "requirements": [{"id": r["id"], "covered": True, "evidence": "test_adapter.Scores.test_score: unit-test stand-in"} for r in requirements]}))
 '''
 
 
@@ -149,7 +160,7 @@ def test_ready_release_scores_from_a_collaborator_clone_and_binds_evidence(harne
         assert release["contract_version"] == package["version"] == state["contract"]["version"]
         names = [t["name"] for t in release["tests"]]
         assert names == ["fresh clone", "release contents", "fresh environment", "declared assets", "independent calculation",
-                         "valid example", "wrong example", "wrong example scores worse", "invalid artifact rejected", "checkout unchanged"]
+                         "valid example", "wrong example", "wrong example scores worse", "invalid artifact rejected", "contract coverage", "checkout unchanged"]
         assert all(t["passed"] for t in release["tests"])
         evidence = release["evidence"]
         assert evidence["expected_fitness"] == evidence["observed_fitness"] == 1.0 and evidence["tag"] == "v1"
@@ -189,7 +200,7 @@ def test_ready_release_scores_from_a_collaborator_clone_and_binds_evidence(harne
 
         config = client.get(release["config_url"]).text
         assert f'version: "{package["version"]}"' in config and 'direction: "maximize"' in config
-        assert "python evaluate.py --artifact fixtures/valid/predictions.csv" in client.get(release["readme_url"]).text
+        assert "python evaluate.py --mode synthetic --artifact fixtures/valid/predictions.csv" in client.get(release["readme_url"]).text
         yaml = pytest.importorskip("yaml")
         parsed = yaml.safe_load(config)
         frozen = json.loads(client.get(path + "/config").text)
@@ -262,7 +273,8 @@ def test_release_uses_application_files_and_only_publishable_agent_files(harness
         tracked = set(subprocess.run(["git", "ls-files"], cwd=clone, capture_output=True, text=True).stdout.split())
         assert tracked == {".gitignore", ".gitattributes", "revision.txt", "README.md", "assets.json", "contract.json", "evaluate.py", "evaluation.yaml", "evaluator.lock.json",
                            "fetch_assets.py", "gym_adapter.py", "requirements.lock", "run.py", "toy_adapter.py", "fixtures/check_expected.py",
-                           "fixtures/expected.json", "fixtures/valid/predictions.csv", "fixtures/wrong/predictions.csv", "fixtures/invalid/predictions.csv"}
+                           "fixtures/expected.json", "fixtures/valid/predictions.csv", "fixtures/wrong/predictions.csv", "fixtures/invalid/predictions.csv",
+                           "quality.json", "coverage.json", "quality_checks.py", "tests/test_adapter.py"}
 
 
 def test_build_requests_are_gated_and_idempotent(harness, monkeypatch):
@@ -818,7 +830,8 @@ def test_container_runtime_can_be_described_for_a_user_with_no_account_entry(mon
 
 def publication_settled(client, path):
     return settle(client, path + '/evaluator', lambda s: s['status'] not in lite_build.ACTIVE and
-                  (s.get('release', {}).get('publication') or {}).get('status') not in {'queued', 'publishing'})
+                  (s.get('release', {}).get('publication') or {}).get('status') not in {'queued', 'publishing'} and
+                  s.get('release', {}).get('id') not in lite_build._RUNNING)
 
 
 def test_automatic_publication_versions_one_repository(published, monkeypatch):
