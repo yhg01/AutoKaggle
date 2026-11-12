@@ -1,6 +1,8 @@
 """Deterministic release gates; model advice cannot bypass these checks."""
 from __future__ import annotations
 
+from .research_policy import is_public, DISCLOSURE
+
 
 def check(identifier, severity, title, detail, action=""):
     return {"id": identifier, "severity": severity, "title": title, "detail": detail, "action": action}
@@ -20,11 +22,18 @@ def brief_checks(project):
         present = known(a.get(key, ""))
         checks.append(check(key, "pass" if present else "blocker", label,
                             "Recorded for human review." if present else "This decision is missing.", "" if present else action))
+    if is_public(project):
+        from . import onboarding_setup
+        confirmed = a.get("labels_public") == "yes" and onboarding_setup.get(project)["competition_type"] == "prediction"
+        checks.append(check("public_labels", "warning" if confirmed else "blocker", "Public-data research",
+                            DISCLOSURE if confirmed else "Public-data research requires known public answers and prediction submissions.",
+                            "" if confirmed else "Confirm answer exposure and select prediction submissions. Unknown exposure remains blocked."))
     private = a.get("labels_public") == "no"
-    checks.append(check("public_labels", "pass" if private else "blocker", "Test answer exposure",
-                        "The organizer states that these labels have not been public. This statement needs verification." if private else
-                        "Test labels are public or their exposure is unknown. A new split cannot remove prior exposure.",
-                        "" if private else "Use fresh private evaluation labels, then update the source declaration."))
+    if not is_public(project):
+        checks.append(check("public_labels", "pass" if private else "blocker", "Test answer exposure",
+                            "The organizer states that these labels have not been public. This statement needs verification." if private else
+                            "Test labels are public or their exposure is unknown. A new split cannot remove prior exposure.",
+                            "" if private else "Use fresh private evaluation labels, then update the source declaration."))
     source_known = a.get("data_origin") in {"private", "public", "synthetic"}
     checks.append(check("provenance", "pass" if source_known else "blocker", "Data origin",
                         "Origin recorded. Retain the source and collection history in the brief." if source_known else "The data source is unknown.",

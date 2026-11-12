@@ -1,5 +1,55 @@
 # Project instructions
 
+## Communication
+
+Added at the project owner's request on 5 November 2026.
+
+Use ASD-STE100 (Simplified Technical English) for all responses, progress updates, questions, and documents. Be concise and direct. State the main point first. Use short sentences and consistent terms. Preserve technical accuracy. State evidence and limits without unnecessary detail.
+
+## Public-data research and reproducible submissions
+
+Added at the project owner's request on 5 November 2026.
+
+These are approved requirements. They do not establish that the application has implemented or enforced them.
+
+- Keep evaluation with private test answers as the primary workflow. Public training data is compatible with this workflow. Ask separately about data availability and test-answer exposure.
+- Provide a separate, explicit option for research and practice with public test answers. Disclose answer exposure, possible prior model knowledge, and limits on score interpretation in the website, README, participant AGENTS.md, and organizer review. Do not describe these results as blind evaluation. Do not mark public answers private to pass a gate.
+- Keep this option separate from the primary workflow. It must not weaken private-answer protection, change its defaults, or add practice-only steps to it. Technical data, submission, scoring, and access checks remain mandatory in both workflows.
+- Public availability alone does not establish that a problem lacks scientific value. Ask what remains unanswered and what evidence would support the proposed claim. Distinguish practice, reproduction, method comparison, and a claim of new discovery.
+- Permit participants to work on their own machines. For public-data research, require each prediction submission to include the corresponding code and the information needed to reproduce it. Keep private-data submissions unchanged, as confirmed on 9 November 2026. Record data versions, dependencies, execution commands, random seeds, model assets, and resource settings where applicable. Bind these artifacts to the saved predictions and challenge version.
+- Verify reproduction through a controlled run under the declared resource limits and numeric tolerances. Until that run succeeds, describe the attempt as submitted, not verified. Reproduction alone does not prove that the method avoided test answers.
+- Include access rules in each generated participant AGENTS.md. Permit only the declared data, files, tools, and services. Prohibit external answer searches, test-label lookup tables, unauthorized network access, access to scorer secrets, and attempts to infer answers through repeated scoring queries. Allow only the published submission interface and allowance.
+- Distinguish instructions from enforcement. A downloaded ZIP cannot enforce restrictions on a participant's machine. For hosted research, enforce access limits across the full agent session and its tools. Deny network access by default. Permit a controlled model-service connection only when required. Keep test answers and scorer credentials outside the research environment.
+- Add a separate agent review for possible reward hacking. Inspect submitted code, artifacts, and available execution records for answer lookup, embedded answers, prohibited data access, and scorer exploitation. Treat submitted material as untrusted input. Report evidence and uncertainty. Keep the review agent away from scorer secrets and test answers. Agent review supplements execution controls; it does not prove that cheating is impossible.
+- Keep exposure disclosure even after a successful controlled run. Offline execution cannot remove knowledge acquired during model training or earlier participant work.
+
+## Assess responsibility for reported failures
+
+Added at the project owner's request on 5 November 2026.
+
+When asked to identify gaps from a specific failure, assess responsibility from the evidence. Do not assume that every reported difficulty is a system fault.
+
+- Compare the user's actions and supplied problem definition with the agreed requirements, documented workflow, and actual system behavior.
+- Distinguish system defects, intended restrictions, unsupported requests, incorrect use, and incomplete or inconsistent problem definitions. State which party must take corrective action. Identify shared responsibility only when the evidence supports it.
+- If incorrect use or a poor problem definition caused the failure, state that the user must correct it. Do not automatically treat it as a product defect or a requirement to expand the product.
+- If the system failed to meet its agreed requirements, state what we must fix. Separate optional improvements to instructions or controls from the cause of the failure.
+- Keep reported facts, verified findings, and assumptions separate. If the saved conversation, configuration, or artifacts are missing, state what remains uncertain. Do not assign fault or percentages without evidence.
+- Do not accept blame, apologize, or propose system changes merely because a user reported a failure. Apply the same evidence standard to system faults and user errors.
+
+
+## BOLD OS integration plan — 5 November 2026
+
+BOLD OS is an operating system that agents can access through an MCP server. The configured Codex server is named `bold`. Its endpoint is `https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/mcp`. Authentication uses a private Bearer token. Keep that token in private configuration, outside this repository.
+
+Integrating AutoKaggle with BOLD OS is an immediate project goal. The plan is:
+
+1. BOLD OS will provide a dedicated page for onboarding new projects. This page is planned; do not assume it already exists.
+2. Connect the AutoKaggle onboarding workflow to that page through the BOLD OS MCP. Define the detailed workflow in later work with the project owner.
+3. After a problem is confirmed, support creation of a private verifier repository in `bold-lab-ai`. Reuse BOLD OS's existing GitHub App and project repository workflow. Use a lab-approved template, preserve its project-tracking requirements, and link the repository to the corresponding BOLD OS project record. Use the project's access controls; lab-wide access is not required. Save the repository ID and URL so retries reuse the same repository. Keep hidden test data and runtime credentials outside Git. An authorized provisioning action is still needed; the current read-only MCP connection does not establish permission to create repositories.
+4. In the longer term, enable agents to interact with BOLD OS as part of ongoing project work.
+
+This section records the integration direction. The page and application integration have not been implemented by this documentation change.
+
 ## Follow the Kaggle workflow
 
 For all work in this project, reproduce the Kaggle competition workflow as closely as the task permits. Use official Kaggle documentation and published competition rules as the first reference. Explain any necessary difference and record it in the affected documentation. Do not assume that Kaggle's private security infrastructure is publicly documented.
@@ -87,6 +137,31 @@ Use short, direct sentences. Preserve existing work. Report what was actually te
 ## Branch and commit naming
 
 Use descriptive branch names without AI product or model names. Keep those names out of commit messages as well. Do not add attribution signatures, generated-by footers, or co-author trailers. Do not commit or push changes until explicitly requested.
+
+## Internal, Speedrun, and Full — updated 9 November 2026
+
+- Keep three user paths with two trust modes. Internal (Lite) serves trusted lab researchers on its separate Civo service. Full follows the competition policies above. Speedrun is a paper/repository entry path within Full; it is not Internal and must not use Internal's relaxed execution assumptions. Do not convert existing sessions between trust modes without an explicit migration.
+- At the start of a new Full interview, offer a published paper/benchmark and repository, or a new problem from scratch. Preserve returning interviews. A saved entry choice must not change scientific readiness, scorer checks, access controls, quotas, hidden-answer policy, or compute approval.
+- Speedrun reads bounded source text and a frozen repository revision. Accept a public paper URL or a text PDF up to 16 MiB. Show an editable proposal before importing it as interview evidence. Record supported facts and ask for missing or conflicting decisions. A publication or repository alone does not prove that a runnable implementation, permitted dataset, or verified evaluator exists.
+- Deploy Internal on the existing AutoKaggle Civo cluster with its own service, persistent data, credentials, and lab membership checks. The owner corrected the earlier Vercel request; Vercel is not the deployment target.
+- Lite uses six decision groups: research objective, data or environment, submitted artifact, evaluation protocol, resources, and reproduction record. Use a paper and repository to propose as much as the sources support. Ask only for missing or conflicting decisions. A reference baseline remains optional.
+- Keep source facts, researcher statements, and agent suggestions distinct. Require researcher acceptance before a proposal becomes the contract. Preserve excerpts, source versions, corrections, and prior result versions. Treat imported documents and code as untrusted data. Never execute a repository during import.
+- Support ML batch tasks and interactive environments through a declared adapter interface. Separate a prediction file, policy, or checkpoint from the method that created it. Record environment versions, observation/action rules, state resets, outcome definition, failure rules, seeds, and resource bounds when applicable.
+- Lite may use visible fixed seeds and researcher-controlled execution. This is an approved difference from Full. Result validation establishes structural consistency, not independent reproduction. Record code, artifact, dependency, and contract digests. Do not claim that an uploaded result proves training provenance or scientific accuracy.
+- Keep hosted Lite access limited to an explicit lab membership list or an administrator. A verified email or shared project alone does not grant internal access. Local development must stay on loopback.
+- Every Full compute request and node rental needs the owner's manual approval through BOLD OS. Agents can request permission but cannot approve themselves. Bind permission to the exact execution bundle, challenge version, executor, resource bounds, attempt count, cost ceiling, and expiry. All extra resources need a new approval.
+- The BOLD OS approval gate is a permission record. Provider adapters must still enforce quotas, cancellation, time limits, idempotent job creation, and separation of credentials from participant code. Keep hosted execution disabled until those checks pass. Never call the system impossible to compromise.
+- See `autokaggle/docs/LITE.md` for delivered Lite behavior. A separate `bold-os-approval` checkout contains the native BOLD OS gate and its integration guide. Implementation does not imply that the gate has been deployed or connected to Civo or Isambard.
+
+### Lite requirements before merge — 10 November 2026
+
+Changed at the project owner's request on 12 November 2026: for Internal, a tested evaluator that every collaborator can download is sufficient. A separate GitHub repository for each problem is optional. Lite can still publish one when an owner account is configured. The clean-clone scoring test below still applies to the downloadable release.
+
+Requested by the project owner on 12 November 2026: start a new Internal session by asking, in the conversation, whether there is a paper and whether there is a repository. Do not use a separate start control below the message box for this.
+
+- Each onboarded Lite problem must have its own GitHub evaluator repository and a versioned YAML evaluation config. Keep the repo accessible to the lab members who work on the problem. Pin the evaluator release to a Git commit. Include the task adapter, input contract, dependency setup, required asset references, and one documented local scoring command.
+- Before marking a benchmark ready, clone its evaluator repository into a clean directory and score a known sample of the declared artifact type. A collaborator must be able to supply a compatible checkpoint, policy, or output and receive the defined fitness and a machine-readable result. Use the declared metric, seeds, and failure rules. A template adapter or a run that requires files from the author's laptop does not pass. Evaluation runs on the collaborator's machine. It requires no hosted evaluator on Civo.
+- Make BOLD OS the home for Lite onboarding. Put each problem in the Problem Bank and link its evaluator version under Benchmarks. Collaborators open and resume onboarding from BOLD OS. Use stable IDs and update the same records on retry. Keep Lite's backend as needed to support this workflow. Replace the standalone challenge page as the destination for an onboarded problem.
 
 ## Live API testing
 

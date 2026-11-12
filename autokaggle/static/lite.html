@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f9fb"><title>BOLD AutoKaggle Lite</title>
+  <link rel="icon" href="/static/bold-butterfly.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/lite.css?v=20261112"><script src="/static/lite.js?v=20261112" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#message-input">Skip to conversation</a>
+<div class="shell">
+  <header class="topbar">
+    <a class="brand" href="/lite"><img src="/static/bold-butterfly.svg" width="37" height="37" alt=""><span><strong>BOLD</strong> AutoKaggle <em>Lite</em><small>INTERNAL RESEARCH</small></span></a>
+    <div class="header-actions"><button id="refresh-session" class="button quiet" type="button" aria-label="Refresh saved session" title="Refresh saved session" hidden>↻</button><button id="sessions-button" class="button quiet" type="button">Sessions</button><button id="new-button" class="button secondary" type="button">+ New</button><button id="sign-out" class="button quiet" type="button" hidden>Sign out</button></div>
+  </header>
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <a id="sign-in" class="sign-in button primary" hidden>Sign in again</a>
+  <main class="workspace">
+    <section class="conversation" aria-labelledby="challenge-title">
+      <div class="conversation-heading"><div><span class="eyebrow">RESEARCH AGENT</span><h1 id="challenge-title">Start from the research you have.</h1></div><span id="session-state" class="pill">Internal draft</span></div>
+      <div id="transcript" class="transcript" tabindex="0" aria-label="Conversation">
+        <div id="welcome" class="welcome"><img src="/static/bold-butterfly.svg" width="44" height="44" alt=""><h2>A clear experiment.<br>A reproducible result.</h2><p>I start by asking whether there is a paper and a repository. I read what you have, propose a starting definition, and ask about the decisions that remain.</p><button id="welcome-start" class="button primary" type="button">Start a research session <span aria-hidden="true">→</span></button><p class="welcome-note">For lab research. Results stay labelled as researcher-reported until independently reproduced.</p></div>
+        <div id="messages"></div>
+        <div id="proposal-banner" class="proposal-banner" hidden><div><strong>Review the imported definition</strong><p id="proposal-summary">Source material is a proposal until you accept it.</p></div><button id="review-proposals" class="button secondary" type="button">Review proposals</button></div>
+        <div id="recovery-banner" class="proposal-banner" hidden><div><strong id="recovery-title">Your answers are saved</strong><p id="recovery-detail"></p></div><button id="retry-request" class="button secondary" type="button" hidden>Retry saved request</button><button id="continue-round" class="button secondary" type="button" hidden>Continue interview</button></div>
+        <div id="thinking" class="thinking" role="status" hidden><span class="activity-dot"></span><span id="thinking-text">Reading your answer…</span></div>
+      </div>
+      <form id="message-form" class="composer">
+        <label class="sr-only" for="message-input">Your reply or correction</label><textarea id="message-input" rows="2" maxlength="30000" placeholder="Describe your question, answer, or what you want to change…" disabled></textarea>
+        <div class="composer-bottom"><span id="composer-hint">Create a session to start.</span><span class="composer-actions"><button id="attach-paper" class="button quiet" type="button" hidden>Attach PDF</button><input id="paper-attach" type="file" accept=".pdf,application/pdf" hidden><button id="send-message" class="button primary" type="submit" disabled>Send <span aria-hidden="true">↑</span></button></span></div>
+      </form>
+      <footer class="conversation-tools"><div><button id="sources-button" class="button quiet" type="button" disabled>Sources</button><button id="package-button" class="button quiet" type="button" disabled>Research package</button><button id="evaluator-button" class="button quiet" type="button" disabled>Evaluator</button><button id="results-button" class="button quiet" type="button" disabled>Results <span id="result-count"></span></button></div></footer>
+    </section>
+    <aside class="definition" aria-labelledby="definition-title"><div class="definition-heading"><span class="eyebrow">THE EXPERIMENT</span><h2 id="definition-title">Six decisions, one contract.</h2><p id="coverage-label">The agent records evidence as you go.</p><progress id="coverage" value="0" max="6" aria-label="Definition coverage">0 of 6</progress></div><div id="checklist" class="checklist"></div><div class="definition-footer"><strong id="readiness-title">Start with what you know</strong><p id="readiness-detail">A reference baseline is optional. The contract keeps open decisions visible.</p><button id="build-package" class="button secondary" type="button" disabled>Prepare research package <span aria-hidden="true">→</span></button></div></aside>
+  </main>
+</div>
+<dialog id="detail-dialog" aria-labelledby="dialog-title"><div class="dialog-heading"><div><span id="dialog-kicker" class="eyebrow">YOUR RESEARCH</span><h2 id="dialog-title">Details</h2></div><button id="close-dialog" class="icon-button" type="button" aria-label="Close dialog">×</button></div><div id="dialog-error" class="dialog-error" role="alert" hidden></div><div id="dialog-content" class="dialog-content"></div></dialog>
+</body>
+</html>

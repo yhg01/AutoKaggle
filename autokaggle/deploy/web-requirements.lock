@@ -35,3 +35,6 @@ typing-inspection==0.4.4
 typing_extensions==4.16.0
 uvicorn==0.54.0
 pypdf==6.21.4
+# Evaluator publishing with a token: Git over HTTPS without the git program.
+dulwich==1.2.20
+urllib3==2.8.0

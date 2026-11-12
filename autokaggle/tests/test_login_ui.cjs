@@ -224,6 +224,8 @@ test("Successful sign-in clears prior account drafts and tells other tabs to sig
 });
 
 for (const [requested, expected] of [
+  ["/lite", "/lite"],
+  ["/lite?project=mine", "/lite?project=mine"],
   ["/workbench", "/"],
   ["/workbench?project=mine&view=problem", "/?project=mine"],
   ["/workbench?view=review", "/"],

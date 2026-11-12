@@ -172,7 +172,7 @@ function messageHarness(messages, pending) {
   const render = uiFunction("renderMessages", { messageSteps: () => null, messageAttachments: () => null,
     state, $, element: node, markdown: (text, className) => node("div", className, text),
     document: { createTextNode: (text) => ({ nodeType: 3, textContent: text }) },
-    window: immediateWindow, working: () => false,
+    window: immediateWindow, working: () => false, entryStage: () => null,
     userCount: () => state.conversation.messages.filter((message) => message.role === "user").length,
   });
   return { state, render, $ };
@@ -210,7 +210,7 @@ test("All error states block Send and Skip but allow editing and drafting", () =
     const { $ } = dom();
     $("message-input").value = "A new correction";
     const state = { projectId: "p1", pending: null, conversation: { status: "error", can_retry, current_question: { text: "What is the target?" }, messages: [{ role: "user", content: "My problem" }] } };
-    const update = uiFunction("updateControls", { state, $, document: {querySelectorAll: () => []}, window: {}, working: () => false, userCount: () => 1, contactRequired: () => false, reviewAvailable: () => true, renderContact: noop, renderReviewControls: noop, renderError: noop, updateSetupControls: noop, updateBypassControls: noop, updateWorkflowControls: noop, updateDataControls: noop });
+    const update = uiFunction("updateControls", { state, $, entryStage: () => null, renderEntry: noop, document: {querySelectorAll: () => []}, window: {}, working: () => false, userCount: () => 1, contactRequired: () => false, reviewAvailable: () => true, renderContact: noop, renderReviewControls: noop, renderError: noop, updateSetupControls: noop, updateBypassControls: noop, updateWorkflowControls: noop, updateDataControls: noop });
     update();
     assert.equal($("send-message").disabled, true);
     assert.equal($("skip-question").disabled, true);
@@ -223,7 +223,7 @@ test("All error states block Send and Skip but allow editing and drafting", () =
 test("Answer controls and session tools leave busy state after a completed response", () => {
   const { $ } = dom(); const answer = {disabled: true}; const events = []; let busy = true;
   const state = {projectId: "p1", pending: null, config: {can_create_projects: true}, conversation: {status: "idle", messages: [{role: "user", content: "My problem"}]}};
-  const update = uiFunction("updateControls", {state, $, document: {querySelectorAll: () => [answer]},
+  const update = uiFunction("updateControls", {state, $, entryStage: () => null, renderEntry: noop, document: {querySelectorAll: () => [answer]},
     window: {dispatchEvent: (event) => events.push(event)}, CustomEvent: class {constructor(type, options) {this.type = type; this.detail = options.detail;}},
     working: () => busy, userCount: () => 1, contactRequired: () => false, reviewAvailable: () => true,
     renderContact: noop, renderReviewControls: noop, renderError: noop, updateBypassControls: noop, updateWorkflowControls: noop, updateDataControls: noop});
@@ -635,7 +635,7 @@ test("The private email gate blocks conversation changes without clearing the ex
   const contactRequired = uiFunction("contactRequired", { state });
   assert.equal(contactRequired(), true);
   const tabs = node();
-  uiFunction("renderContact", { state, $, contactRequired, userCount: () => 1, working: () => false, document: { querySelector: () => tabs } })();
+  uiFunction("renderContact", { state, $, entryStage: () => null, contactRequired, userCount: () => 1, working: () => false, document: { querySelector: () => tabs } })();
   assert.equal($("email-gate").hidden, false);
   assert.equal($("chat-view").hidden, true);
   assert.equal($("readme-view").hidden, true);
@@ -655,7 +655,7 @@ test("Email save uses the private setup route, preserves a failed input, and ope
   const contactRequired = uiFunction("contactRequired", { state });
   $("organizer-email").value = " researcher@example.test "; $("organizer-email").reportValidity = () => true;
   const requests = []; let fail = true;
-  const save = uiFunction("saveOrganizerEmail", { state, $, working: () => false, contactRequired, updateControls: noop, renderConversation: noop, refreshWorkflow: async () => {}, projectPath: () => "/api/projects/p1", base: () => "/conversation", api: async (path, options) => {
+  const save = uiFunction("saveOrganizerEmail", { state, $, entryStage: () => null, working: () => false, contactRequired, updateControls: noop, renderConversation: noop, refreshWorkflow: async () => {}, projectPath: () => "/api/projects/p1", base: () => "/conversation", api: async (path, options) => {
     requests.push({ path, method: options.method, body: JSON.parse(options.body) });
     if (fail) throw new Error("Email could not be saved");
     return { conversation: { messages, setup: { organizer_email: "researcher@example.test" } } };
@@ -1071,7 +1071,7 @@ test("A missing or unauthorized challenge gives account guidance instead of a co
 test("Unavailable challenges hide the checklist and Reconnect action without blocking New challenge", () => {
   const { $ } = dom(); const tabs = { hidden: false };
   const state = { projectUnavailable: true, conversation: null, config: { private_mode: true, can_create_projects: true }, view: "chat", localError: { heading: "Challenge unavailable", text: "Use another account" } };
-  uiFunction("renderContact", { state, $, contactRequired: () => false, working: () => false, userCount: () => 0, document: { querySelector: () => tabs } })();
+  uiFunction("renderContact", { state, $, entryStage: () => null, contactRequired: () => false, working: () => false, userCount: () => 0, document: { querySelector: () => tabs } })();
   uiFunction("renderError", { state, $, working: () => false })();
   for (const id of ["chat-view", "readme-view", "review-view", "interview-topics", "checklist-toggle", "retry-action"]) assert.equal($(id).hidden, true, id);
   assert.equal(tabs.hidden, true); assert.equal($("error-banner").hidden, false);
@@ -1518,4 +1518,57 @@ test("fileCard labels a file without an extension", () => {
   assert.equal(fileCard("notes").attributes["data-kind"], "FILE");
   assert.equal(fileCard("run.tar.gz").attributes["data-kind"], "GZ");
   assert.equal(fileCard("a.docx", "file-card removed").className, "file-card removed");
+});
+
+test("New interviews choose an entry path while saved scientific work resumes", () => {
+  const state = { conversation: { messages: [] } };
+  const entryStage = uiFunction("entryStage", { state, userCount: () => (state.conversation?.messages || []).filter(m => m.role === "user").length });
+  assert.equal(entryStage(), "choice");
+  state.conversation.entry_path = "scratch";
+  assert.equal(entryStage(), null);
+  state.conversation.entry_path = "speedrun";
+  assert.equal(entryStage(), "sources");
+  state.conversation.messages = [{ role: "user", content: "An approved starting brief." }];
+  assert.equal(entryStage(), null);
+  delete state.conversation.entry_path;
+  assert.equal(entryStage(), null, "Older interviews do not restart at the entry question");
+  state.conversation = { messages: [], readme: "Saved working draft" };
+  assert.equal(entryStage(), null);
+  state.conversation = { messages: [], review: { mode: "revision" } };
+  assert.equal(entryStage(), null);
+  state.conversation = { messages: [] }; state.pending = { action: "messages" };
+  assert.equal(entryStage(), null, "An uncertain first message retains its existing retry flow");
+});
+
+test("Speedrun saves only the Full entry path before opening existing source review", async () => {
+  const { $ } = dom(); const requests = []; const openings = [];
+  const state = { projectId: "full-project", conversation: { messages: [] }, entryBusy: false };
+  const chooseEntry = uiFunction("chooseEntry", { state, $, working: () => state.entryBusy, contactRequired: () => false, entryStage: () => "choice",
+    projectPath: () => "/api/projects/full-project", api: async (path, request) => { requests.push([path, request.method, JSON.parse(request.body)]); return { entry_path: "speedrun", messages: [] }; },
+    updateControls: noop, renderConversation: noop, showError: (message) => { throw new Error(message); }, openSpeedrunSources: () => openings.push(state.entryBusy) });
+  await chooseEntry("speedrun");
+  assert.deepEqual(requests, [["/api/projects/full-project/onboarding", "PATCH", { entry_path: "speedrun" }]]);
+  assert.deepEqual(openings, [false], "Source review opens after busy state clears");
+  assert.equal(state.conversation.entry_path, "speedrun");
+  assert.equal(state.entryBusy, false);
+});
+
+test("An entry save failure keeps the existing path and allows a retry", async () => {
+  const { $ } = dom(); const failures = []; const state = { projectId: "p1", conversation: { messages: [] }, entryBusy: false };
+  const original = state.conversation;
+  const chooseEntry = uiFunction("chooseEntry", { state, $, working: () => state.entryBusy, contactRequired: () => false, entryStage: () => "choice", projectPath: () => "/api/projects/p1",
+    api: async () => { throw new Error("Connection interrupted"); }, updateControls: noop, renderConversation: noop,
+    showError: message => failures.push(message), openSpeedrunSources: () => { throw new Error("Do not open before a confirmed save"); } });
+  await chooseEntry("speedrun");
+  assert.equal(state.conversation, original); assert.equal(state.entryBusy, false); assert.deepEqual(failures, ["Connection interrupted"]);
+});
+
+test("Entry choices preserve the Full gates and expose no Internal switch", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "static", "chat.html"), "utf8");
+  const entry = html.slice(html.indexOf('<section id="entry-choice"'), html.indexOf('<div id="welcome"'));
+  assert.match(entry, /same challenge, evaluation, and access checks/);
+  assert.match(entry, /id="choose-speedrun"/); assert.match(entry, /id="choose-scratch"/);
+  assert.doesNotMatch(entry, /\/lite|Internal|trust-based/);
+  const choose = source.slice(source.indexOf("  async function chooseEntry("), source.indexOf("  function inRevision("));
+  assert.doesNotMatch(choose, /api\/lite|scope|bypass|ready_for/);
 });

@@ -388,14 +388,19 @@ def register(app, store, access, get, editing, conversation_output):
         try:
             with store.connection() as con:
                 con.execute("BEGIN IMMEDIATE")
-                row = con.execute("SELECT 1 FROM handoff_codes JOIN projects ON projects.id=handoff_codes.project WHERE digest=? AND expires>? AND used=0", (digest, now())).fetchone()
+                row = con.execute("SELECT projects.body FROM handoff_codes JOIN projects ON projects.id=handoff_codes.project WHERE digest=? AND expires>? AND used=0", (digest, now())).fetchone()
                 if not row:
                     raise HTTPException(404, "The handoff code is no longer available.")
+                is_lite = "lite" in json.loads(row[0])
+                if is_lite:
+                    from .lite import require_member
+                    # Membership is required before consuming the code or granting access.
+                    require_member(access, request)
                 if not store.owns(project_id, actor):
                     con.execute("INSERT OR IGNORE INTO collaborators VALUES (?,?,?,?,?)",
                         (secrets.token_hex(16), project_id, actor, now(), POLICY_VERSION))
                 con.execute("UPDATE handoff_codes SET used=1 WHERE digest=?", (digest,))
-            return {"project_id": project_id, "redirect": "/?project=" + project_id}
+            return {"project_id": project_id, "redirect": ("/lite?project=" if is_lite else "/?project=") + project_id}
         finally:
             lock.release()
 

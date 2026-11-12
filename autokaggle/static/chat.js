@@ -4,7 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const LAST_PROJECT = "autokaggle-chat-last-project";
   const SESSION_ENDED = "autokaggle-session-ended";
-  const state = { projectId: null, conversation: null, config: null, projects: [], busy: false, polling: false, view: "chat", pending: null, localError: null, dismissedError: null, messageKey: "", selectedTopic: null, selectedItem: null, knowledgeTopic: null, knowledgeQuestion: null, renderedKnowledgeTopic: null, checklistKey: "", workflow: null, workflowLoading: false, workflowBusy: false, workflowUncertain: false, workflowError: null, dataProject: null, dataLoading: false, dataBusy: false, dataDirty: false, dataSnapshot: "", contactBusy: false, contactError: null, bypassDrafts: {}, scopeDrafts: {}, scopeDraftsLoaded: false, signingOut: false, projectUnavailable: false };
+  const state = { projectId: null, conversation: null, config: null, projects: [], busy: false, polling: false, view: "chat", pending: null, localError: null, dismissedError: null, messageKey: "", selectedTopic: null, selectedItem: null, knowledgeTopic: null, knowledgeQuestion: null, renderedKnowledgeTopic: null, checklistKey: "", workflow: null, workflowLoading: false, workflowBusy: false, workflowUncertain: false, workflowError: null, dataProject: null, dataLoading: false, dataBusy: false, dataDirty: false, dataSnapshot: "", contactBusy: false, contactError: null, bypassDrafts: {}, scopeDrafts: {}, scopeDraftsLoaded: false, signingOut: false, projectUnavailable: false, entryBusy: false };
   const topics = [
     { id: "problem", label: "Problem", fields: ["question", "task", "data", "evaluation", "leakage"] },
     { id: "approach", label: "Method & deployment", fields: ["methodology", "deployment", "protocol"] },
@@ -46,8 +46,39 @@
   }
   function base(id = state.projectId) { return `/api/projects/${encodeURIComponent(id)}/conversation`; }
   function projectPath(id = state.projectId) { return `/api/projects/${encodeURIComponent(id)}`; }
-  function working() { return state.documentBusy || state.signingOut || state.busy || state.contactBusy || state.polling || state.workflowLoading || state.workflowBusy || state.dataLoading || state.dataBusy || state.conversation?.status === "working"; }
+  function working() { return state.documentBusy || state.signingOut || state.busy || state.entryBusy || state.contactBusy || state.polling || state.workflowLoading || state.workflowBusy || state.dataLoading || state.dataBusy || state.conversation?.status === "working"; }
   function contactRequired() { return !!state.conversation && (state.conversation.contact_required ?? !state.conversation.setup?.organizer_email); }
+  function entryStage() {
+    const conversation = state.conversation;
+    if (!conversation || conversation.readme || conversation.review?.mode === "revision" || userCount() > 0 || state.pending?.action === "messages") return null;
+    if (conversation.entry_path === "scratch") return null;
+    return conversation.entry_path === "speedrun" ? "sources" : "choice";
+  }
+  function renderEntry() {
+    const stage = entryStage();
+    $("entry-choice").hidden = stage !== "choice";
+    $("speedrun-start").hidden = stage !== "sources";
+    $("chat-view").classList.toggle("entry-active", !!stage);
+    for (const id of ["choose-speedrun", "choose-scratch", "open-speedrun-sources", "speedrun-to-scratch"]) $(id).disabled = working() || contactRequired() || !!state.authRequired;
+    $("entry-choice").setAttribute("aria-busy", String(state.entryBusy));
+    $("speedrun-start").setAttribute("aria-busy", String(state.entryBusy));
+  }
+  function openSpeedrunSources() {
+    if (working() || contactRequired() || !state.projectId) return;
+    window.dispatchEvent(new CustomEvent("autokaggle:sources"));
+  }
+  async function chooseEntry(entryPath) {
+    if (working() || contactRequired() || !state.projectId || !entryStage()) return;
+    state.entryBusy = true; state.localError = null; updateControls();
+    let saved = false;
+    try {
+      state.conversation = await api(`${projectPath()}/onboarding`, { method: "PATCH", body: JSON.stringify({ entry_path: entryPath }) });
+      saved = true; renderConversation({ scroll: true });
+    } catch (error) { showError(error.message, "Could not save your starting path"); }
+    finally { state.entryBusy = false; updateControls(); }
+    if (saved && entryPath === "speedrun") openSpeedrunSources();
+    else if (saved) $("message-input").focus();
+  }
   function inRevision() { return state.conversation?.review?.mode === "revision"; }
   function reviewAvailable() { return !!state.conversation?.readme || inRevision() || !!state.workflow?.version; }
   function renderContact() {
@@ -56,9 +87,9 @@
     $("chat-view").hidden = unavailable || required || state.view !== "chat";
     $("readme-view").hidden = unavailable || required || state.view !== "readme";
     $("review-view").hidden = unavailable || required || state.view !== "review";
-    $("interview-topics").hidden = required || unavailable;
-    $("checklist-toggle").hidden = required || unavailable;
-    document.querySelector(".view-tabs").hidden = required || unavailable;
+    $("interview-topics").hidden = required || unavailable || !!entryStage();
+    $("checklist-toggle").hidden = required || unavailable || !!entryStage();
+    document.querySelector(".view-tabs").hidden = required || unavailable || !!entryStage();
     $("email-existing-note").hidden = userCount() === 0;
     $("email-error").textContent = state.contactError || ""; $("email-error").hidden = !state.contactError;
     $("organizer-email").disabled = working(); $("save-organizer-email").disabled = working() || !state.conversation;
@@ -75,12 +106,12 @@
       state.conversation = result.conversation || await api(base());
       input.value = ""; renderConversation({ scroll: true }); await refreshWorkflow();
     } catch (error) { state.contactError = error.message; }
-    finally { state.contactBusy = false; updateControls(); if (!contactRequired()) $("message-input").focus(); }
+    finally { state.contactBusy = false; updateControls(); if (!contactRequired()) $(entryStage() === "choice" ? "choose-speedrun" : entryStage() === "sources" ? "open-speedrun-sources" : "message-input").focus(); }
   }
   function userCount() { return (state.conversation?.messages || []).filter((message) => message.role === "user").length; }
   function setBusy(value, label = "Thinking through your challenge…") { state.busy = value; $("thinking-text").textContent = label; updateControls(); if (state.pending?.action === "messages") renderMessages(true); }
   function updateControls() {
-    const busy = working(); const ready = !!state.projectId && !!state.conversation && !contactRequired() && !state.conversation.storage?.required && !state.authRequired; const uncertain = !!state.pending && !busy; const blockedByError = state.conversation?.status === "error";
+    const busy = working(); const ready = !!state.projectId && !!state.conversation && !contactRequired() && !state.conversation.storage?.required && !state.authRequired && !entryStage(); const uncertain = !!state.pending && !busy; const blockedByError = state.conversation?.status === "error";
     const canCreate = state.config?.can_create_projects !== false;
     $("sign-out").hidden = !state.config?.private_mode; $("sign-out").disabled = !!state.signingOut; $("sign-out").textContent = state.signingOut ? "Signing out…" : "Sign out";
     $("new-project").hidden = !canCreate; $("new-project").disabled = busy || !canCreate; $("message-input").disabled = busy || !ready;
@@ -97,7 +128,7 @@
     $("retry-action").disabled = busy;
     for (const control of document.querySelectorAll("[data-conversation-retry]")) control.disabled = busy || !!state.authRequired;
     $("answer-in-chat").disabled = busy || !ready;
-    updateWorkflowControls(); updateDataControls(); renderContact(); renderReviewControls(); updateBypassControls();
+    updateWorkflowControls(); updateDataControls(); renderContact(); renderEntry(); renderReviewControls(); updateBypassControls();
     renderError();
     for (const control of document.querySelectorAll("[data-edit-answer]")) control.disabled = busy || !ready || uncertain;
     if (window.dispatchEvent && typeof CustomEvent === "function") window.dispatchEvent(new CustomEvent("autokaggle:state", { detail: { projectId: state.projectId, conversation: state.conversation, busy: working(), canCreate: state.config?.can_create_projects !== false, authKind: state.config?.auth_kind, researcherName: state.config?.researcher_name } }));
@@ -739,11 +770,11 @@
   }
   function dataDefaults(project) {
     const design = project.design || {}; const answers = project.answers || {}; const names = (project.dataset?.columns || []).map((column) => column.name);
-    return { design: { target: names.includes(design.target) ? design.target : "", task: design.task || "classification", metric: design.metric || "accuracy", split: design.split || "random", group_column: names.includes(design.group_column) ? design.group_column : "", time_column: names.includes(design.time_column) ? design.time_column : "", exclude_columns: [...new Set(design.exclude_columns || [])].filter((name) => names.includes(name) && name !== design.target).sort(), test_fraction: 0.2 }, answers: { data_origin: answers.data_origin || "unknown", labels_public: answers.labels_public || "unknown", rights: answers.rights || "unknown", compute_budget: answers.compute_budget || "", token_budget: answers.token_budget || "" } };
+    return { design: { target: names.includes(design.target) ? design.target : "", task: design.task || "classification", metric: design.metric || "accuracy", split: design.split || "random", group_column: names.includes(design.group_column) ? design.group_column : "", time_column: names.includes(design.time_column) ? design.time_column : "", exclude_columns: [...new Set(design.exclude_columns || [])].filter((name) => names.includes(name) && name !== design.target).sort(), test_fraction: 0.2 }, answers: { data_origin: answers.data_origin || "unknown", labels_public: answers.labels_public || "unknown", research_mode: answers.research_mode || "private", rights: answers.rights || "unknown", compute_budget: answers.compute_budget || "", token_budget: answers.token_budget || "" } };
   }
   function collectDataForm() {
     const target = $("data-target").value;
-    return { design: { target, task: $("data-task").value, metric: $("data-metric").value, split: $("data-split").value, group_column: $("data-group-column").value, time_column: $("data-time-column").value, exclude_columns: [...document.querySelectorAll("#data-exclude-columns input:checked")].map((input) => input.value).filter((name) => name !== target).sort(), test_fraction: 0.2 }, answers: { data_origin: $("data-origin-choice").value, labels_public: $("data-labels-public").value, rights: $("data-rights").value, compute_budget: $("data-compute-budget").value.trim(), token_budget: $("data-token-budget").value.trim() } };
+    return { design: { target, task: $("data-task").value, metric: $("data-metric").value, split: $("data-split").value, group_column: $("data-group-column").value, time_column: $("data-time-column").value, exclude_columns: [...document.querySelectorAll("#data-exclude-columns input:checked")].map((input) => input.value).filter((name) => name !== target).sort(), test_fraction: 0.2 }, answers: { data_origin: $("data-origin-choice").value, labels_public: $("data-labels-public").value, research_mode: $("data-research-mode").value, rights: $("data-rights").value, compute_budget: $("data-compute-budget").value.trim(), token_budget: $("data-token-budget").value.trim() } };
   }
   function dataOptions(id, columns, selected, placeholder) {
     const select = $(id); select.replaceChildren(new Option(placeholder, "")); for (const column of columns) select.append(new Option(column.name, column.name)); select.value = selected || "";
@@ -775,7 +806,7 @@
     state.dataProject = project; const defaults = dataDefaults(project); const values = draft || defaults; const columns = project.dataset?.columns || [];
     dataOptions("data-target", columns, values.design.target, columns.length ? "Select a target" : "Add a CSV first"); dataOptions("data-group-column", columns, values.design.group_column, "Select a column"); dataOptions("data-time-column", columns, values.design.time_column, "Select a column");
     $("data-task").value = values.design.task; dataMetrics(values.design.metric); $("data-split").value = values.design.split; dataSplitFields();
-    for (const [key, id] of [["data_origin", "data-origin-choice"], ["labels_public", "data-labels-public"], ["rights", "data-rights"], ["compute_budget", "data-compute-budget"], ["token_budget", "data-token-budget"]]) $(id).value = values.answers[key] || (key.endsWith("budget") ? "" : "unknown");
+    for (const [key, id] of [["data_origin", "data-origin-choice"], ["labels_public", "data-labels-public"], ["research_mode", "data-research-mode"], ["rights", "data-rights"], ["compute_budget", "data-compute-budget"], ["token_budget", "data-token-budget"]]) $(id).value = values.answers[key] || (key.endsWith("budget") ? "" : "unknown");
     const excluded = $("data-exclude-columns"); excluded.replaceChildren();
     for (const column of columns) { const label = element("label", "data-checkbox"); const input = element("input"); input.type = "checkbox"; input.value = column.name; input.checked = values.design.exclude_columns.includes(column.name) && column.name !== values.design.target; label.append(input, document.createTextNode(column.name)); excluded.append(label); }
     if (!columns.length) excluded.append(element("p", "data-help", "Add a CSV to choose columns."));
@@ -974,10 +1005,10 @@
     const messages = [...(state.conversation?.messages || [])];
     const pendingVisibleInHistory = state.pending?.action === "messages" && messages.filter((message) => message.role === "user").slice(state.pending.before_user_count ?? userCount()).some((message) => message.content === state.pending.message);
     if (state.pending?.action === "messages" && !pendingVisibleInHistory) messages.push({ id: `pending:${state.pending.request_id}`, role: "user", content: state.pending.message, attachments: state.pending.attachments, pending: true });
-    const key = `${state.projectId}:${JSON.stringify(messages)}:${(state.conversation?.documents || []).map((item) => item.id).join()}:${working()}`; $("welcome").hidden = started || messages.length > 0;
+    const key = `${state.projectId}:${JSON.stringify(messages)}:${(state.conversation?.documents || []).map((item) => item.id).join()}:${working()}:${entryStage()}`; $("welcome").hidden = started || messages.length > 0 || !!entryStage();
     if (key === state.messageKey) return; state.messageKey = key;
     const root = $("messages"); const transcript = $("transcript"); const nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 120;
-    root.replaceChildren();
+    root.hidden = !!entryStage(); root.replaceChildren();
     for (const message of messages) {
       if (!["user", "assistant"].includes(message.role)) continue;
       const block = element("article", `message ${message.role}`); const role = element("div", "message-role");
@@ -1151,6 +1182,10 @@
     if (id) { writeStorage(draftKey(id), null); writeStorage(pendingKey(id), null); }
     if (id === state.projectId) { writeStorage(LAST_PROJECT, null); window.location.replace("/"); }
   });
+    $("choose-speedrun").addEventListener("click", () => chooseEntry("speedrun"));
+    $("choose-scratch").addEventListener("click", () => chooseEntry("scratch"));
+    $("speedrun-to-scratch").addEventListener("click", () => chooseEntry("scratch"));
+    $("open-speedrun-sources").addEventListener("click", openSpeedrunSources);
     $("organizer-email-form").addEventListener("submit", (event) => { event.preventDefault(); saveOrganizerEmail(); });
     $("organizer-email").addEventListener("input", () => { if (state.contactError) { state.contactError = null; renderContact(); } });
     $("review-tab").addEventListener("click", openReview);

@@ -3,7 +3,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const state = { project: null, config: null, busy: false, snapshot: "", adviceDirty: false, seenNotices: new Set() };
-  const answerFields = { objective: "objective", prediction_unit: "prediction-unit", success_criterion: "success-criterion", data_origin: "data-origin", labels_public: "labels-public", rights: "rights", compute_budget: "compute-budget", token_budget: "token-budget" };
+  const answerFields = { objective: "objective", prediction_unit: "prediction-unit", success_criterion: "success-criterion", data_origin: "data-origin", labels_public: "labels-public", research_mode: "research-mode", rights: "rights", compute_budget: "compute-budget", token_budget: "token-budget" };
   const metricNames = { accuracy: "Accuracy", balanced_accuracy: "Balanced accuracy", roc_auc: "ROC AUC", rmse: "Root mean squared error", mae: "Mean absolute error" };
   const stageNames = { scope: "Frame the problem", scoping: "Frame the problem", problem: "Frame the problem", data: "Understand the data", audit: "Check the data and evaluation", analyze: "Check the data and evaluation", evaluation: "Design the evaluation", baseline: "Run the development trial", trial: "Run the development trial", review: "Review the challenge", complete: "Ready for your review", failed: "Needs attention", queued: "Starting the agent", start: "Starting the agent", package: "Prepare the packages" };
 
@@ -189,7 +189,7 @@
   function renderProject() {
     const project = state.project; if (!project) return; $("welcome").hidden = true; $("workspace").hidden = false;
     $("workspace-title").textContent = project.title || "Untitled challenge"; document.title = `${project.title || "Untitled challenge"} · BOLD AutoKaggle`; $("title").value = project.title || ""; $("brief").value = project.brief || "";
-    for (const [key, id] of Object.entries(answerFields)) $(id).value = project.answers?.[key] || (["data_origin", "labels_public", "rights"].includes(key) ? "unknown" : "");
+    for (const [key, id] of Object.entries(answerFields)) $(id).value = project.answers?.[key] || (key === "research_mode" ? "private" : ["data_origin", "labels_public", "rights"].includes(key) ? "unknown" : "");
     $("task").value = project.design?.task || "classification"; updateMetrics(project.design?.metric); $("split").value = project.design?.split || "random"; updateSplitFields(); renderColumns(project);
     renderChecklist(project.checklist || []); renderDataset(project.dataset); renderAnalysis(project.analysis); renderAdvice(project.advice || [], project.revision); state.adviceDirty = false; renderHarness(project);
     $("packages").hidden = !project.prepared; $("acknowledge-review").checked = false; $("prepare-help").textContent = !project.analysis ? "Run the trial and review its results before preparing packages." : project.analysis.summary?.blockers ? "Resolve the blocking checks and rerun the trial before preparing packages." : project.analysis.baseline?.status !== "complete" ? "Complete the development baseline before preparing packages." : "Complete the review checkbox to prepare. Blocking checks must pass.";
