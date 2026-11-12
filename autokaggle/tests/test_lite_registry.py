@@ -40,14 +40,15 @@ def test_registry_requires_current_research_validation_and_human_approval(change
 def test_bold_registration_receipt_and_retry(monkeypatch, scenario):
     import httpx
     item, build = eligible()
-    monkeypatch.setenv('AUTOKAGGLE_BOLD_REGISTRY_URL', 'https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/v1/registerBenchmark')
+    monkeypatch.setenv('AUTOKAGGLE_BOLD_REGISTRY_URL', 'https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/v1/register_benchmark')
     monkeypatch.setenv('AUTOKAGGLE_BOLD_REGISTRY_TOKEN', 'test-placeholder')
     calls = []
     class Store:
         def save(self, value): pass
     def handle(request):
         calls.append(request)
-        payload = json.loads(request.content)
+        payload = json.loads(request.content)["registration"]
+        assert request.headers["Authorization"] == "Bearer test-placeholder"
         assert request.headers['Idempotency-Key'] == payload['idempotency_key']
         if scenario == 'timeout': raise httpx.ReadTimeout('test', request=request)
         if scenario == 'forbidden': return httpx.Response(403)
@@ -70,3 +71,12 @@ def test_bold_registration_receipt_and_retry(monkeypatch, scenario):
         lite_release.deliver_registration(Store(), item, build, client=client)
         assert build['registry']['status'] == 'not_eligible'
 
+
+
+def test_new_research_approval_gets_new_receipt_key():
+    item, build = eligible()
+    before = lite_release.registry_payload(item, build)["idempotency_key"]
+    build["human_approval"]["approved_at"] = "2026-11-12T21:00:00Z"
+    after = lite_release.registry_payload(item, build)["idempotency_key"]
+    assert after != before
+    assert lite_release.registry_payload(item, build)["idempotency_key"] == after

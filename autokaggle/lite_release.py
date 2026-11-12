@@ -52,7 +52,7 @@ def invitation(store, item, build, *, retry=False):
 
 
 def registry_payload(item, build):
-    """Fail closed. The receiver must deduplicate source_id + evaluator commit."""
+    """Fail closed. Retries identify the exact release, evidence, and approval."""
     validation, approval, evidence = build.get("validation") or {}, build.get("human_approval") or {}, build.get("evidence") or {}
     commit, contract = evidence.get("commit"), build.get("contract_sha256")
     from . import lite
@@ -75,7 +75,7 @@ def registry_payload(item, build):
         raise ValueError("Publish this exact evaluator commit before BOLD OS registration.")
     c = item["lite"]["contract"]
     return {"schema": "bold.autokaggle.registration.v1", "source_id": "autokaggle:" + item["id"],
-            "idempotency_key": hashlib.sha256((item["id"] + commit).encode()).hexdigest(),
+            "idempotency_key": hashlib.sha256(json.dumps([item["id"], commit, research["report_sha256"], approval.get("approved_at")], separators=(",", ":")).encode()).hexdigest(),
             "destinations": ["problem_bank", "benchmarks"], "title": c.get("title", item["title"]),
             "objective": c.get("objective"), "task_kind": c.get("task_kind"),
             "evaluator": {"repository": published["url"], "commit": commit, "version": build["evaluator_version"],
@@ -122,7 +122,7 @@ def deliver_registration(store, item, build, *, client=None):
         parsed = urlsplit(url)
         valid_url = (parsed.scheme == "https" and parsed.hostname == "europe-west2-bold-d7ff2.cloudfunctions.net"
                      and not (parsed.username or parsed.password or parsed.query or parsed.fragment)
-                     and parsed.port in (None, 443))
+                     and parsed.port in (None, 443) and parsed.path == "/boldApi/v1/register_benchmark")
     except ValueError:
         valid_url = False
     if not valid_url:
@@ -134,7 +134,7 @@ def deliver_registration(store, item, build, *, client=None):
     own_client = client is None
     client = client or httpx.Client(timeout=30, follow_redirects=False)
     try:
-        response = client.post(url, json=queued["payload"], headers={"Authorization": token, "Idempotency-Key": queued["idempotency_key"]})
+        response = client.post(url, json={"registration": queued["payload"]}, headers={"Authorization": token if token.startswith("Bearer ") else "Bearer " + token, "Idempotency-Key": queued["idempotency_key"]})
         if response.status_code not in (200, 201):
             raise ValueError("BOLD OS did not accept registration (HTTP " + str(response.status_code) + "). The outbox entry is saved.")
         receipt = response.json()
