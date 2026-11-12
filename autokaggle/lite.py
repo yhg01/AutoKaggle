@@ -219,7 +219,7 @@ def version(contract, records):
 
 def evaluator_files():
     return {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest()
-            for name in ("lite_runner.py", "lite_gym_adapter.py")}
+            for name in ("lite_runner.py", "lite_gym_adapter.py", "lite_quality.py")}
 
 
 def view(project):
@@ -512,6 +512,7 @@ def build(project, directory):
              "manifest.schema.json": json.dumps(manifest_schema, indent=2), "results.schema.json": json.dumps(result_schema, indent=2),
              "decision-evidence.json": json.dumps(state.get("accepted_evidence", {}), indent=2),
              "run.py": (HERE / "lite_runner.py").read_text(), "gym_adapter.py": (HERE / "lite_gym_adapter.py").read_text(),
+             "quality_checks.py": (HERE / "lite_quality.py").read_text(),
              "adapter.py": adapter, "ENVIRONMENT.md": "# Declared evaluation environment\n\n"+c["dependencies"]+"\n\n"
                  "This is the agreed environment specification. It is not a generated dependency lock. "
                  "Use the researcher repository's fixed dependency lock and record its SHA-256 in the submission manifest. "
@@ -568,8 +569,8 @@ def record_results(project, directory, request_id, manifest, records):
         if not isinstance(record, dict) or type(record.get("seed")) is not int or record["seed"] in by_seed:
             raise ValueError("Result records need distinct integer seeds.")
         by_seed[record["seed"]] = True
-        if set(record) - {"seed", "status", "score", "steps", "elapsed_seconds", "end_reason"}:
-            raise ValueError("Result records support seed, status, score, steps, elapsed_seconds, and end_reason only. Store logs in the artifact reference.")
+        from .lite_quality import validate_metadata
+        validate_metadata(record)
         checked = validate_record(copy.deepcopy(record), record["seed"], submitted_contract["metric"])
         if checked.get("end_reason") == "evaluation_horizon" and (submitted_contract.get("horizon_policy") != "fixed_horizon" or checked["steps"] != submitted_contract.get("max_steps")):
             raise ValueError("A horizon result must reach the declared fixed horizon.")

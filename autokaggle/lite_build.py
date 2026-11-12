@@ -36,8 +36,8 @@ HERE = Path(__file__).parent
 FORMAT = "bold.autokaggle.lite.evaluation.v1"
 DIRECTION = {"success_rate": "maximize", "accuracy": "maximize", "mean_score": "maximize", "rmse": "minimize", "mae": "minimize"}
 TRUSTED = {"evaluate.py": "lite_evaluator_cli.py", "fetch_assets.py": "lite_fetch_assets.py",
-           "run.py": "lite_runner.py", "gym_adapter.py": "lite_gym_adapter.py"}
-RESERVED = {"evaluate", "run", "fetch_assets", "gym_adapter", "check", "loader"}
+           "run.py": "lite_runner.py", "gym_adapter.py": "lite_gym_adapter.py", "quality_checks.py": "lite_quality.py"}
+RESERVED = {"evaluate", "run", "fetch_assets", "gym_adapter", "check", "loader", "quality_checks"}
 ACTIVE = {"queued", "building", "testing"}
 PROMPT = "Read BUILD_TASK.md in this directory and complete the task it describes. Work only in this directory."
 _RUNNING: set[str] = set()

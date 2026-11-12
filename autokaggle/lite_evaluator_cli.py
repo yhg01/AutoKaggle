@@ -72,6 +72,8 @@ def main():
     parser.add_argument("--artifact-url", default="", help="Where collaborators can retrieve this artifact.")
     parser.add_argument("--resources", default="Not recorded.", help="Hardware and time used to produce the artifact.")
     parser.add_argument("--provenance", default="Not recorded.", help="Training code, data versions, and seeds.")
+    parser.add_argument("--mode", choices=("research", "synthetic"), default="research", help="Synthetic examples never establish research-data validation.")
+    parser.add_argument("--reference", help="Local reference file or directory, including licensed data. It is never uploaded.")
     args = parser.parse_args()
 
     try:
@@ -88,20 +90,28 @@ def main():
         if actual != expected:
             stop(f"{name} is missing or differs from the release. Check out the pinned release again.")
     for asset in assets:
-        if not (ROOT / asset["path"]).is_file() or digest(ROOT / asset["path"]) != asset["sha256"]:
+        if asset.get("mode") == "research" and args.mode == "synthetic":
+            continue
+        from quality_checks import digest as asset_digest
+        target = Path(args.reference).resolve() if asset.get("source") == "local" and args.reference else ROOT / asset["path"]
+        if not target.exists() or asset_digest(target) != asset["sha256"]:
             stop(f"{asset['path']} is missing or does not match its SHA-256. Run: python fetch_assets.py")
     artifact = Path(args.artifact).resolve()
-    if not artifact.is_file():
-        stop(f"{args.artifact} is not a file.")
+    if not artifact.is_file() and not artifact.is_dir():
+        stop(f"{args.artifact} is not a file or directory.")
+    from quality_checks import digest as artifact_digest
     revision = release_revision()
 
     manifest = {"format": "bold.autokaggle.lite.submission.v1", "challenge_version": lock["contract_version"],
                 "contract_sha256": lock["contract_sha256"], "code_repository": lock["repository"], "code_revision": revision,
                 "code_directory": str(ROOT), "artifact_url": args.artifact_url or "local:" + artifact.name,
-                "artifact_path": str(artifact), "artifact_sha256": digest(artifact),
+                "artifact_path": str(artifact), "artifact_sha256": artifact_digest(artifact),
                 "dependencies_path": str(ROOT / "requirements.lock"), "dependencies_sha256": digest(ROOT / "requirements.lock"),
                 "resources": args.resources, "training_provenance": args.provenance,
-                "evaluator_version": lock["evaluator_version"]}
+                "evaluator_version": lock["evaluator_version"], "evaluation_mode": args.mode}
+    if args.reference:
+        reference = Path(args.reference).resolve()
+        manifest.update(reference_path=str(reference), reference_sha256=artifact_digest(reference))
     if lock.get("loader"):
         manifest["policy_loader"] = lock["loader"]
 
