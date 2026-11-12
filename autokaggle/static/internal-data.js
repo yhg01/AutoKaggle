@@ -19,6 +19,7 @@
   function rows(data, section) {
     const p = data.project || {}, c = p.conversation || {}, review = data.review || {};
     const definitions = Object.fromEntries(array(review.field_definitions).map(d => [d.id, d]));
+    if (p.lite && section !== "calls" && section !== "raw") return liteRows(p, section);
     if (section === "messages") return array(c.messages).map((value, i) => ({id: value.id || `message-${i}`, label: value.role || "Message", subtitle: short(value.content ?? value.text), status: value.role, at: value.at || value.created_at, index: i + 1, value, path: `conversation.messages[${i}]`, type: "message"}));
     if (section === "calls") return array(p._model_traces).map((value, i) => ({id: value.id || `call-${i}`, label: value.kind || "Model call", subtitle: value.model || "Model not recorded", status: value.status, at: value.started_at, index: i + 1, value, path: `_model_traces[${i}]`, type: "call"}));
     if (section === "fields") {
@@ -48,6 +49,27 @@
       return records.map((r, i) => ({...r, index: i + 1, subtitle: r.subtitle || short(r.value)}));
     }
     return [...Object.entries(p), ["review", review]].map(([key, value], i) => ({id: key, label: key, subtitle: short(value), index: i + 1, value, path: key, type: "raw"}));
+  }
+  function liteRows(p, section) {
+    const c = p.lite, records = [];
+    const add = (id, label, value, path, type = "artifact", status) => records.push({id, label, value, path, type, status, subtitle: short(value), index: records.length + 1});
+    if (section === "messages") return array(c.messages).map((value, i) => ({id: value.id || `message-${i}`, label: value.role || "Message", subtitle: short(value.content), status: value.role, at: value.at || value.created_at, index: i + 1, value, path: `lite.messages[${i}]`, type: "message"}));
+    if (section === "fields") {
+      for (const [key, value] of Object.entries(object(c.contract))) add(`contract-${key}`, key, {value, evidence: c.accepted_evidence?.[key] ?? null}, `lite.contract.${key}`, "lite_field", "accepted");
+      if (c.proposal) add("proposal", "Current proposal · not yet accepted", c.proposal, "lite.proposal", "artifact", "proposed");
+      add("open-decisions", "Open decisions", c.open_decisions || [], "lite.open_decisions");
+    } else if (section === "changes") {
+      array(c.history).forEach((value, i) => {add(`history-${i}`, "Accepted contract revision", value, `lite.history[${i}]`, "lite_change"); records.at(-1).at = value.at;});
+    } else if (section === "execution") {
+      const keys = ["status", "stage", "error", "job_id", "round", "round_start", "model_calls"];
+      add("lite-runtime", "Lite interview runtime", Object.fromEntries(keys.filter(k => k in c).map(k => [k, c[k]])), "lite (control fields)", "execution", c.status);
+      array(p.lite_evaluator?.builds).forEach((value, i) => add(value.id, `Evaluator build ${i + 1}`, value, `lite_evaluator.builds[${i}]`, "lite_build", value.status));
+      array(c.results).forEach((value, i) => add(`result-${i}`, `Submitted result ${i + 1}`, value, `lite.results[${i}]`, "submission", value.status));
+    } else if (section === "artifacts") {
+      for (const key of ["package", "package_history", "sources"]) if (c[key] !== undefined) add(key, {package: "Current research package", package_history: "Package history", sources: "Imported source records"}[key], c[key], `lite.${key}`);
+      if (p.lite_evaluator) add("lite-evaluator", "Evaluator releases and publication", p.lite_evaluator, "lite_evaluator");
+    }
+    return records;
   }
   function related(data, row) {
     const ids = [...new Set((row.type === "message" ? [row.value.id] : row.type === "field" ? array(row.value.evidence).map(e => e.message_id) : [row.value?.trigger?.message_id || row.value?.message_id]).filter(Boolean))];

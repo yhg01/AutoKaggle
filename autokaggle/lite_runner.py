@@ -87,10 +87,27 @@ def run(package_dir, manifest_path, output_path):
     if manifest.get("contract_sha256") != actual_digest:
         raise ValueError("The manifest contract digest does not match the package.")
     code_directory = Path(manifest.get("code_directory", ".")).resolve()
-    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=code_directory, check=True,
-        capture_output=True, text=True, timeout=10).stdout.strip()
-    dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=code_directory,
-        check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+    archive_revision = code_directory / "revision.txt"
+    archive = (code_directory == package_dir and not (code_directory / ".git").exists() and
+               archive_revision.is_file() and len(archive_revision.read_text().strip()) == 40)
+    if archive:
+        revision = archive_revision.read_text().strip()
+        if any(c not in "0123456789abcdef" for c in revision):
+            raise ValueError("The archive revision is invalid.")
+        lock = json.loads((code_directory / "evaluator.lock.json").read_text())
+        if lock.get("contract_sha256") != actual_digest or not lock.get("files"):
+            raise ValueError("The archive does not match this evaluation contract.")
+        for name, expected in lock["files"].items():
+            file = code_directory / name
+            actual = hashlib.sha256(b"$Format:%H$\n").hexdigest() if name == "revision.txt" else digest(file)
+            if actual != expected:
+                raise ValueError("An archive file differs from the evaluator release.")
+        dirty = ""
+    else:
+        revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=code_directory, check=True,
+            capture_output=True, text=True, timeout=10).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=code_directory,
+            check=True, capture_output=True, text=True, timeout=10).stdout.strip()
     if dirty or revision != manifest.get("code_revision"):
         raise ValueError("Run the declared code commit with no changes to tracked files.")
     # Paths are local researcher choices. The web service never follows them.

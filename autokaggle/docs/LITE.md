@@ -2,7 +2,7 @@
 
 Lite is the internal ML research mode. Open `/lite`. On the separate Lite host, `/` also opens Lite. The original Full host retains the Full interview.
 
-One accepted contract produces a private website preview, README, research ZIP, fixed seed list, result schemas, local runner, and result record. Lite supports supervised batch evaluation and interactive environments. It accepts predictions, a checkpoint, or a policy as the contract permits. It does not start hosted compute or rent nodes.
+One accepted contract produces a private website preview, README, research ZIP, fixed seed list, result schemas, local runner, and result record. Lite supports batch evaluation, interactive environments, optimization, forecasting, generation, and custom evaluation. It accepts the artifact defined by the contract. Researchers run their experiments locally. The service can prepare and test a small evaluator in a bounded build job; it does not rent nodes.
 
 ## Required workflow before merging Lite into main
 
@@ -10,11 +10,11 @@ One accepted contract produces a private website preview, README, research ZIP, 
 
 **BOLD OS as the project home.** Collaborators start and resume Lite from BOLD OS. The Problem Bank holds the problem record and its status. Benchmarks links the problem to the evaluator repo and pinned version. Show incomplete work as a draft until the scoring test passes. Preserve the BOLD OS record IDs and repo ID so a retry updates the same records. Lite can supply the interview and build backend. The existing standalone preview is part of the current implementation and does not satisfy this requirement.
 
-These are merge requirements. The evaluator build and its clean-clone scoring check are implemented for local use; see **Build evaluator** below. Publishing a tested release to a private GitHub repository is implemented; see **Publish to GitHub**. It has run only under one developer account. Publishing under `bold-lab-ai` with the lab's template and access list, and a write integration for the BOLD OS sections, are still needed.
+These are merge requirements. The evaluator build and its clean-clone scoring check are implemented for local use and the configured Internal Civo build service; see **Build evaluator** below. Publishing a tested release to a private GitHub repository is implemented; see **Publish to GitHub**. Automatic publication uses the configured BOLD GitHub connection. Project access lists and a write integration for the BOLD OS sections remain separate work.
 
 ## Build evaluator
 
-After a contract is accepted, **Evaluator → Build evaluator** produces a tested evaluator release for that exact contract version. A build publishes nothing; publishing is a separate action. See the [10 November build record](LITE_EVALUATOR_BUILD_2026-11-10.md) for what has and has not been tested.
+After a contract is accepted, **Evaluator → Build evaluator** produces a tested evaluator release for that exact contract version. On the configured Civo Lite service, a successful build automatically publishes the tested commit to a private BOLD GitHub repository. See the [10 November build record](LITE_EVALUATOR_BUILD_2026-11-10.md) for what has and has not been tested.
 
 1. **Freeze.** The build reads the frozen `contract.json` of the current package and binds to its version and digest. It derives the metric direction: `success_rate`, `accuracy`, and `mean_score` are maximized; `rmse` and `mae` are minimized. A local-only source, private scoring targets, or a reserved adapter module name stops the build with a named decision before any model call.
 2. **Implement.** A coding agent (opencode, pinned in `deploy/lite-build.Dockerfile`) works in a disposable workspace. It writes the task adapter, an artifact loader for policies and checkpoints, `requirements.lock`, `assets.json`, three example artifacts, their expected scores, and a separate calculation of those scores. It must report a blocker instead of inventing a decision that affects scoring. The instructions are in `prompts/lite_build.md`.
@@ -45,7 +45,9 @@ Limits of this version:
 
 ## Publish to GitHub
 
-**Evaluator → Publish to GitHub** pushes the tested release for the current contract to a private repository for that problem. It is available when `AUTOKAGGLE_LITE_GITHUB_OWNER` names the account or organization that holds evaluator repositories and the server has a usable GitHub credential.
+Automatic publication starts only after all release checks pass. Failed builds create no repository. Each problem keeps one repository; tested updates add `v1`, `v2`, and later tags. A failed or interrupted publication keeps the tested local release available. Retry checks the remote state and reuses the same repository. An older contract is never published as the current release. Existing sessions are not published in bulk when this setting is enabled.
+
+With `AUTOKAGGLE_LITE_AUTO_PUBLISH=1`, a successful evaluator check automatically publishes the tested release for the current contract to a private repository for that problem. The dialog shows publication progress, the repository link, and a ZIP download pinned to the tested commit. **Retry publication** retries a failed push without another build. Services with automatic publication disabled retain **Evaluator → Publish to GitHub**. It is available when `AUTOKAGGLE_LITE_GITHUB_OWNER` names the account or organization that holds evaluator repositories and the server has a usable GitHub credential.
 
 - **One repository per problem.** The name is `lite-eval-<title>-<first eight characters of the problem ID>`. It is fixed at the first build and does not follow later title changes. The repository ID and URL are saved on the problem before the push, so a retry reuses the same repository.
 - **The tested commit, unchanged.** The push carries `main` and the `v<N>` release tags in one all-or-nothing push, without force. Afterwards the application reads the refs back from GitHub and requires the tested commit.
@@ -65,17 +67,18 @@ For hosted Lite, the deployer reads the token from the private file `$HOME/.conf
 
 Limits of this version:
 
-- Hosted Lite cannot build evaluators, because builds need Docker. It therefore has no tested release to publish yet. Its publishing configuration is in place for when hosted builds exist.
-- Repository access is not managed. The creator is the only member until someone adds collaborators on GitHub. The project's access list is not yet applied.
+- Release checks test the primary fitness and declared fixtures. They do not yet test every secondary output or reference-data provenance requirement in the scientific definition. Review generated adapters before treating a result as fully compliant with that definition. A missing required diagnostic or reference identity needs a corrected evaluator release.
+- Hosted builds require the Internal Kubernetes runtime described in `deploy/LITE_WEB.md`. Admission follows the configured Lite access policy. They do not run researcher training jobs.
+- Repository access follows GitHub organization and repository permissions. Lite does not add collaborators automatically. Email access to Lite does not grant access to a private GitHub repository.
 - The lab-approved repository template and its project-tracking files are not applied.
 - BOLD OS Problem Bank and Benchmarks records are not written.
 - After a repository is transferred or renamed, publishing follows it by ID. Earlier releases keep the old address in their lock file.
 
 ## Start a session
 
-1. Start the existing app with `OPENROUTER_API_KEY` in the private environment file. Lite calls OpenRouter directly. The default model is `openai/gpt-6.1-sol` with medium reasoning. `AUTOKAGGLE_LITE_MODEL` can select another compatible model. Package generation is deterministic.
+1. Configure a model provider in the private environment. The 12 November rollout uses `DEEPSEEK_API_KEY`, `AUTOKAGGLE_LITE_PROVIDER=deepseek`, and `deepseek-v4-pro`. OpenRouter remains supported. Package generation is deterministic.
 2. Open `/lite`. Create a session, enter the organizer email, and accept storage and model processing.
-3. Add a public paper URL, a text PDF up to 16 MiB, a public GitHub repository, or both. Add the intended research question.
+3. Describe the research question. Paste a public paper or GitHub link in chat, or use **Attach** for multiple files. Documents, tables, text, code, and images are accepted. Each file is limited to 50 MiB; image interpretation is limited to 20 MiB. Images are interpreted by a model and need review. The earlier Sources dialog retains its 16 MiB PDF limit.
 4. Review the proposed contract. Source excerpts, pinned revisions, suggestions, and extraction errors remain visible. Edit the proposal or ask for a correction. Select **Accept** to record it.
 5. Answer only the remaining questions. The six groups are objective, source, artifact, evaluation, resources, and provenance. A scientific reference baseline is optional.
 6. Build the package. Open its website preview, download the ZIP, and download the evaluation config. The config is the same `contract.json` included in the ZIP. It includes every required seed.
@@ -98,11 +101,13 @@ The revision agent receives the latest three saved result summaries, their versi
 | `openrouter` (default) | `OPENROUTER_API_KEY` | `AUTOKAGGLE_LITE_MODEL`, else `openai/gpt-6.1-sol` | The interview is the unchanged call in `lite.py`, with strict schema output. |
 | `deepseek` | `DEEPSEEK_API_KEY` | `AUTOKAGGLE_LITE_DEEPSEEK_MODEL`, else `deepseek-v4-pro` | DeepSeek has JSON output without a strict schema. The schema is placed in the prompt and one blank reply is retried. |
 
-Both routes send the same interview context and pass the same `parse_proposal` validation. The DeepSeek route lives in `lite_providers.py` and is installed at startup, so `lite.py` stays byte-identical and existing contract versions and seeds do not change. Medium reasoning maps to DeepSeek's `high`. For builds, the gateway forwards to the selected provider and the coding agent returns DeepSeek's reasoning text on later tool-call turns, as that API requires. The session view's model label in `lite.py` still names the OpenRouter model; each proposal and build record states the model that actually answered. Record the provider and model with every live test.
+Both routes send the same interview context and pass the same `parse_proposal` validation. The DeepSeek route lives in `lite_providers.py` and is installed at startup, so `lite.py` stays byte-identical and existing contract versions and seeds do not change. Medium reasoning maps to DeepSeek's `high`. For builds, the gateway forwards to the selected provider and the coding agent returns DeepSeek's reasoning text on later tool-call turns, as that API requires. The session view, proposal, and build record name the configured model. Record the provider and model with every live test.
 
 ## Internal access
 
-In private deployments, set `AUTOKAGGLE_LITE_MEMBERS` to a comma-separated list of approved lab email addresses. A verified email alone does not establish lab membership. The list is empty by default; private Lite access then requires an administrator session. Ownership and collaborator checks still apply. Local development uses the existing local owner cookie.
+The owner approved temporary verified-email access on 12 November 2026, pending BOLD OS sign-in. Set `AUTOKAGGLE_LITE_ACCESS_POLICY=verified_email` for this mode; users still sign in with an email code and retain private project ownership. The Slack/BOLD OS replacement is specified in [the sign-in plan](LITE_BOLD_OS_AUTH_PLAN.md).
+
+With the default `AUTOKAGGLE_LITE_ACCESS_POLICY=members`, set `AUTOKAGGLE_LITE_MEMBERS` to a comma-separated list of approved lab email addresses. A verified email alone does not establish lab membership. The list is empty by default; private Lite access then requires an administrator session. Ownership and collaborator checks still apply. Local development uses the existing local owner cookie.
 
 Do not expose a server with private mode disabled. Lite does not silently convert Full sessions. Full model and dataset routes reject Lite project IDs. Full and Lite session lists are separate.
 
@@ -178,3 +183,31 @@ All endpoints retain owner access checks and same-origin writes.
 | `DELETE /api/projects/{id}` | Delete with `confirm: true`. |
 
 Queued requests return immediately. Poll the state endpoint while status is `working`. Repeated request IDs reuse the saved action. An ID with different input returns 409. Result retries reuse the saved result. A run that finishes after a revision can still submit evidence for its known built version. The service uses that version's frozen contract and marks the result historical. It does not score old evidence with new settings.
+
+## Server repository imports
+
+Public GitHub links create an immutable source snapshot on the server. The agent can read files and search that snapshot. It does not run repository code during import. The snapshot records the commit and each file digest. It excludes Git history, submodule downloads, and Git LFS downloads; missing assets remain explicit requirements.
+
+Imports allow up to 256 MiB compressed, 1 GiB extracted, 40,000 files, and 128 MiB per file. Each session can store six revisions. The service checks free space before download. Unsafe archive paths are rejected. Links and special files are omitted. Failed imports clean their temporary files. Deleting a session removes its stored snapshots. Source excerpts in model prompts remain bounded; a local file-search tool supplies further details.
+
+## Conversation and task-specific requirements
+
+The agent asks for missing decisions in chat. Secondary functions are in **Session tools**. Once the relevant step is ready, the chat shows the package, evaluator, or result action. Custom scores require a metric name, exact definition, and direction. Optimization requires constraints. Forecasting requires a time and leakage policy. Generation requires a reference and sample policy. Environment tasks retain episode, seed, and termination requirements. These additions do not relax Full's execution or private-answer controls.
+
+### Downloaded evaluator ZIP
+
+The GitHub ZIP of a new release can run without a Git checkout. `revision.txt` uses Git's [archive substitution](https://git-scm.com/docs/gitattributes#_export_subst) to record the release commit. The scorer checks the release file digests before execution. The revision is provenance metadata, not a signature or proof of independent reproduction. The generic researcher-code runner still requires a clean Git checkout; the archive option applies only to a complete evaluator release with its matching lock and contract.
+
+## Administrator logs — 12 November 2026
+
+Open `/internal` on the Lite service with administrator access. Select a project.
+
+- **Conversation** shows the saved Lite messages in their original order.
+- **Model calls** shows newly recorded interview requests, responses, tool calls, duration, and token use. Select **Input** for the request and system instructions. An interview turn can include several model requests. The project list shows interview turns separately.
+- **Saved fields** separates the accepted contract from the current proposal. **Changes** shows accepted contract revisions.
+- **Execution** shows build status, errors, checks, and submitted results. Select a build, then **Agent log** or **Test log**. Running Civo jobs save log snapshots about every ten seconds. Click the log button again to load the latest snapshot. A pending pod or model response can have no output yet.
+- **Draft & artifacts** shows source records, packages, evaluator releases, and publication records. **Export** downloads the same redacted snapshot; build log text is loaded separately.
+
+Earlier Lite interviews did not save provider request/response records. Their saved messages and build records remain available. Do not infer historical request counts from the interview turn count. Missing model responses cannot be recovered.
+
+The service retains the latest 30 interview request records per project. Each text field is capped at 24,000 characters and marks truncation. The log viewer returns the latest 256 KiB of each saved build log. Credentials and email addresses are redacted. Hidden model reasoning is not saved by Lite. These diagnostics require administrator access and do not enter participant packages.

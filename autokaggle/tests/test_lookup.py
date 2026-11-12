@@ -62,7 +62,7 @@ def test_no_lookup_runs_when_the_model_does_not_request_one(monkeypatch, project
     calls = provider(monkeypatch, [answer(field="task", text="What is the output?", requirement="outputs")])
     c.submit_message(project, "We predict catalyst stability.", "first")
     assert len(calls) == 1
-    assert [tool["name"] for tool in calls[0]["tools"]] == ["read_source", "query_data"]
+    assert [tool["name"] for tool in calls[0]["tools"]] == ["read_source", "query_data", "read_repository"]
     assert calls[0]["tool_choice"] == "auto"
     assert project["conversation"].get("_tool_log") is None
     assert lookups(project["conversation"]["messages"][-1]) == []
@@ -224,7 +224,7 @@ def test_a_search_result_link_can_then_be_read(monkeypatch, project):
     monkeypatch.setattr(sources, "fetch", lambda url, limit: (b"The licence is CC BY 4.0.", "text/plain", url))
     calls = provider(monkeypatch, [asks(tool_call("web_search", "a", query="dataset licence")), asks(read("https://found.example.org/p", call_id="b")), answer("The page says CC BY 4.0.")])
     c.submit_message(project, "Please search the web for the licence.", "first")
-    assert [tool["name"] for tool in calls[0]["tools"]] == ["read_source", "query_data", "web_search"]
+    assert [tool["name"] for tool in calls[0]["tools"]] == ["read_source", "query_data", "read_repository", "web_search"]
     assert "CC BY 4.0" in outputs_of(calls[2])[-1]["output"]
     assert lookups(reply_to(project, "The page says CC BY 4.0."))[0]["label"] == 'Searched the web for "dataset licence"'
 

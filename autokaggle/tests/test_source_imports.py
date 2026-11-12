@@ -43,7 +43,8 @@ def complete(client, root):
 
 def fake_sources(monkeypatch):
     monkeypatch.setattr(sources, "paper", lambda url: {"kind": "paper", "url": url, "text": "A source-reported stability study.", "sha256": "paper-hash", "truncated": False})
-    monkeypatch.setattr(sources, "repository", lambda url: {"kind": "repository", "url": url, "commit": "a" * 40, "files": [{"path": "README.md", "text": "Untrusted reference"}], "truncated": False})
+    from autokaggle import repository_store
+    monkeypatch.setattr(repository_store, "snapshot", lambda url, *args: {"kind": "repository", "url": url, "commit": "a" * 40, "files": [{"path": "README.md", "text": "Untrusted reference"}], "truncated": False})
 
 
 def test_import_requires_review_and_apply_is_idempotent(app, monkeypatch):

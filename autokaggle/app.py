@@ -974,7 +974,7 @@ def create_app(data_dir: Path | None = None):
     documents.DIRECTORY = store.directory
     documents.register(app, store, editing)
     sources.register(app, store, pool, get, editing, conversation_output)
-    lite_providers.install(lite)
+    lite_providers.install(lite, store)
     lite.register(app, store, pool, access, get, editing)
     lite_build.register(app, store, pool, access, get, editing)
 

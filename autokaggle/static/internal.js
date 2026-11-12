@@ -41,7 +41,7 @@
     const root = $("projects"); root.replaceChildren();
     for (const p of state.projects) {
       const b = el("button", undefined, "project" + (p.id === state.id ? " active" : "")); b.setAttribute("aria-current", p.id === state.id ? "true" : "false");
-      b.append(el("strong", p.title), el("small", p.researcher_name || "Researcher name not recorded"), el("small", `${p.workflow_status === "awaiting_approval" ? "Waiting for approval" : p.conversation_status || p.status} · ${p.model_calls} calls`), el("small", date(p.updated_at)));
+      b.append(el("strong", p.title), el("small", p.researcher_name || "Researcher name not recorded"), el("small", `${p.workflow_status === "awaiting_approval" ? "Waiting for approval" : p.conversation_status || p.status} · ${p.mode === "lite" ? `${p.interview_turns ?? "Unknown"} interview turn${p.interview_turns === 1 ? "" : "s"}` : `${p.model_calls} calls`}`), el("small", date(p.updated_at)));
       b.addEventListener("click", () => {if (state.id === p.id) return; state.id = p.id; state.data = null; state.pending = null; state.selected = {}; $("new-data").hidden = true; $("record-search").value = ""; $("record-filter").value = ""; $("project-title").textContent = p.title; $("project-id").textContent = p.id; $("researcher-label").textContent = "Researcher: " + (p.researcher_name || "Name not recorded"); $("researcher-form").hidden = true; $("researcher-status").textContent = ""; $("records").replaceChildren(el("p", "Loading saved records…", "empty")); $("inspector").replaceChildren(); $("export").disabled = true; projectList(); url(); load(true);});
       root.append(b);
     }
@@ -58,7 +58,7 @@
     $("researcher-label").textContent = "Researcher: " + (data.researcher?.name || "Name not recorded");
     $("researcher-form").hidden = !data.researcher?.can_edit;
     if (document.activeElement !== $("admin-researcher-name") && !state.renaming) $("admin-researcher-name").value = data.researcher?.name || "";
-    $("project-meta").textContent = `Saved status: ${p.status} · Conversation: ${p.conversation?.status ?? "not recorded"} · Revision ${p.revision ?? "not recorded"} · Saved ${date(p.updated_at)}`;
+    $("project-meta").textContent = `Saved status: ${p.status} · Conversation: ${p.lite?.status ?? p.conversation?.status ?? "not recorded"} · Revision ${p.revision ?? "not recorded"} · Saved ${date(p.updated_at)}`;
     $("export").disabled = false;
     const nav = $("sections"); nav.replaceChildren();
     for (const [id, label] of categories) {
@@ -87,9 +87,15 @@
       artifacts: "Saved drafts, advice and artifact metadata. A listed artifact or suggested action does not establish that execution occurred.",
       raw: "Saved project fields, with credentials and correspondence addresses redacted. Export JSON includes the same project snapshot and review ledgers."
     };
+    if (p.lite) {
+      notes.calls = `${traces.length} retained / ${p._lite_model_requests ?? 0} recorded model requests. ${p.lite.model_calls ?? 0} interview turns in total; a turn can use several requests. Earlier requests were not recorded. Latest 30 requests retained; each text field is capped at 24,000 characters. Credentials are redacted. Hidden reasoning is not saved.`;
+      notes.execution = "Lite interview state, evaluator builds and submitted result records. Select a build to open its saved agent or test log.";
+    }
     if (!visible.some(r => r.id === state.selected[state.section])) state.selected[state.section] = visible[0]?.id;
     const list = $("records"); list.replaceChildren(); list.classList.toggle("list-mode", state.presentation === "list");
     const note = el("details", undefined, "data-notes"); note.append(el("summary", "Record scope & reading notes"), el("p", notes[state.section])); list.append(note);
+    const untraced = p._lite_untraced_turns ?? p.lite?.model_calls ?? 0;
+    if (p.lite && state.section === "calls" && untraced > 0) list.append(el("p",`${untraced} earlier interview turns have no saved model request records. Their saved messages are in Conversation. New requests will be recorded here.`,"section-note"));
     if (state.presentation === "visual" && state.section === "calls" && visible.length) callCharts(list, visible);
     if (state.presentation === "visual" && ["messages", "changes"].includes(state.section)) {
       const timeline = el("div", undefined, "timeline"); visible.forEach(row => timeline.append(recordCard(row))); list.append(timeline);
@@ -176,10 +182,33 @@
       const meta=el("details",undefined,"raw-details");meta.append(el("summary","Message metadata"));table(meta,[["Message ID",value.id],["Role",value.role],["Time",row.at?date(row.at):"Not recorded"]]);pane.append(meta);}
     else if(row.type==="change") changeInspector(pane,row);
     else if(row.type==="draft") section(pane,"Saved README", "Original Markdown text.").append(el("pre",value ?? "No README is saved.","text-value"));
+    else if(row.type==="lite_build") buildInspector(pane,row);
+    else if(row.type==="lite_field") {section(pane,"Accepted value").append(tree(value.value));section(pane,"Saved evidence").append(tree(value.evidence));}
+    else if(row.type==="lite_change") {section(pane,"Previous contract").append(tree(value.previous_contract));section(pane,"Accepted contract").append(tree(value.contract));section(pane,"Change record").append(tree(value));}
     else if(row.type==="execution" || row.type==="submission") executionInspector(pane,row);
     else if(row.type==="settings") table(pane,Object.entries(D.object(value)));
     else if(row.type==="advice") {if(value.content) section(pane,"Saved advice").append(el("pre",value.content,"text-value"));pane.append(tree(value,"Record metadata"));}
     else pane.append(tree(value));
+  }
+  function buildInspector(parent,row) {
+    const projectId = state.id;
+    table(parent, [["Build status",row.value.status],["Stage",row.value.stage],["Cause",row.value.cause],["Publication",row.value.publication?.status]]);
+    const controls = section(parent,"Saved build logs","Logs are redacted and show the latest 256 KiB. Running jobs save a snapshot about every 10 seconds. Click a log button again to refresh.");
+    const output = el("div");
+    let serial = 0;
+    for(const [kind,label] of [["agent","Agent log"],["test","Test log"]]) {
+      const button = el("button",label,"record-link");
+      button.addEventListener("click",async()=>{
+        const requestNumber = ++serial;
+        output.replaceChildren(el("p","Loading saved log…"));
+        try {
+          const result = await api(`/api/internal/projects/${encodeURIComponent(projectId)}/lite-builds/${encodeURIComponent(row.value.id)}/logs/${kind}`,new AbortController().signal);
+          if(!parent.isConnected || state.id !== projectId || requestNumber !== serial)return;
+          output.replaceChildren(el("p",`${result.note}${result.truncated ? " Earlier log content is omitted." : ""}`,"section-note"),el("pre",result.text.trim() ? result.text : "No output has been saved yet. A running job can still be starting or waiting for a model response.","text-value code"));
+        } catch(error) {if(parent.isConnected && requestNumber === serial)output.replaceChildren(el("p",error.message.includes("404") ? "No saved log of this type exists for this build." : error.message,"error"));}
+      }); controls.append(button);
+    }
+    controls.append(output); section(parent,"Build record").append(tree(row.value));
   }
   function relationMap(parent,row) {
     const links=D.related(state.data,row);
@@ -215,12 +244,26 @@
       const cap=D.captured(t,"output");
       if(cap.parsed&&typeof cap.parsed==="object"&&!Array.isArray(cap.parsed))providerOutput(parent,cap.parsed);
       else capturePanel(parent,t,"output","Provider output");
-      parent.append(el("p","Output is the original provider response. Validation and field application are separate records.","section-note"));
+      if(t.tool_calls) capturePanel(parent,t,"tool_calls","Requested tool calls");
+      parent.append(el("p","Output is the saved provider response. Validation and field application are separate records.","section-note"));
     } else if(tab==="input") {capturePanel(parent,t,"input","Request input");const sys=el("details",undefined,"raw-details");sys.append(el("summary","System instructions"));capturePanel(sys,t,"instructions","Instructions");parent.append(sys);}
-    else if(tab==="reasoning") {table(parent,[["Reasoning tokens (included in output)",t.usage?.reasoning_tokens],["Readable reasoning returned",t.reasoning_available]]);if(t.reasoning_available)capturePanel(parent,t,"reasoning","Provider-returned reasoning");else parent.append(el("p","No readable reasoning text was returned. A token count does not reveal hidden reasoning.","section-note"));}
+    else if(tab==="reasoning") {table(parent,[["Reasoning tokens (included in output)",t.usage?.reasoning_tokens],["Readable reasoning returned",t.reasoning_available]]);if(t.reasoning_available)capturePanel(parent,t,"reasoning","Provider-returned reasoning");else parent.append(el("p","No readable reasoning text is saved. A token count does not reveal hidden reasoning.","section-note"));}
     else {parent.append(el("p",row.path,"source-path"));table(parent,[["Call ID",t.id],["Model",t.model],["Call status",t.status],["Provider status",t.provider_status],["Validation",t.validation?.status],["Validation code",t.validation?.code],["Started",date(t.started_at)],["Finished",t.finished_at?date(t.finished_at):"Not recorded"],["Effort",t.effort],["Error type",t.error_type]]);parent.append(tree(t.trigger??null,"Recorded trigger"),tree(t.capture??null,"Capture metadata"));}
   }
   function providerOutput(parent,value) {
+    if(Array.isArray(value.updates) && value.updates.some(v=>v && "value_json" in v)) {
+      if(value.summary)section(parent,"Summary").append(el("pre",value.summary,"text-value"));
+      if(value.question)section(parent,"Proposed next question").append(el("pre",value.question,"text-value"));
+      const updates=section(parent,`Proposed contract updates · ${value.updates.length}`);
+      for(const v of value.updates) {
+        const card=section(updates,v.field || "Field not recorded");card.append(pill(v.basis));
+        let proposed=v.value_json;try {proposed=JSON.parse(v.value_json);}catch(_) {/* Keep invalid source text visible. */}
+        card.append(typeof proposed === "string" ? el("pre",proposed,"text-value") : tree(proposed,"Proposed value"));
+        if(v.evidence)card.append(el("blockquote",v.evidence));
+      }
+      for(const key of ["open_decisions","resolved_decisions"])if(value[key])section(parent,key.replaceAll("_"," ")).append(tree(value[key]));
+      return;
+    }
     if(value.question_text){const box=section(parent,"Proposed next question");box.append(el("pre",value.question_text,"text-value"));if(value.question_why)box.append(el("p",value.question_why));if(value.question_field)box.append(el("p",`${value.question_field} / ${value.question_requirement_id||"criterion not recorded"}`,"meta"));}
     if(value.intro)section(parent,"Draft introduction").append(el("pre",value.intro,"text-value"));
     for(const [key,label] of [["updates","Proposed field updates"],["requirements","Proposed requirement assessments"]])if(Array.isArray(value[key])){

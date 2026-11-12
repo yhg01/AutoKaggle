@@ -155,7 +155,7 @@ Use descriptive branch names without AI product or model names. Keep those names
 
 ### Lite requirements before merge — 10 November 2026
 
-Changed at the project owner's request on 12 November 2026: for Internal, a tested evaluator that every collaborator can download is sufficient. A separate GitHub repository for each problem is optional. Lite can still publish one when an owner account is configured. The clean-clone scoring test below still applies to the downloadable release.
+Updated on 12 November 2026. Internal publishes a standalone evaluation module to a private BOLD GitHub repository. Collaborators download it and run experiments locally to obtain fitness. Civo serves onboarding and publishing. It does not run their experiments. Retain the clean-clone scoring check.
 
 Requested by the project owner on 12 November 2026: start a new Internal session by asking, in the conversation, whether there is a paper and whether there is a repository. Do not use a separate start control below the message box for this.
 
@@ -185,3 +185,9 @@ Added at the project owner's request on 29 October 2026.
 - Removing a researcher turn removes dependent facts and generated records. Keep independent scientific decisions and remaining researcher messages. Reassess supported facts without reconstructing withdrawn content. Keep request replay safe and retain only non-content quota counts where results are erased.
 - Revision after attempts must include actual development results and preserve the score contract until a recorded change requires rebuilding. Never use private final scores for iteration.
 - See autokaggle/docs/WORKSPACE.md for the implemented contract. Session deletion does not erase separate email-account records or physically sanitize historical backup files; those operator obligations must be stated accurately.
+
+## Agent workflow update — 12 November 2026
+
+Use DeepSeek for live model tests and both Civo services while OpenRouter has no credit. Load DEEPSEEK_API_KEY from private configuration. This owner instruction replaces the OpenRouter-only test requirement for this work. Keep all credentials out of Git and reports.
+
+Ask for task-specific data, artifact, evaluation, resource, and provenance requirements in the conversation. Show contextual actions when useful. Keep optional tools in a secondary menu. Do not require users to discover a row of forms below the chat. Support explicit custom fitness definitions in Internal. Keep Full execution and access checks separate from interview readiness.

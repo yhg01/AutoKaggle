@@ -3,8 +3,8 @@
 A coding agent implements the evaluator in a disposable workspace. The
 application then assembles a release from validated files, commits it, and
 scores its fixtures from a fresh clone in a clean runtime. A build is ready
-only when that clone test passes. Publishing to GitHub is a separate step; see
-lite_publish.py.
+only when that clone test passes. Configured services then publish the tested
+commit to GitHub. Publication failure does not invalidate a scoring test.
 """
 from __future__ import annotations
 
@@ -214,6 +214,9 @@ class DockerRuntime:
 
 def default_runtime():
     chosen = settings()
+    if chosen["runtime"] == "kubernetes":
+        from .lite_kubernetes import KubernetesRuntime
+        return KubernetesRuntime()
     return LocalRuntime() if chosen["runtime"] == "local" else DockerRuntime(chosen["cpus"], chosen["memory_gb"])
 
 
@@ -233,14 +236,14 @@ def freeze(project, directory):
     if not packaged and (module in RESERVED or "." in module):
         blockers.append({"field": "adapter_entrypoint", "reason": f"'{module}' cannot name the task adapter in an evaluator repository. "
                          "Use a top-level module name other than " + ", ".join(sorted(RESERVED)) + "."})
-    if c["source_url"].startswith("local:"):
+    if c["source_url"].startswith("local:") and c["source_url"] != "local:contract":
         blockers.append({"field": "source_url", "reason": "The source is a local reference. The build job and a collaborator cannot retrieve it. Provide a lab-accessible location."})
     if c.get("answer_exposure") == "private":
         blockers.append({"field": "answer_exposure", "reason": "The scoring targets are private. A Lite evaluator runs on each collaborator's machine and its repository cannot hold private answers. Decide where scoring targets come from."})
     spec = {"format": FORMAT, "problem_id": project["id"], "title": c.get("title", project["title"]),
             "contract_version": record["version"], "contract_sha256": record["contract_sha256"],
             "task_kind": c["task_kind"], "artifact_type": c["artifact_type"], "metric": c["metric"],
-            "direction": DIRECTION[c["metric"]], "failure_policy": c["failure_policy"],
+            "direction": c["metric_direction"] if c["metric"] == "custom" else DIRECTION[c["metric"]], "failure_policy": c["failure_policy"],
             "adapter": {"entrypoint": c["adapter_entrypoint"], "module": module, "packaged": packaged},
             "loader": "loader:load" if c["artifact_type"] in {"policy", "checkpoint"} else None,
             "independent_forbidden": sorted({"evaluate", "run", "gym_adapter", "check", module, "<dynamic import or execution>"}),
@@ -276,7 +279,7 @@ def evaluation_config(spec, record, files):
     assets = acceptance.parse_assets(files["assets.json"])
     protocol = {"description": c["evaluation_protocol"], "adapter": spec["adapter"]["entrypoint"], "seeds": record["seeds"],
                 "timeout_seconds": c["timeout_seconds"], "total_timeout_seconds": c["total_timeout_seconds"]}
-    for field in ("max_steps", "horizon_policy", "env_id", "environment_imports", "environment_kwargs", "seed_method", "success_key"):
+    for field in ("max_steps", "horizon_policy", "env_id", "environment_imports", "environment_kwargs", "seed_method", "success_key", "constraints", "temporal_policy", "generation_policy"):
         if field in c:
             protocol[field] = c[field]
     return {"schema": FORMAT, "evaluator_version": spec["evaluator_version"],
@@ -285,7 +288,7 @@ def evaluation_config(spec, record, files):
             "task": {"kind": c["task_kind"], "objective": c["objective"], "inputs": c["inputs"], "allowed_data": c["allowed_data"],
                      "answer_exposure": c["answer_exposure"]},
             "artifact": {"type": c["artifact_type"], "format": c["outputs"], "loader": spec["loader"]},
-            "metric": {"name": c["metric"], "direction": spec["direction"], "aggregation": "mean over the fixed seeds",
+            "metric": {"name": c.get("metric_name", c["metric"]) if c["metric"] == "custom" else c["metric"], "definition": c.get("metric_definition", c["success_definition"]), "direction": spec["direction"], "aggregation": "mean over the fixed seeds",
                        "failure_policy": c["failure_policy"], "success_definition": c["success_definition"]},
             "protocol": protocol,
             "dependencies": {"declared": c["dependencies"], "lock": "requirements.lock", "lock_sha256": _sha(files["requirements.lock"])},
@@ -300,13 +303,13 @@ def readme(spec, record, files):
     pins = acceptance.parse_requirements(files["requirements.lock"])
     lines = [f"# {spec['title']} — evaluator", "",
              f"Evaluator version {spec['evaluator_version']} for BOLD AutoKaggle Lite contract `{spec['contract_version']}`.", "",
-             "Clone this release, supply your own artifact, and run one command. It returns the fitness and a machine-readable result.", "",
+             "Clone this release or download its GitHub ZIP, supply your own artifact, and run one command. It returns the fitness and a machine-readable result.", "",
              *(["## Get this release", "", "```sh", f"git clone {spec['repository']}.git evaluator", "cd evaluator",
                 f"git checkout v{spec['evaluator_version']}", "```", ""] if spec.get("repository") else []),
              "## What is scored", "",
              f"- **Objective:** {c['objective']}",
              f"- **Artifact ({c['artifact_type']}):** {c['outputs']}",
-             f"- **Fitness:** `{c['metric']}`, {spec['direction']}d; the mean over {len(record['seeds'])} fixed seeds.",
+             f"- **Fitness:** `{c.get('metric_name', c['metric']) if c['metric'] == 'custom' else c['metric']}`, {spec['direction']}d; the mean over {len(record['seeds'])} fixed seeds.",
              f"- **Success:** {c['success_definition']}",
              f"- **Failure rule:** `{c['failure_policy']}`. " + ("A failed seed contributes zero." if c["failure_policy"] == "zero" else "Any failed seed makes the run incomplete, with no fitness."),
              f"- **Limits:** {c['timeout_seconds']} s per seed, {c['total_timeout_seconds']} s in total.", "",
@@ -322,7 +325,7 @@ def readme(spec, record, files):
     lines += ["## Score an artifact", "", "```sh", "python evaluate.py --artifact PATH --output results.json", "```", "",
               "The last output line is JSON with `fitness`, `status`, and the seed counts. `results.json` holds one record per seed. "
               "Exit status 0 means a complete score; 2 means no completed score; 1 means the release or inputs are not usable.", "",
-              "Run it from this Git clone with no changes to tracked files. The result records the exact evaluator revision.", "",
+              "Run it from this Git clone or the extracted GitHub ZIP with no changes to release files. The result records the evaluator revision. In a ZIP, Git supplies that revision through revision.txt.", "",
               "Check your setup with the included example:", "", "```sh",
               f"python evaluate.py --artifact {expected['valid']['artifact']}", "```", "",
               f"It must print fitness `{expected['valid']['expected_score']!r}`. Basis: {expected['valid']['basis']}", "",
@@ -348,6 +351,8 @@ def assemble(tree, files, spec, record_bytes):
         content[name] = (HERE / source).read_bytes()
     content["contract.json"] = record_bytes
     content[".gitignore"] = acceptance.IGNORE.encode()
+    content[".gitattributes"] = b"revision.txt export-subst\n"
+    content["revision.txt"] = b"$Format:%H$\n"
     content["evaluation.yaml"] = ("# Generated from the accepted Lite contract. Do not edit. Rebuild through AutoKaggle Lite.\n"
                                   + "\n".join(to_yaml(evaluation_config(spec, record, files))) + "\n").encode()
     content["README.md"] = readme(spec, record, files).encode()
@@ -486,13 +491,30 @@ def _finish(store, identifier, build_id, job, status, **changes):
                    "failed": "Build did not pass"}[status], finished_at=now(), **changes)
 
 
-def work(store, identifier, build_id, runtime, chosen, key, command=None):
+def auto_publish():
+    return os.getenv("AUTOKAGGLE_LITE_AUTO_PUBLISH", "") == "1"
+
+
+def work(store, identifier, build_id, runtime, chosen, key, command=None, github=None):
     try:
         with _SLOTS:
             _work(store, identifier, build_id, runtime, chosen, key, command)
     except Exception as exc:  # Keep the build a draft and show a bounded cause.
         cause = str(exc)[:600] if isinstance(exc, (RuntimeError, ValueError)) else "The build stopped unexpectedly (" + type(exc).__name__ + ")."
         _finish(store, identifier, build_id, Path(store.directory(identifier)) / "lite-evaluator" / "jobs" / build_id, "failed", cause=cause)
+    else:
+        if auto_publish():
+            # Keep publication separate from build failure. Hold the project lock
+            # through the push so edits and deletion cannot change its contract.
+            with store.lock(identifier):
+                item = _reload(store, identifier)
+                build = next((b for b in (item or {}).get("lite_evaluator", {}).get("builds", []) if b["id"] == build_id), None)
+                if build and build["status"] == "ready":
+                    try:
+                        publish_locked(store, item, runtime, github, expected_build=build_id)
+                    except HTTPException as exc:
+                        build["publication"] = {**(build.get("publication") or {}), "status": "failed", "error": exc.detail, "finished_at": now()}
+                        store.save(item)
     finally:
         _RUNNING.discard(build_id)
 
@@ -592,22 +614,26 @@ def _work(store, identifier, build_id, runtime, chosen, key, command):
                 "fixture": expected["valid"]["artifact"], "expected_fitness": expected["valid"]["expected_score"],
                 "observed_fitness": observed.get("observed"), "expected_basis": "A separate calculation written in the same build job; see each example's basis.",
                 "command": f"python evaluate.py --artifact {expected['valid']['artifact']}"}
-    _finish(store, identifier, build_id, job, "ready", tests=tests, evidence=evidence, cause=None)
+    _finish(store, identifier, build_id, job, "ready", tests=tests, evidence=evidence, cause=None,
+            publication={"status": "queued", "attempts": 0} if auto_publish() else None)
 
 
 # --- Views and routes -----------------------------------------------------------
 
 def _public(build):
     result = {k: copy.deepcopy(build.get(k)) for k in ("id", "status", "stage", "evaluator_version", "contract_version", "contract_sha256",
-              "started_at", "finished_at", "blockers", "cause", "tests", "evidence", "model", "runtime", "agent_summary", "decisions", "published")}
+              "started_at", "finished_at", "blockers", "cause", "tests", "evidence", "model", "runtime", "agent_summary", "decisions", "published", "publication")}
     if build["status"] in ACTIVE and build["id"] not in _RUNNING:
-        result.update(status="failed", stage="Build interrupted", cause="The service restarted during this build. Start a new build.")
+        result.update(status="failed", stage="Build interrupted", cause="The service restarted during this build. Start a new build.", interrupted=True)
+    publication = result.get("publication")
+    if publication and publication["status"] in {"queued", "publishing"} and build["id"] not in _RUNNING and publication.get("project_id") not in _PUBLISHING:
+        publication.update(status="failed", error="Publication was interrupted. Retry publication to check GitHub and finish the same release.", interrupted=True)
     return result
 
 
 def publishing_view(state, github):
     saved = state.get("github")
-    result = {"available": False, "reason": "", "owner": None, "repository": {"url": saved["url"], "name": saved["full_name"]} if saved else None}
+    result = {"automatic": auto_publish(), "available": False, "reason": "", "owner": None, "repository": {"url": saved["url"], "name": saved["full_name"]} if saved else None}
     try:
         result["owner"] = publishing.owner() or None
     except ValueError as exc:
@@ -663,6 +689,47 @@ class Publish(BaseModel):
     new_repository: bool = False
 
 
+def publish_locked(store, item, runtime, github, *, expected_build=None, replace=False):
+    """Publish under the caller's project lock. Reuse the saved repository on retry."""
+    identifier = item["id"]
+    current = view(item, runtime, github)
+    release = current["release"]
+    if not release or (expected_build and release["id"] != expected_build):
+        raise HTTPException(409, "There is no tested evaluator for the current contract. Build the evaluator first.")
+    state = _state(item)
+    if any(b["status"] in ACTIVE and b["id"] in _RUNNING for b in state["builds"]):
+        raise HTTPException(409, "Wait for the evaluator build to finish before publishing.")
+    build = next(b for b in state["builds"] if b["id"] == release["id"])
+    publication = {"status": "publishing", "attempts": (build.get("publication") or {}).get("attempts", 0) + 1,
+                   "project_id": identifier, "started_at": now(), "error": None}
+    build["publication"] = publication
+    _PUBLISHING.add(identifier)
+    try:
+        store.save(item)
+        if not current["publishing"]["available"]:
+            raise publishing.PublishError(current["publishing"]["reason"])
+        name = state.setdefault("repository_name", publishing.repository_name(identifier, current["contract"]["title"]))
+        repository = publishing.ensure_repository(identifier, current["contract"]["title"], name, state.get("github"), github,
+                                                  current["publishing"]["owner"], replace=replace)
+        state["github"] = {k: repository[k] for k in ("id", "full_name", "url")} | {"saved_at": now()}
+        store.save(item)  # A failed push must reuse this repository.
+        pushed = publishing.push_release(store.directory(identifier) / "lite-evaluator" / "repo.git", repository,
+                                         release["evidence"]["commit"], release["evaluator_version"], github)
+        build["published"] = {**pushed, "repository_id": repository["id"], "repository": repository["full_name"],
+                              "url": repository["url"], "zip_url": repository["url"] + "/archive/" + pushed["commit"] + ".zip",
+                              "published_at": now(), "by": github.account()}
+        publication.update(status="published", finished_at=now())
+        store.save(item)
+    except Exception as exc:
+        # Only the publisher's bounded, sanitized errors may reach the interface.
+        error = str(exc) if isinstance(exc, publishing.PublishError) else "GitHub publication stopped unexpectedly. Retry publication; the tested evaluator is saved."
+        publication.update(status="failed", error=error, finished_at=now())
+        store.save(item)
+        raise HTTPException(502 if current["publishing"]["available"] else 503, error) from exc
+    finally:
+        _PUBLISHING.discard(identifier)
+
+
 def register(app, store, pool, access, get, editing, runtime=None, command=None, github=None):
     runtime = runtime or default_runtime()
     github = github or publishing.default_client()
@@ -673,21 +740,33 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None,
             raise HTTPException(404, "This is not an internal Lite session.")
         return item
 
+    def read_view(identifier, request):
+        result = view(lite_get(identifier, request), runtime, github)
+        # A worker can save its terminal state and leave the running registry
+        # after this request reads the old database row. Confirm an apparent
+        # interruption under the project lock before reporting a failure.
+        # Normal polling stays unlocked, including during a GitHub push.
+        records = [r for r in (result.get("latest"), result.get("release")) if r]
+        if any(r.get("interrupted") or (r.get("publication") or {}).get("interrupted") for r in records):
+            with store.lock(identifier):
+                result = view(lite_get(identifier, request), runtime, github)
+        return result
+
     @app.get("/api/projects/{project_id}/lite/evaluator")
     def read(project_id: str, request: Request):
-        return view(lite_get(project_id, request), runtime, github)
+        return read_view(project_id, request)
 
     @app.post("/api/projects/{project_id}/lite/evaluator/build")
     def start(project_id: str, body: Start, request: Request):
         saved = lite_get(project_id, request)
         # A repeated request is answered from the saved record, even while the build holds the project lock.
         if body.request_id in (saved.get("lite_evaluator") or {}).get("requests", {}):
-            return view(saved, runtime, github)
+            return read_view(project_id, request)
         with editing(project_id, request) as item:
             state = _state(item)
             if body.request_id in state["requests"]:
                 return view(item, runtime, github)
-            if any(b["status"] in ACTIVE and b["id"] in _RUNNING for b in state["builds"]):
+            if any(b["id"] in _RUNNING for b in state["builds"]):
                 raise HTTPException(409, "An evaluator build is already running for this problem.")
             if item["lite"]["status"] == "working":
                 raise HTTPException(409, "The agent is working. Wait for its saved response.")
@@ -719,7 +798,7 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None,
             store.save(item)
             result = view(item, runtime, github)
         if not blockers:
-            pool.submit(work, store, project_id, build["id"], runtime, settings(), key, command)
+            pool.submit(work, store, project_id, build["id"], runtime, settings(), key, command, github)
         return result
 
     @app.post("/api/projects/{project_id}/lite/evaluator/publish")
@@ -727,39 +806,11 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None,
         """Push the tested release for the current contract to this problem's private GitHub repository."""
         lite_get(project_id, request)
         with editing(project_id, request) as item:
-            current = view(item, runtime, github)
-            release = current["release"]
-            if not release:
-                raise HTTPException(409, "There is no tested evaluator for the current contract. Build the evaluator first.")
-            if not current["publishing"]["available"]:
-                raise HTTPException(503, current["publishing"]["reason"])
-            if project_id in _PUBLISHING:
-                raise HTTPException(409, "This evaluator is already being published.")
-            _PUBLISHING.add(project_id)
-            state = _state(item)
-            name = state.setdefault("repository_name", publishing.repository_name(project_id, current["contract"]["title"]))
-            saved, account = state.get("github"), current["publishing"]["owner"]
-            store.save(item)
-        try:
-            repository = publishing.ensure_repository(project_id, current["contract"]["title"], name, saved, github, account,
-                                                      replace=bool(body and body.new_repository))
-            with store.lock(project_id):  # Save the repository before the push, so a retry reuses it.
-                item = _reload(store, project_id)
-                item["lite_evaluator"]["github"] = {k: repository[k] for k in ("id", "full_name", "url")} | {"saved_at": now()}
-                store.save(item)
-            pushed = publishing.push_release(store.directory(project_id) / "lite-evaluator" / "repo.git", repository,
-                                             release["evidence"]["commit"], release["evaluator_version"], github)
-            _update(store, project_id, release["id"], published={**pushed, "repository_id": repository["id"], "repository": repository["full_name"],
-                                                                 "url": repository["url"], "published_at": now(), "by": github.account()})
-        except publishing.PublishError as exc:
-            raise HTTPException(502, str(exc)) from exc
-        finally:
-            _PUBLISHING.discard(project_id)
-        return view(lite_get(project_id, request), runtime, github)
+            publish_locked(store, item, runtime, github, replace=bool(body and body.new_repository))
+        return read_view(project_id, request)
 
     def release_file(project_id, request, name):
-        item = lite_get(project_id, request)
-        release = view(item, runtime, github)["release"]
+        release = read_view(project_id, request)["release"]
         if not release:
             raise HTTPException(409, "There is no tested evaluator for the current contract. Build the evaluator first.")
         return store.directory(project_id) / "lite-evaluator" / "releases" / f"v{release['evaluator_version']}" / name

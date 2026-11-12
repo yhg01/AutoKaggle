@@ -1019,6 +1019,11 @@
       if (message.role === "user" && !message.pending) { const edit = element("button", "message-edit", "Edit or remove answer"); edit.type = "button"; edit.setAttribute("data-edit-answer", message.id); edit.disabled = working(); block.append(edit); }
       root.append(block);
     }
+    const questionField = state.conversation?.current_question?.field || "";
+    if (!working() && ["data", "data_source", "dataset", "data_schema"].includes(questionField)) {
+      const action = element("button", "button button-secondary", "Attach CSV or inspect data");
+      action.type = "button"; action.addEventListener("click", openData); root.append(action);
+    }
     if (nearBottom || forceScroll) window.requestAnimationFrame(() => { transcript.scrollTop = transcript.scrollHeight; });
   }
   function renderQuestionWhy() {

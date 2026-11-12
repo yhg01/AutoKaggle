@@ -54,8 +54,15 @@ WEB_SEARCH = {
         "query": {"type": "string", "maxLength": websearch.MAX_QUERY_CHARS}}}}
 
 
+READ_REPOSITORY = {
+    "type": "function", "name": "read_repository", "strict": True,
+    "description": "Read or search a GitHub repository supplied by the researcher. The server stores its pinned source snapshot. Empty path and query lists files; path reads a file; query searches local text. No repository code is executed.",
+    "parameters": {"type": "object", "additionalProperties": False, "required": ["source", "path", "start", "query"],
+                   "properties": {"source": {"type": "string"}, "path": {"type": "string"}, "start": {"type": "integer", "minimum": 0}, "query": {"type": "string", "maxLength": 200}}}}
+
+
 def tools():
-    return [READ_SOURCE, QUERY_DATA, *([WEB_SEARCH] if websearch.available() else [])]
+    return [READ_SOURCE, QUERY_DATA, READ_REPOSITORY, *([WEB_SEARCH] if websearch.available() else [])]
 
 
 def permitted_links(project, state):
@@ -93,6 +100,19 @@ def _load_source(project, state, source, cache):
     if source not in permitted_links(project, state):
         raise ValueError("Only an attached document, a link the researcher sent, or a link a web search returned can be read.")
     if source not in cache:
+        from . import sources, repository_store
+        try:
+            sources.parse_repository(source)
+            is_repo = True
+        except ValueError:
+            is_repo = False
+        if is_repo and documents.DIRECTORY:
+            record = repository_store.snapshot(source, documents.DIRECTORY(project["id"]))
+            text = "Pinned commit: " + record["commit"] + "\n" + "\n".join(
+                "## " + f["path"] + "\n" + f["text"] for f in record["files"])
+            text += "\nRepository file index:\n" + "\n".join(f["path"] for f in record["file_index"])
+            cache[source] = ("repository", text)
+            return (source, *cache[source])
         from .sources import fetch
         body, content_type, final = fetch(source, documents.MAX_DOCUMENT_BYTES)
         parsed = documents.extract(body, Path(urlsplit(final).path).name, content_type)
@@ -219,6 +239,8 @@ def _step_labels(project, name, args):
         labels = (f"Searching {target} for \"{args['find']}\"", f"Searched {target} for \"{args['find']}\"") if args.get("find") else (f"Reading {target}", f"Read {target}")
     elif name == "web_search":
         labels = (f"Searching the web for \"{args.get('query', '')}\"", f"Searched the web for \"{args.get('query', '')}\"")
+    elif name == "read_repository":
+        labels = ("Reading the pinned repository", "Read the pinned repository")
     elif name == "query_data":
         columns = ", ".join(map(str, args.get("columns") or []))
         detail = f"({args.get('operation', 'query')}{': ' + columns if columns else ''})"
@@ -232,6 +254,14 @@ def _dispatch(project, state, name, args, cache):
     if name == "read_source" and set(args) == {"source", "start", "find"} and isinstance(args["source"], str):
         return read_source(project, state, args["source"], args["start"] if isinstance(args["start"], int) else 0,
                            args["find"] if isinstance(args["find"], str) else "", cache)
+    if name == "read_repository" and set(args) == {"source", "path", "start", "query"}:
+        from . import repository_store
+        if args["source"] not in permitted_links(project, state) or not documents.DIRECTORY:
+            raise ValueError("Use a repository link supplied in this session.")
+        key = "repo:" + args["source"]
+        if key not in cache:
+            cache[key] = repository_store.snapshot(args["source"], documents.DIRECTORY(project["id"]))
+        return repository_store.read(documents.DIRECTORY(project["id"]), cache[key]["snapshot"], args["path"], args["start"], query=args["query"])
     if name == "query_data" and set(args) == {"operation", "columns", "conditions", "group_by"}:
         return query_data(project, args["operation"], args["columns"], args["conditions"], args["group_by"], cache)
     if name == "web_search" and set(args) == {"query"} and isinstance(args["query"], str):

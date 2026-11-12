@@ -194,7 +194,7 @@ def test_ready_release_scores_from_a_collaborator_clone_and_binds_evidence(harne
         parsed = yaml.safe_load(config)
         frozen = json.loads(client.get(path + "/config").text)
         assert parsed["protocol"]["seeds"] == frozen["seeds"] and parsed["contract"]["sha256"] == frozen["contract_sha256"]
-        assert parsed["metric"] == {"name": "accuracy", "direction": "maximize", "aggregation": "mean over the fixed seeds",
+        assert parsed["metric"] == {"name": "accuracy", "definition": frozen["contract"]["success_definition"], "direction": "maximize", "aggregation": "mean over the fixed seeds",
                                     "failure_policy": "zero", "success_definition": frozen["contract"]["success_definition"]}
 
 
@@ -260,7 +260,7 @@ def test_release_uses_application_files_and_only_publishable_agent_files(harness
         assert (clone / "evaluate.py").read_bytes() == (lite_build.HERE / "lite_evaluator_cli.py").read_bytes()
         assert (clone / "run.py").read_bytes() == (lite_build.HERE / "lite_runner.py").read_bytes()
         tracked = set(subprocess.run(["git", "ls-files"], cwd=clone, capture_output=True, text=True).stdout.split())
-        assert tracked == {".gitignore", "README.md", "assets.json", "contract.json", "evaluate.py", "evaluation.yaml", "evaluator.lock.json",
+        assert tracked == {".gitignore", ".gitattributes", "revision.txt", "README.md", "assets.json", "contract.json", "evaluate.py", "evaluation.yaml", "evaluator.lock.json",
                            "fetch_assets.py", "gym_adapter.py", "requirements.lock", "run.py", "toy_adapter.py", "fixtures/check_expected.py",
                            "fixtures/expected.json", "fixtures/valid/predictions.csv", "fixtures/wrong/predictions.csv", "fixtures/invalid/predictions.csv"}
 
@@ -592,7 +592,7 @@ def test_publishing_creates_one_private_repository_and_pushes_the_tested_commit(
         identifier, path = accepted(client, monkeypatch)
         assert client.post(path + "/evaluator/publish").status_code == 409  # No tested release yet.
         state = build(client, path)
-        assert state["publishing"] == {"available": True, "reason": "", "owner": "bold-test", "repository": None}
+        assert state["publishing"] == {"automatic": False, "available": True, "reason": "", "owner": "bold-test", "repository": None}
         commit = state["release"]["evidence"]["commit"]
         assert state["release"]["published"] is None and hub.created == []
 
@@ -814,3 +814,197 @@ def test_container_runtime_can_be_described_for_a_user_with_no_account_entry(mon
     monkeypatch.setattr(getpass, "getuser", lambda: (_ for _ in ()).throw(KeyError("no account")))
     runtime = lite_build.DockerRuntime()
     assert runtime.user == f"uid{os.getuid()}" and runtime.tag.startswith(runtime.user + "_autokaggle-lite-build:")
+
+
+def publication_settled(client, path):
+    return settle(client, path + '/evaluator', lambda s: s['status'] not in lite_build.ACTIVE and
+                  (s.get('release', {}).get('publication') or {}).get('status') not in {'queued', 'publishing'})
+
+
+def test_automatic_publication_versions_one_repository(published, monkeypatch):
+    app, hub = published
+    monkeypatch.setenv('AUTOKAGGLE_LITE_AUTO_PUBLISH', '1')
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        build(client, path)
+        first = publication_settled(client, path)
+        release = first['release']
+        assert first['publishing']['automatic']
+        assert release['publication']['status'] == 'published'
+        assert release['published']['commit'] == release['evidence']['commit']
+        assert release['published']['zip_url'].endswith('/archive/' + release['evidence']['commit'] + '.zip')
+        assert len(hub.created) == 1
+        revise(client, monkeypatch, path, evaluation_count=4)
+        build(client, path)
+        second = publication_settled(client, path)['release']
+        assert len(hub.created) == 1 and second['published']['tag'] == 'v2'
+        assert hub.refs(1000) == {'refs/heads/main': second['evidence']['commit'],
+                                  'refs/tags/v1': release['evidence']['commit'], 'refs/tags/v2': second['evidence']['commit']}
+
+
+def test_failed_automatic_push_keeps_tested_release_and_reuses_repository(published, monkeypatch):
+    app, hub = published
+    monkeypatch.setenv('AUTOKAGGLE_LITE_AUTO_PUBLISH', '1')
+    original = hub.push
+    def fail(*args):
+        raise RuntimeError('credential-that-must-not-appear')
+    monkeypatch.setattr(hub, 'push', fail)
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        build(client, path)
+        state = publication_settled(client, path)
+        assert state['status'] == 'ready' and len(hub.created) == 1
+        release = state['release']
+        assert release['publication']['status'] == 'failed' and release['published'] is None
+        assert 'credential-that-must-not-appear' not in json.dumps(state)
+        assert client.get(path + '/evaluator/bundle').status_code == 200
+        monkeypatch.setattr(hub, 'push', original)
+        retry = client.post(path + '/evaluator/publish')
+        assert retry.status_code == 200, retry.text
+        saved = retry.json()['release']
+        assert saved['publication']['status'] == 'published' and saved['publication']['attempts'] == 2
+        assert saved['evidence']['commit'] == release['evidence']['commit'] and len(hub.created) == 1
+
+
+def test_failed_build_never_auto_publishes(published, monkeypatch):
+    app, hub = published
+    monkeypatch.setenv('AUTOKAGGLE_LITE_AUTO_PUBLISH', '1')
+    monkeypatch.setattr(lite_build, 'agent_command', lambda model: ['{python}', '-c', 'raise SystemExit(3)'])
+    with TestClient(app) as client:
+        _, path = accepted(client, monkeypatch)
+        state = build(client, path)
+        assert state['status'] == 'failed' and not hub.created
+
+
+def test_auto_publisher_skips_a_changed_contract(published, monkeypatch):
+    app, hub = published
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        release = build(client, path)['release']
+        revise(client, monkeypatch, path, evaluation_count=4)
+        monkeypatch.setenv('AUTOKAGGLE_LITE_AUTO_PUBLISH', '1')
+        monkeypatch.setattr(lite_build, '_work', lambda *args: None)
+        lite_build.work(app.state.store, identifier, release['id'], lite_build.LocalRuntime(), {}, 'unused', github=hub)
+        state = client.get(path + '/evaluator').json()
+        assert state['status'] == 'stale' and state['release'] is None and not hub.created
+
+
+def test_publication_locks_contract_and_duplicate_builds(published, monkeypatch):
+    app, hub = published
+    monkeypatch.setenv('AUTOKAGGLE_LITE_AUTO_PUBLISH', '1')
+    entered, proceed = threading.Event(), threading.Event()
+    original = hub.create
+    def slow(*args):
+        entered.set()
+        assert proceed.wait(20)
+        return original(*args)
+    monkeypatch.setattr(hub, 'create', slow)
+    with TestClient(app) as client:
+        _, path = accepted(client, monkeypatch)
+        client.post(path + '/evaluator/build', json={'request_id': uuid.uuid4().hex})
+        assert entered.wait(120)
+        try:
+            state = client.get(path + '/evaluator').json()
+            assert state['release']['publication']['status'] == 'publishing'
+            assert client.post(path + '/evaluator/publish').status_code == 409
+            assert client.post(path + '/evaluator/build', json={'request_id': uuid.uuid4().hex}).status_code == 409
+            assert client.post(path + '/message', json={'request_id': uuid.uuid4().hex, 'message': 'Change the task.'}).status_code == 409
+        finally:
+            proceed.set()
+        assert publication_settled(client, path)['release']['publication']['status'] == 'published'
+        assert len(hub.created) == 1
+
+
+def test_interrupted_publication_has_retry_state():
+    build = {'id': 'interrupted', 'status': 'ready', 'publication': {'status': 'publishing', 'project_id': 'p1', 'attempts': 1}}
+    public = lite_build._public(build)
+    assert public['status'] == 'ready' and public['publication']['status'] == 'failed'
+    assert 'Retry publication' in public['publication']['error']
+    assert build['publication']['status'] == 'publishing'  # A read must not mutate storage.
+
+
+def test_publisher_rejects_main_that_differs_from_tested_release():
+    class Refs:
+        def local_refs(self, repo):
+            return {'refs/heads/main': 'b' * 40, 'refs/tags/v1': 'a' * 40}
+    with pytest.raises(lite_publish.PublishError, match='does not match its tested commit'):
+        lite_publish.push_release(None, {}, 'a' * 40, 1, Refs())
+
+
+def test_rollout_cannot_enable_lite_auto_publish_on_full():
+    from autokaggle.deploy.rollout import update
+    with pytest.raises(ValueError, match='only be changed on the Lite service'):
+        update(None, 'web', b'', '', {}, auto_publish=True)
+
+
+def test_downloaded_git_archive_scores_without_git_metadata(harness, monkeypatch, tmp_path):
+    import io, zipfile
+    app, _, _ = harness
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        release = build(client, path)['release']
+        commit = release['evidence']['commit']
+        repo = app.state.store.directory(identifier) / 'lite-evaluator/repo.git'
+        zipped = subprocess.run(['git', '--git-dir', str(repo), 'archive', '--format=zip', commit], capture_output=True, check=True).stdout
+        unpacked = tmp_path / 'download'
+        with zipfile.ZipFile(io.BytesIO(zipped)) as archive:
+            archive.extractall(unpacked)
+        assert (unpacked / 'revision.txt').read_text().strip() == commit
+        # Put the archive inside an unrelated checkout. It must not record the parent's revision.
+        subprocess.run(['git', 'init', '-q', str(tmp_path)], check=True)
+        result = subprocess.run([sys.executable, 'evaluate.py', '--artifact', 'fixtures/valid/predictions.csv'], cwd=unpacked, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        summary = json.loads(result.stdout.strip().splitlines()[-1])
+        assert summary['fitness'] == 1 and summary['evaluator_revision'] == commit
+        (unpacked / 'toy_adapter.py').write_text('raise RuntimeError("changed")')
+        rejected = subprocess.run([sys.executable, 'evaluate.py', '--artifact', 'fixtures/valid/predictions.csv'], cwd=unpacked, capture_output=True, text=True)
+        assert rejected.returncode == 1 and 'differs from the release' in rejected.stderr
+
+
+@pytest.mark.parametrize('phase', ['build', 'publication'])
+def test_poll_rechecks_completion_before_reporting_interruption(harness, monkeypatch, phase):
+    """The saved row can be older than the in-memory worker registry."""
+    import copy
+    app, _, _ = harness
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        initial = build(client, path)
+        assert initial['status'] == 'ready', initial
+        store = app.state.store
+        completed = lite_build._reload(store, identifier)
+        build_id = completed['lite_evaluator']['builds'][-1]['id']
+        old = copy.deepcopy(completed)
+        record = old['lite_evaluator']['builds'][-1]
+        if phase == 'build':
+            record.update(status='testing', stage='Scoring the examples from a fresh clone')
+            lite_build._RUNNING.add(build_id)
+        else:
+            record['publication'] = {'status': 'publishing', 'project_id': identifier}
+            completed['lite_evaluator']['builds'][-1]['publication'] = {'status': 'published', 'project_id': identifier}
+            lite_build._PUBLISHING.add(identifier)
+        store.save(old)
+        original = lite_build.view
+        first = True
+
+        def finish_between_read_and_view(project, *args, **kwargs):
+            nonlocal first
+            if first:
+                first = False
+                with store.lock(identifier):
+                    store.save(completed)
+                    lite_build._RUNNING.discard(build_id)
+                    lite_build._PUBLISHING.discard(identifier)
+            return original(project, *args, **kwargs)
+
+        monkeypatch.setattr(lite_build, 'view', finish_between_read_and_view)
+        try:
+            response = client.get(path + '/evaluator')
+            assert response.status_code == 200
+            result = response.json()
+            assert result['status'] == 'ready' and result['release'], result
+            assert not result['release'].get('interrupted')
+            if phase == 'publication':
+                assert result['release']['publication']['status'] == 'published'
+        finally:
+            lite_build._RUNNING.discard(build_id)
+            lite_build._PUBLISHING.discard(identifier)

@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,25 @@ def digest(path):
 def stop(message):
     print("evaluate: " + message, file=sys.stderr)
     raise SystemExit(1)
+
+
+def release_revision():
+    # GitHub archives expand this tracked placeholder. It records provenance;
+    # it is not an authenticity signature for a researcher-supplied result.
+    marker = ROOT / "revision.txt"
+    value = marker.read_text().strip() if marker.is_file() else ""
+    if re.fullmatch(r"[a-f0-9]{40}", value):
+        return value
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=ROOT, check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+        if Path(top).resolve() != ROOT:
+            raise ValueError("Not the evaluator repository")
+        revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+        if re.fullmatch(r"[a-f0-9]{40}", revision):
+            return revision
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    stop("use a Git clone or the GitHub ZIP of the pinned release, so the result records its exact revision.")
 
 
 def explain(record, manifest, contract, diagnostic=None):
@@ -61,7 +81,11 @@ def main():
     except (OSError, ValueError):
         stop("this is not a complete evaluator release. Clone the pinned release again.")
     for name, expected in lock["files"].items():
-        if not (ROOT / name).is_file() or digest(ROOT / name) != expected:
+        path = ROOT / name
+        actual = digest(path) if path.is_file() else None
+        if name == "revision.txt" and path.is_file() and re.fullmatch(rb"[a-f0-9]{40}\n", path.read_bytes()):
+            actual = hashlib.sha256(b"$Format:%H$\n").hexdigest()
+        if actual != expected:
             stop(f"{name} is missing or differs from the release. Check out the pinned release again.")
     for asset in assets:
         if not (ROOT / asset["path"]).is_file() or digest(ROOT / asset["path"]) != asset["sha256"]:
@@ -69,10 +93,7 @@ def main():
     artifact = Path(args.artifact).resolve()
     if not artifact.is_file():
         stop(f"{args.artifact} is not a file.")
-    try:
-        revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True, timeout=10).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        stop("run this from a Git clone of the evaluator release, so the result records its exact revision.")
+    revision = release_revision()
 
     manifest = {"format": "bold.autokaggle.lite.submission.v1", "challenge_version": lock["contract_version"],
                 "contract_sha256": lock["contract_sha256"], "code_repository": lock["repository"], "code_revision": revision,
@@ -99,7 +120,7 @@ def main():
         explain(failed[0], result["manifest"], contract["contract"], result.get("diagnostics", {}).get(str(failed[0]["seed"])))
     # With the zero failure rule the runner reports 0.0 even when no seed completed. That is not a measured fitness.
     scored = summary["status"] == "complete" and summary["completed"] > 0
-    print(json.dumps({"fitness": summary["score"] if scored else None, "metric": summary["metric"], "direction": lock["direction"],
+    print(json.dumps({"fitness": summary["score"] if scored else None, "metric": contract["contract"].get("metric_name", summary["metric"]) if summary["metric"] == "custom" else summary["metric"], "direction": lock["direction"],
                       "status": summary["status"] if scored or summary["status"] != "complete" else "no_completed_seed",
                       "completed": summary["completed"], "failed": summary["failed"],
                       "seeds": len(result["results"]), "contract_version": lock["contract_version"],

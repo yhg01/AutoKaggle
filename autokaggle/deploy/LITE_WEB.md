@@ -140,8 +140,7 @@ owner is set, `deploy` reads a token from `$HOME/.config/autokaggle/lite-github.
 places it only in the `lite-secrets` Secret. Without an owner the token is not sent to the cluster. `deploy --github-owner NAME` sets `AUTOKAGGLE_LITE_GITHUB_OWNER` in
 `lite-config`. The owner is kept on later deployments unless the option is given again; an empty value turns
 publishing off. Both values enter the deployment's settings hash, so a change restarts Lite. The pinned runtime
-packages include `dulwich` and `urllib3` for the token route. Hosted Lite cannot build evaluators, so these settings
-have no effect until hosted builds exist. See [Publish to GitHub](../docs/LITE.md#publish-to-github).
+packages include `dulwich` and `urllib3` for the token route. The Internal build runtime described below supplies tested releases for publishing. See [Publish to GitHub](../docs/LITE.md#publish-to-github).
 
 Before a release, rehearse the pod locally: run the pinned image with a read-only root as user 1000, extract the source
 archive, install `web-requirements.lock` with the init container's command, and start the application with the
@@ -316,3 +315,43 @@ Do not restore an old database as part of a source rollback. Do not patch
 After restart or rollback, repeat health, login, membership, download, and model
 checks. Confirm the source annotation and compare saved project records. Old
 immutable source ConfigMaps can remain available for a later rollback.
+
+## Internal build runtime — 12 November
+
+`lite_kubernetes.py` runs bounded build and acceptance jobs on the existing node. The jobs use the default container runtime, a non-root user, a read-only root, no added capabilities, no service-account token, and mounts for one job only. Each job has a deadline, 2 CPU and 4 GiB memory limits. Network policies block incoming traffic, private destinations, the application port, the cluster API, and metadata. Public HTTPS is available for dependencies. A short-lived model gateway is available on the Lite pod. Provider and GitHub credentials stay in the trusted web process.
+
+This is an Internal lab service. Container isolation is not a claim of protection against all hostile code. Full's separate offline gVisor runner is unchanged. The Kubernetes control account can create, read, and remove jobs, and read pod status/logs. It cannot read secrets or execute commands in other pods.
+
+Install the pinned build image on each eligible node before use. Set `AUTOKAGGLE_LITE_BUILD_RUNTIME=kubernetes`, an immutable `AUTOKAGGLE_LITE_BUILD_IMAGE`, the Lite data claim, and the pod IP from the downward API. Apply `lite_jobs.resources` and run its network checks before enabling builds. The source updater preserves existing runtime add-ons and makes a private SQLite backup:
+
+```sh
+python -m autokaggle.deploy.rollout lite --model-env /private/deepseek.env \
+  --build-image IMAGE@sha256:DIGEST --github-owner OWNER --github-env /private/lite-github.env
+python -m autokaggle.deploy.rollout web --model-env /private/deepseek.env
+```
+
+Use `yhg01` for test publication. Set the production owner only after access is checked. No new node is rented. The Lite data volume is 10 GiB; repository imports stop before the disk is full.
+
+Civo volume expansion requires an offline volume. A larger PVC request does not prove the filesystem has grown. Stop Lite and wait for all build jobs and volume attachments to finish. Wait for controller expansion, then restart Lite and check the mounted capacity with `df`. Keep the private database backup. The 12 November expansion changed the existing Lite volume from 1 GiB to 10 GiB.
+
+## Temporary email access — 12 November 2026
+
+The owner approved access for any verified email while BOLD OS sign-in is prepared. Set `AUTOKAGGLE_LITE_ACCESS_POLICY=verified_email`; keep `AUTOKAGGLE_PRIVATE_MODE=1`. Existing member lists are retained but are not required in this mode. `members` restores the previous admission rule. The rollout command accepts `--lite-access-policy verified_email` only for the Lite service. It preserves the existing build runtime and other settings. See [the collaborator plan](../docs/LITE_BOLD_OS_AUTH_PLAN.md).
+
+
+## Automatic evaluator publication — 12 November 2026
+
+The approved BOLD connection uses `AUTOKAGGLE_LITE_GITHUB_OWNER=bold-lab-ai` and the private token file already configured for Lite. Enable automatic publication with the existing-service updater:
+
+```sh
+python -m autokaggle.deploy.rollout lite \
+  --model-env "$HOME/.config/autokaggle/deepseek.env" \
+  --github-env "$HOME/.config/autokaggle/lite-github.env" \
+  --github-owner bold-lab-ai --auto-publish
+```
+
+The updater preserves the current access policy, runtime mounts, and database. It waits for active builds and publications to finish before replacing the service. The token stays in `lite-secrets`; build jobs receive no GitHub credential. Later updates preserve the automatic setting unless `--no-auto-publish` is supplied.
+
+The tested commit is published only after acceptance checks pass. Publication failures retain the local release and show a retry action. A service restart during publication also shows a retry action. Retrying reuses the repository and release tag. This version does not resume an interrupted publication without a retry request. GitHub access is required to download the private repository or its ZIP.
+
+Deployment check: source `70f0b34c50cbee54bd31c242b727d441ed5b00ad7e75ca6fd5c9222596ff69a1`, implementation commit `b6999df`. The GitHub connection authenticates, but repository creation currently returns HTTP 403. The tested evaluator is saved for retry. See [the publication check](../docs/AUTO_PUBLICATION_2026-11-12.md).

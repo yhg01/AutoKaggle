@@ -2,6 +2,7 @@
 from __future__ import annotations
 import importlib
 import random
+import numbers
 
 
 def evaluate(seed, manifest, contract):
@@ -11,9 +12,11 @@ def evaluate(seed, manifest, contract):
     if fixed_horizon and (type(max_steps) is not int or max_steps <= 0):
         raise ValueError("A fixed evaluation horizon needs a positive max_steps value.")
     random.seed(seed)
+    boolean_types = (bool, numbers.Integral)
     try:
         import numpy as np
         np.random.seed(seed % (2 ** 32))
+        boolean_types += (np.bool_,)
     except ImportError:
         pass
     # Some environment packages register IDs on import.
@@ -39,9 +42,12 @@ def evaluate(seed, manifest, contract):
             score += float(reward)
             steps += 1
             success_key = contract.get("success_key") or "success"
-            if success_key in info:
+            if contract["metric"] == "success_rate" and success_key in info:
+                value = info[success_key]
+                if not isinstance(value, boolean_types) or value not in (0, 1):
+                    raise ValueError("The success key must report a boolean or 0/1. Use an explicit adapter for status codes.")
                 success_observed = True
-                success = success or bool(info[success_key])
+                success = success or bool(value)
             if terminated or truncated:
                 if terminated:
                     status, end_reason = "completed", "terminated"

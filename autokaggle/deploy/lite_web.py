@@ -52,7 +52,9 @@ def private_settings(model_env: Path):
             **({"DEEPSEEK_API_KEY": key} if model.get("DEEPSEEK_API_KEY") else {"OPENROUTER_API_KEY": key}), **github_settings()}
 
 
-def resources(source, digest, private, node_ips, *, members=MEMBERS, github_owner=""):
+def resources(source, digest, private, node_ips, *, members=MEMBERS, github_owner="", access_policy="members"):
+    if access_policy not in {"members", "verified_email"}:
+        raise ValueError("Invalid Lite access policy.")
     if github_owner and not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", github_owner):
         raise ValueError("The GitHub owner must be one account or organization name.")
     names = {
@@ -77,10 +79,11 @@ def resources(source, digest, private, node_ips, *, members=MEMBERS, github_owne
         # Namespace is shared only to reuse the installed issuer and mail Secret.
         item["metadata"]["namespace"] = web.NAMESPACE
         if item["kind"] == "PersistentVolumeClaim":
-            item["spec"]["resources"]["requests"]["storage"] = "1Gi"
+            item["spec"]["resources"]["requests"]["storage"] = "10Gi"
         if item["kind"] == "ConfigMap" and item["metadata"]["name"] == "lite-config":
             item["data"]["AUTOKAGGLE_PUBLIC_BASE_URL"] = BASE_URL
             item["data"]["AUTOKAGGLE_LITE_MEMBERS"] = members
+            item["data"]["AUTOKAGGLE_LITE_ACCESS_POLICY"] = access_policy
             item["data"]["AUTOKAGGLE_DEFAULT_INTERFACE"] = "lite"
             item["data"]["AUTOKAGGLE_WORKERS"] = "5"
             if github_owner:
@@ -121,6 +124,7 @@ def main():
     parser.add_argument("command", choices=["tls", "deploy", "expose", "status"])
     parser.add_argument("--model-env", type=Path, default=web.ROOT / ".env")
     parser.add_argument("--members", help="Approved lab emails, comma separated. Existing membership is preserved when omitted.")
+    parser.add_argument("--access-policy", choices=["members", "verified_email"], help="Preserve the existing policy when omitted.")
     parser.add_argument("--github-owner", help="Account or organization for evaluator repositories. Preserved when omitted. An empty value turns publishing off.")
     args = parser.parse_args()
     with private_kubeconfig() as config:
@@ -137,10 +141,11 @@ def main():
             configs = kube.json("get", "configmaps", "-n", web.NAMESPACE)["items"]
             prior = next((x.get("data", {}) for x in configs if x["metadata"]["name"] == "lite-config"), {})
             members = args.members if args.members is not None else prior.get("AUTOKAGGLE_LITE_MEMBERS", MEMBERS)
+            policy = args.access_policy if args.access_policy is not None else prior.get("AUTOKAGGLE_LITE_ACCESS_POLICY", "members")
             owner = args.github_owner if args.github_owner is not None else prior.get("AUTOKAGGLE_LITE_GITHUB_OWNER", "")
             if not owner:  # Without an owner publishing is off. Keep an unused credential off the cluster.
                 private.pop("AUTOKAGGLE_LITE_GITHUB_TOKEN", None)
-            for item in resources(source, digest, private, addresses, members=members, github_owner=owner):
+            for item in resources(source, digest, private, addresses, members=members, github_owner=owner, access_policy=policy):
                 kube.run("apply", "--server-side", "--field-manager=autokaggle-lite", "-f", "-", document=item)
             print(json.dumps({"host": HOST, "source_sha256": digest, "source_bytes": len(source), "github_owner": owner or None,
                               "github_token": "AUTOKAGGLE_LITE_GITHUB_TOKEN" in private}))

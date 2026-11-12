@@ -37,13 +37,14 @@
     finally { clearTimeout(timer); }
   }
   function controls() {
+    renderNextAction();
     const active = ready(), blocked = busy();
     for (const id of ["sources-button", "send-message", "build-package", "retry-request", "continue-round"]) $(id).disabled = !active || blocked;
     $("message-input").disabled = !active || blocked;
     const opening = active ? intake() : null;
-    $("attach-paper").hidden = !opening || opening.step !== "paper"; $("attach-paper").disabled = blocked;
+    $("attach-paper").hidden = !active; $("attach-paper").disabled = blocked;
     $("message-input").placeholder = opening ? "Paste a link, or answer in a sentence…" : "Describe your question, answer, or what you want to change…";
-    $("send-message").disabled ||= !$("message-input").value.trim();
+    $("send-message").disabled ||= !$("message-input").value.trim() && !pendingFiles.length;
     $("package-button").disabled = !active;
     $("results-button").disabled = !active;
     $("evaluator-button").disabled = !active;
@@ -54,9 +55,13 @@
     $("thinking-text").textContent = state.loading ? "Opening the saved session…" : state.data?.stage || "Saving your request…";
     $("composer-hint").textContent = !active ? "Create a session to start." : blocked ? "Your request is in progress. You can return to this session later." : "Enter to send · Shift + Enter for a new line";
     $("session-state").textContent = state.data?.status === "working" ? "Agent working" : state.data?.package?.status === "stale" ? "Package needs an update" : state.data?.ready ? "Definition recorded" : "Internal draft";
-    for (const button of content.querySelectorAll("[data-mutation]")) button.disabled = blocked || state.auth || (button.dataset.packageRequired === "true" && state.data?.package?.status !== "ready");
+    for (const button of content.querySelectorAll("[data-mutation]")) button.disabled = blocked || state.auth ||
+      (button.dataset.packageRequired === "true" && state.data?.package?.status !== "ready") ||
+      (button.dataset.evaluatorAction && (evaluatorActive(state.evaluator) ||
+        (button.dataset.evaluatorAction === "build" && (!state.evaluator?.available || !state.evaluator?.contract.accepted))));
   }
   function clearPrivate() {
+    pendingFiles = []; renderAttachments();
     state.generation++; clearTimeout(state.poll); clearTimeout(state.evaluatorPoll); state.evaluator = null; state.data = null; state.busy = false; state.loading = false; state.messageKey = "";
     $("messages").replaceChildren(); $("message-input").value = ""; $("proposal-banner").hidden = true; $("recovery-banner").hidden = true; $("welcome").hidden = false; $("challenge-title").textContent = "Sign in to continue your research.";
     content.replaceChildren(); if (dialog.open) dialog.close(); renderChecklist(); controls();
@@ -144,8 +149,22 @@
     $("recovery-title").textContent = limit ? "This interview round is complete" : "Your answers are saved";
     $("recovery-detail").textContent = limit ? "Continue with the saved context for another bounded round. Open decisions still need a recorded answer." : "The agent could not finish its last request. Retry it without adding your answer again.";
     $("result-count").textContent = data.results?.length ? `(${data.results.length})` : "";
-    renderChecklist(); controls();
+    renderChecklist(); renderNextAction(); controls();
     if (data.status === "error") notice(data.error || "The agent could not finish this request. Your saved definition is still available. Retry the request or add a correction.", true);
+  }
+  function renderNextAction() {
+    const box = $("next-action"); box.replaceChildren(); box.hidden = true;
+    if (!ready() || busy() || intake()) return;
+    const field = state.data.proposal?.question_field || "";
+    const add = (text, label, action) => { box.hidden = false; box.append(el("p", text), button(label, action)); };
+    if (state.data.ready && state.data.package?.status !== "ready") {
+      add("The required decisions are recorded. Shall I prepare the versioned package?", "Prepare package", () => mutate("/build", {}, { after: showPackage }));
+    } else if (state.data.package?.status === "ready") {
+      add("Your package is ready. You can download it, review the evaluation module, or report a local result.", "Download package", showPackage);
+      box.append(button("Evaluation module", showEvaluator), button("Report a result", showResults));
+    } else if (["source_url", "source_revision"].includes(field)) {
+      add("Paste source links in your reply. You can also attach a paper for me to read.", "Attach a paper or source", showSources);
+    }
   }
   function schedule(delay = 1500) {
     clearTimeout(state.poll); if (state.data?.status !== "working" || state.auth) return;
@@ -159,6 +178,7 @@
   }
   async function openSession(id) {
     if (state.id) stored(draftKey(), $("message-input").value);
+    pendingFiles = []; renderAttachments();
     const generation = ++state.generation; clearTimeout(state.poll); state.id = id; state.data = null; state.messageKey = ""; state.loading = true; state.auth = false;
     $("messages").replaceChildren(); $("welcome").hidden = true; $("proposal-banner").hidden = true; $("challenge-title").textContent = "Opening your research…"; $("message-input").value = stored(draftKey()) || ""; renderChecklist(); controls();
     history.replaceState(null, "", "/lite?project=" + encodeURIComponent(id));
@@ -330,15 +350,71 @@
     }
     if (!state.data.results?.length) content.append(el("p", "No results have been recorded.", "empty")); controls();
   }
-  async function sendMessage() {
-    const message = $("message-input").value.trim(); if (!message || busy() || !ready()) return;
-    if (intake()) { $("message-input").value = ""; stored(draftKey(), null); await answerIntake(message); return; }
-    await mutate("/message", { message }, { label: "Sending your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
+  let pendingFiles = [];
+  function renderAttachments() {
+    const list = $("attachment-list"); list.replaceChildren();
+    for (const file of pendingFiles) {
+      const chip = el("span", null, "attachment-chip");
+      chip.append(el("span", `${file.name} · ${Math.ceil(file.size / 1024)} KB`), button("Remove", () => {
+        pendingFiles = pendingFiles.filter(other => other !== file); renderAttachments(); controls();
+      })); list.append(chip);
+    }
   }
+  function addAttachments(files) {
+    if (!ready() || busy()) return;
+    for (const file of files) {
+      if (!file.size || file.size > 50 * 1024 * 1024) { notice("Files must contain data and be no larger than 50 MB. Use a shared link for larger datasets.", true); continue; }
+      if (pendingFiles.length >= 12) { notice("Attach at most twelve files at once.", true); break; }
+      if (!pendingFiles.some(other => other.name === file.name && other.size === file.size && other.lastModified === file.lastModified)) pendingFiles.push(file);
+    }
+    renderAttachments(); controls();
+  }
+  async function uploadAttachments() {
+    const generation = state.generation, opening = intake(), names = [];
+    state.busy = true; controls();
+    try {
+      while (pendingFiles.length) {
+        const file = pendingFiles[0], form = new FormData(); form.append("file", file);
+        notice("Reading " + file.name + "…");
+        const data = await api(path("/attachments"), { method: "POST", body: form });
+        if (generation !== state.generation) return false;
+        state.data = data; pendingFiles.shift(); names.push(file.name); renderAttachments();
+      }
+      if (opening && opening.step === "paper") {
+        opening.pdf = names.join(", "); opening.done.paper = true; opening.step = opening.done.repository ? "question" : "repository";
+        opening.log.push({ role: "user", content: "Attached " + names.join(", ") }, { role: "assistant", content: intakeText[opening.step] });
+        saveIntake();
+      }
+      render(); notice(); return true;
+    } catch (error) { await failure(error); return false; }
+    finally { if (generation === state.generation) { state.busy = false; controls(); } }
+  }
+  async function sendMessage() {
+    let message = $("message-input").value.trim(); if ((!message && !pendingFiles.length) || busy() || !ready()) return;
+    if (pendingFiles.length) {
+      const opening = intake();
+      if (!await uploadAttachments()) return;
+      if (!message && opening) { state.messageKey = ""; render(); return; }
+      message ||= "Please read the attached files and use them to refine this experiment.";
+    }
+    if (intake()) { $("message-input").value = ""; stored(draftKey(), null); await answerIntake(message); return; }
+    const links = messageLinks(message);
+    const repository = links.find(repositoryRoot);
+    const paper = links.find(url => /^https:\/\/(arxiv\.org|doi\.org)\//i.test(url));
+    const tail = repository || paper ? "/import" : "/message";
+    const payload = repository || paper ? { paper_url: paper || "", repository_url: repository || "", brief: message } : { message };
+    await mutate(tail, payload, { label: "Reading your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
+  }
+  // Only a repository root link can be imported; the server accepts exactly https://github.com/owner/repository.
+  // Other GitHub links, such as files, commits, or archives, stay in the message so the model can read them.
+  const messageLinks = text => (text.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(link => link.replace(/[.,;:!?]+$/, ""));
+  const githubLink = link => /^https?:\/\/(www\.)?github\.com\//i.test(link);
+  const repositoryRoot = link => /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/i.test(link);
+  const insideRepositoryNote = "That GitHub link points inside a repository. Paste the repository's main link, such as https://github.com/owner/repository. ";
   // Opening questions. A new session starts by asking, in the conversation, whether there is a paper and a repository.
   // The answers are kept in this browser tab until the first request is sent; the saved transcript then takes over.
   const intakeText = {
-    paper: "Is this work based on a paper? Paste its link or attach the PDF. If there is no paper, say so.",
+    paper: "Is this work based on a paper? Paste its link or attach a file. You can also attach notes, tables, code, or images. If there is no paper, say so.",
     repository: "Is there a code repository for it? Paste its public GitHub link. If there is none, say so.",
     question: "What do you want to investigate? One or two sentences are enough."
   };
@@ -346,12 +422,16 @@
   function intake() {
     const data = state.data;
     // A new session holds only the service's greeting. The opening questions take its place until the researcher's first request is saved.
-    if (!state.id || !data || data.messages?.some(message => message.role !== "assistant") || data.sources?.length || data.proposal || data.status === "working") return null;
+    if (!state.id || !data || data.messages?.some(message => message.role === "user") || data.proposal || data.status === "working") return null;
     if (state.intake?.id !== state.id) {
       let saved; try { saved = JSON.parse(stored(intakeKey()) || "null"); } catch (_) {}
       state.intake = { step: "paper", paper: "", repository: "", brief: "", pdf: "", done: {}, log: [], ...(saved || {}), id: state.id, file: null };
-      // A reloaded page cannot keep a chosen file. Ask for the paper again.
-      if (state.intake.pdf) { state.intake.pdf = ""; state.intake.done.paper = false; state.intake.step = "paper"; state.intake.log.push({ role: "assistant", content: "The page was reloaded, so the attached PDF is gone. " + intakeText.paper }); }
+      if (!saved && data.sources?.some(source => source.url?.startsWith("uploaded:"))) {
+        state.intake.pdf = data.sources.map(source => source.title).join(", "); state.intake.done.paper = true; state.intake.step = "repository";
+        state.intake.log.push({role: "assistant", content: "Your files are saved. " + intakeText.repository});
+      }
+      // Files already uploaded survive reload. A legacy local file selection does not.
+      if (state.intake.pdf && !data.sources?.some(source => source.url?.startsWith("uploaded:"))) { state.intake.pdf = ""; state.intake.done.paper = false; state.intake.step = "paper"; state.intake.log.push({ role: "assistant", content: "The page was reloaded, so the attached PDF is gone. " + intakeText.paper }); }
     }
     return state.intake;
   }
@@ -365,18 +445,21 @@
       else { it.file = file; it.pdf = file.name; it.paper = ""; it.done.paper = true; }
     } else {
       say("user", text);
-      const links = (text.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(link => link.replace(/[.,;:!?]+$/, ""));
-      const repository = links.find(link => /^https?:\/\/(www\.)?github\.com\/[^\/\s]+\/[^\/\s#?]+/i.test(link)), paper = links.find(link => link !== repository);
+      const links = messageLinks(text);
+      const repository = links.find(repositoryRoot), paper = links.find(link => !githubLink(link));
+      const inside = links.some(link => githubLink(link) && !repositoryRoot(link));
       const none = /^\s*(no|none|nope|n\/a|not yet|nothing)\b/i.test(text) || /\b(no|not a|without|don't have|do not have)\b[^.]{0,20}\b(paper|preprint|publication|repo|repository|code|github|link)\b/i.test(text);
       if (repository) { it.repository = repository; it.done.repository = true; }
       const fresh = paper && !it.done.paper;  // A link in a later answer does not replace the paper already given.
       if (fresh) { it.paper = paper; it.done.paper = true; }
       if (it.step === "paper" && !fresh) {
         if (none && !repository) it.done.paper = true;
-        else if (!repository && text.length >= 60 && !it.brief) { it.brief = text; note = "I will use that as your research question. "; }
-        else if (!repository) note = "I did not find a link. ";
+        // A bare link is not a research question, however long it is.
+        else if (!repository && text.replace(/https?:\/\/\S+/gi, "").trim().length >= 60 && !it.brief) { it.brief = text; note = "I will use that as your research question. "; }
+        else if (!repository) note = inside ? insideRepositoryNote : "I did not find a link. ";
       } else if (it.step === "repository" && !repository) {
-        if (none) it.done.repository = true; else note = links.length ? "I can read public GitHub repositories only. " : "I did not find a GitHub link. ";
+        if (none) it.done.repository = true;
+        else note = inside ? insideRepositoryNote : links.length ? "I can read public GitHub repositories only. " : "I did not find a GitHub link. ";
       } else if (it.step === "question") it.brief = text;
     }
     it.step = !it.done.paper ? "paper" : !it.done.repository ? "repository" : !it.brief ? "question" : "send";
@@ -416,7 +499,7 @@
     failed: ["Draft · the build did not pass", "The evaluator stays a draft. The cause is shown below."],
     stale: ["Draft · the contract changed", "The contract changed after the last tested evaluator. Build again for the current contract."]
   };
-  const evaluatorActive = view => ["queued", "building", "testing"].includes(view?.status);
+  const evaluatorActive = view => ["queued", "building", "testing"].includes(view?.status) || ["queued", "publishing"].includes(view?.release?.publication?.status);
   function renderEvaluator(view) {
     if (state.dialog !== "evaluator" || !dialog.open) return; content.replaceChildren();
     const [label, detail] = evaluatorText[view.status] || evaluatorText.not_built, release = view.release, latest = view.latest;
@@ -429,6 +512,8 @@
       content.append(el("h3", "Tested release", "section-label"), el("p", `Evaluator version ${release.evaluator_version}, commit ${e.commit}. The example ${e.fixture} has expected fitness ${e.expected_fitness}; the fresh clone scored ${e.observed_fitness}.`));
       const pub = release.published, link = pub && safeURL(pub.url);
       if (link) { const p = el("p", "Published to the private GitHub repository "), a = el("a", pub.repository + " ↗"); a.href = link; a.target = "_blank"; a.rel = "noopener noreferrer"; p.append(a, el("span", ` at ${pub.tag}.` + (pub.address_recorded ? "" : " This release was built before its repository address was set, so its lock file does not name this repository. Rebuild and publish again to record it."))); content.append(p); }
+      if (["queued", "publishing"].includes(release.publication?.status)) content.append(el("p", "Publishing the tested evaluator to GitHub…", "hint"));
+      if (release.publication?.status === "failed") content.append(el("p", "GitHub publication needs a retry. " + release.publication.error, "extraction-notes"));
       content.append(el("pre", `git clone ${link ? link + ".git" : "evaluator.bundle"} evaluator && cd evaluator && git checkout ${tag}\npython -m venv .venv && . .venv/bin/activate\npython -m pip install -r requirements.lock\npython fetch_assets.py\n${e.command}    # expected fitness ${e.expected_fitness}\npython evaluate.py --artifact PATH --output results.json`, "contract"));
     }
     const shown = release || latest;
@@ -437,16 +522,19 @@
     if (view.earlier_releases?.length) content.append(el("p", "Earlier tested releases are kept: " + view.earlier_releases.map(r => `version ${r.evaluator_version} (contract ${r.contract_version})`).join(", ") + ".", "hint"));
     const actions = el("div", null, "dialog-actions");
     if (release) for (const [text, url, download] of [["Download release ↓", release.bundle_url, true], ["Download YAML config ↓", release.config_url, true], ["Read README ↗", release.readme_url, false]]) { const a = artifactLink(text, url, download); if (a) actions.append(a); }
+    const zip = safeURL(release?.published?.zip_url);
+    if (zip) { const a = el("a", "Download GitHub ZIP ↓", "button secondary"); a.href = zip; a.target = "_blank"; a.rel = "noopener noreferrer"; actions.append(a); }
     const start = button(release ? "Rebuild evaluator" : "Build evaluator", buildEvaluator, true, true);
+    start.dataset.evaluatorAction = "build";
     start.disabled = evaluatorActive(view) || !view.available || !view.contract.accepted || busy(); actions.append(start);
     const publishing = view.publishing;
-    if (release && publishing?.available) { const send = button(release.published ? "Publish again" : "Publish to GitHub", publishEvaluator, false, true); send.disabled = evaluatorActive(view) || busy(); actions.append(send); }
+    if (release && publishing?.available && (!release.published || release.publication?.status === "failed")) { const send = button(release.publication?.status === "failed" ? "Retry publication" : "Publish to GitHub", publishEvaluator, false, true); send.dataset.evaluatorAction = "publish"; send.disabled = evaluatorActive(view) || busy(); actions.append(send); }
     content.append(actions);
     if (release && publishing?.available && !release.published) content.append(el("p", publishing.repository ? `Publishing updates the private repository ${publishing.repository.name}.` : `Publishing creates a private repository under ${publishing.owner} and pushes the tested commit unchanged.`, "hint"));
     else if (release && publishing?.owner && !publishing.available) content.append(el("p", publishing.reason, "hint"));
     if (!view.available) content.append(el("p", view.unavailable_reason || "Evaluator builds are not available on this server.", "hint"));
     else if (!view.contract.accepted) content.append(el("p", "Resolve and accept the open contract decisions first.", "hint"));
-    else content.append(el("p", `A build may use up to ${view.settings.minutes} minutes and ${view.settings.requests} model requests. It publishes nothing. The release stays in this session until it is published.`, "hint"));
+    else content.append(el("p", `A build may use up to ${view.settings.minutes} minutes and ${view.settings.requests} model requests. ` + (publishing?.automatic ? "After the checks pass, the tested release is published to a private GitHub repository. Downloads need access to that repository." : "The release stays in this session until it is published."), "hint"));
   }
   async function loadEvaluator() {
     const generation = state.generation; clearTimeout(state.evaluatorPoll);
@@ -479,7 +567,12 @@
     finally { if (generation === state.generation) { state.busy = false; controls(); } }
   }
   $("attach-paper").addEventListener("click", () => $("paper-attach").click?.());
-  $("paper-attach").addEventListener("change", () => { const file = $("paper-attach").files?.[0]; $("paper-attach").value = ""; if (file) answerIntake("", file); });
+  $("paper-attach").addEventListener("change", () => { addAttachments(Array.from($("paper-attach").files || [])); $("paper-attach").value = ""; });
+  $("message-input").addEventListener("paste", event => {
+    const files = Array.from(event.clipboardData?.files || []); if (files.length) { event.preventDefault(); addAttachments(files); }
+  });
+  $("message-form").addEventListener("dragover", event => { if (event.dataTransfer?.types?.includes("Files")) event.preventDefault(); });
+  $("message-form").addEventListener("drop", event => { const files = Array.from(event.dataTransfer?.files || []); if (files.length) { event.preventDefault(); addAttachments(files); } });
   $("message-form").addEventListener("submit", event => { event.preventDefault(); sendMessage(); });
   $("message-input").addEventListener("input", () => { if (state.id) stored(draftKey(), $("message-input").value); controls(); });
   $("message-input").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); } });
