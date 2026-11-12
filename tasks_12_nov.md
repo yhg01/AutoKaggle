@@ -79,10 +79,10 @@ Deployed temporary email access on 12 November at 11:22 UTC from commit `5cf7668
 - [x] Keep the tested release after failed or interrupted publication; prevent concurrent edits during a push.
 - [x] Support scoring from GitHub ZIP downloads with a recorded revision and file integrity checks.
 - [x] Verify live publication under yhg01 and run the downloaded GitHub ZIP.
-- [ ] Complete BOLD publication: Civo build and all ten checks passed, but GitHub rejected repository creation with HTTP 403. Token scope/permissions need correction; retry requires no new build.
+- [x] Complete BOLD publication after the token permission update. The existing tested release published successfully. Its GitHub ZIP returned fitness 16.0 over three seeds and rejected invalid input.
 - [x] Deploy automatic publication to Civo Lite and verify all ten existing sessions were preserved.
 
-See `autokaggle/docs/AUTO_PUBLICATION_2026-11-12.md` for the live browser test, exact deployment, and GitHub permission blocker.
+See `autokaggle/docs/AUTO_PUBLICATION_2026-11-12.md` for the live browser test, deployment, and resolved GitHub permission blocker.
 
 ## Lite administrator log repair
 
@@ -94,3 +94,10 @@ See `autokaggle/docs/AUTO_PUBLICATION_2026-11-12.md` for the live browser test, 
 - [ ] Deploy after the existing Civo evaluator job finishes, then verify the live admin routes.
 
 See `autokaggle/docs/LITE_ADMIN_LOGS_2026-11-12.md` for cause, checks, and limits. Earlier Lite provider responses were not saved and cannot be recovered.
+
+## PR review and monitoring follow-up
+
+- [x] Review and merge PR #18 into the feature branch. GitHub file/archive links stay in chat; repository root links remain imports. A local browser test with DeepSeek V4 Pro confirmed the file-link path.
+- [ ] Complete the final combined checks, merge PR #17, and verify the Lite rollout.
+- [x] Schedule private checks every 15 minutes through 08:00 London time on 13 November. Record only new failures or changes. The desktop app and computer must remain running.
+- [ ] Review the generated evaluator acceptance gap: primary-score fixture tests do not establish that all secondary outputs and reference-data provenance required by an accepted definition are implemented. A live generated release omitted these fields. Keep the private incident evidence outside Git. This needs a general acceptance change and a new evaluator release; do not alter the accepted scientific definition or replace a published tag.

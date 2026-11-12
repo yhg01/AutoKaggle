@@ -126,11 +126,11 @@ def test_admin_lite_snapshot_and_build_log(app, tmp_path):
 def test_validation_updates_only_its_request_record(tmp_path):
     store=Store(tmp_path);p,state=seeded(store)
     trace={'id':'last','status':'completed'}
-    diag.save(state,trace);state['_diagnostic_trace']=trace
-    assert diag.parse(NS(parse_proposal=lambda *args: {'ok':True}),state,None)=={'ok':True}
+    diag.save(state,trace)
+    assert diag.parse(NS(parse_proposal=lambda *args: {'ok':True}),state,None,trace)=={'ok':True}
     assert read(store,p['id'])['_model_traces'][-1]['validation']['status']=='accepted'
     def bad(*args):raise ValueError('bad schema')
-    with pytest.raises(ValueError):diag.parse(NS(parse_proposal=bad),state,None)
+    with pytest.raises(ValueError):diag.parse(NS(parse_proposal=bad),state,None,trace)
     saved=read(store,p['id'])
     assert saved['_model_traces'][-1]['validation']['status']=='rejected'
     assert saved['_lite_model_requests']==1

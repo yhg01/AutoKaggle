@@ -100,7 +100,7 @@ The revision agent receives the latest three saved result summaries, their versi
 | `openrouter` (default) | `OPENROUTER_API_KEY` | `AUTOKAGGLE_LITE_MODEL`, else `openai/gpt-6.1-sol` | The interview is the unchanged call in `lite.py`, with strict schema output. |
 | `deepseek` | `DEEPSEEK_API_KEY` | `AUTOKAGGLE_LITE_DEEPSEEK_MODEL`, else `deepseek-v4-pro` | DeepSeek has JSON output without a strict schema. The schema is placed in the prompt and one blank reply is retried. |
 
-Both routes send the same interview context and pass the same `parse_proposal` validation. The DeepSeek route lives in `lite_providers.py` and is installed at startup, so `lite.py` stays byte-identical and existing contract versions and seeds do not change. Medium reasoning maps to DeepSeek's `high`. For builds, the gateway forwards to the selected provider and the coding agent returns DeepSeek's reasoning text on later tool-call turns, as that API requires. The session view's model label in `lite.py` still names the OpenRouter model; each proposal and build record states the model that actually answered. Record the provider and model with every live test.
+Both routes send the same interview context and pass the same `parse_proposal` validation. The DeepSeek route lives in `lite_providers.py` and is installed at startup, so `lite.py` stays byte-identical and existing contract versions and seeds do not change. Medium reasoning maps to DeepSeek's `high`. For builds, the gateway forwards to the selected provider and the coding agent returns DeepSeek's reasoning text on later tool-call turns, as that API requires. The session view, proposal, and build record name the configured model. Record the provider and model with every live test.
 
 ## Internal access
 

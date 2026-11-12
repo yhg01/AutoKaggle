@@ -624,10 +624,10 @@ def _public(build):
     result = {k: copy.deepcopy(build.get(k)) for k in ("id", "status", "stage", "evaluator_version", "contract_version", "contract_sha256",
               "started_at", "finished_at", "blockers", "cause", "tests", "evidence", "model", "runtime", "agent_summary", "decisions", "published", "publication")}
     if build["status"] in ACTIVE and build["id"] not in _RUNNING:
-        result.update(status="failed", stage="Build interrupted", cause="The service restarted during this build. Start a new build.")
+        result.update(status="failed", stage="Build interrupted", cause="The service restarted during this build. Start a new build.", interrupted=True)
     publication = result.get("publication")
     if publication and publication["status"] in {"queued", "publishing"} and build["id"] not in _RUNNING and publication.get("project_id") not in _PUBLISHING:
-        publication.update(status="failed", error="Publication was interrupted. Retry publication to check GitHub and finish the same release.")
+        publication.update(status="failed", error="Publication was interrupted. Retry publication to check GitHub and finish the same release.", interrupted=True)
     return result
 
 
@@ -740,16 +740,28 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None,
             raise HTTPException(404, "This is not an internal Lite session.")
         return item
 
+    def read_view(identifier, request):
+        result = view(lite_get(identifier, request), runtime, github)
+        # A worker can save its terminal state and leave the running registry
+        # after this request reads the old database row. Confirm an apparent
+        # interruption under the project lock before reporting a failure.
+        # Normal polling stays unlocked, including during a GitHub push.
+        records = [r for r in (result.get("latest"), result.get("release")) if r]
+        if any(r.get("interrupted") or (r.get("publication") or {}).get("interrupted") for r in records):
+            with store.lock(identifier):
+                result = view(lite_get(identifier, request), runtime, github)
+        return result
+
     @app.get("/api/projects/{project_id}/lite/evaluator")
     def read(project_id: str, request: Request):
-        return view(lite_get(project_id, request), runtime, github)
+        return read_view(project_id, request)
 
     @app.post("/api/projects/{project_id}/lite/evaluator/build")
     def start(project_id: str, body: Start, request: Request):
         saved = lite_get(project_id, request)
         # A repeated request is answered from the saved record, even while the build holds the project lock.
         if body.request_id in (saved.get("lite_evaluator") or {}).get("requests", {}):
-            return view(saved, runtime, github)
+            return read_view(project_id, request)
         with editing(project_id, request) as item:
             state = _state(item)
             if body.request_id in state["requests"]:
@@ -795,11 +807,10 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None,
         lite_get(project_id, request)
         with editing(project_id, request) as item:
             publish_locked(store, item, runtime, github, replace=bool(body and body.new_repository))
-        return view(lite_get(project_id, request), runtime, github)
+        return read_view(project_id, request)
 
     def release_file(project_id, request, name):
-        item = lite_get(project_id, request)
-        release = view(item, runtime, github)["release"]
+        release = read_view(project_id, request)["release"]
         if not release:
             raise HTTPException(409, "There is no tested evaluator for the current contract. Build the evaluator first.")
         return store.directory(project_id) / "lite-evaluator" / "releases" / f"v{release['evaluator_version']}" / name

@@ -57,7 +57,20 @@ def capture(trace, key, value):
     trace.setdefault('capture', {})[key] = {'original_chars': len(raw), 'limit_chars': obs.TEXT_LIMIT, 'truncated': len(raw) > obs.TEXT_LIMIT}
 
 
-def request(state, client, *, kind='lite interview', **kwargs):
+class InterviewRecords:
+    """Keep validation linked to its request without changing interview input state."""
+    def __init__(self, state):
+        self.state = state
+        self.trace = None
+
+    def request(self, client, **kwargs):
+        return request(self.state, client, _record=self, **kwargs)
+
+    def parse(self, lite, response):
+        return parse(lite, self.state, response, self.trace)
+
+
+def request(state, client, *, kind='lite interview', _record=None, **kwargs):
     """Record each provider request, including source lookups and schema repairs."""
     message = next((m for m in reversed(state.get('messages', [])) if m.get('role') == 'user'), {})
     trace = {'id': uuid.uuid4().hex, 'kind': kind, 'status': 'running', 'started_at': now(), 'model': kwargs.get('model'),
@@ -94,17 +107,17 @@ def request(state, client, *, kind='lite interview', **kwargs):
     finally:
         trace.update(finished_at=now(), duration_ms=round((time.monotonic() - started) * 1000))
         save(state, trace)
-        state['_diagnostic_trace'] = trace
+        if _record is not None:
+            _record.trace = trace
 
 
-def parse(lite, state, response):
+def parse(lite, state, response, trace=None):
     status = 'rejected'
     try:
         result = lite.parse_proposal(state, response)
         status = 'accepted'
         return result
     finally:
-        trace = state.get('_diagnostic_trace')
         if trace:
             trace['validation'] = {'status': status, 'at': now()}
             save(state, trace)

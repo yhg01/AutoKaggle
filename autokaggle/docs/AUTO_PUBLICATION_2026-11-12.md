@@ -42,7 +42,7 @@ The Civo check uses the application API and its real Kubernetes build jobs. Brow
 Private repository downloads require GitHub access. Lite does not add collaborators automatically. An interrupted publication needs a retry request; it does not restart automatically. These tests validate publication and scoring plumbing on a small synthetic problem. They do not establish scientific validity for an arbitrary generated evaluator. BOLD OS problem-bank synchronization remains separate work.
 
 
-## Civo BOLD connection check
+## Initial Civo BOLD connection check (resolved later)
 
 Civo completed the live evaluator build with DeepSeek V4 Pro: 12 model requests, 91.0 seconds in the Kubernetes build job, and all ten acceptance checks passed. The tested commit is `fd734263e9a3e08c706987f08c2f1d8958d25937`. The saved session is `2c413be2-75eb-448f-acea-9232d4459552`.
 
@@ -53,3 +53,9 @@ GitHub returned `administration=write; repository_creation=write` in its accepte
 The supplied credential can authenticate and read BOLD repository metadata. That check alone did not establish creation access. BOLD end-to-end publication remains blocked by this GitHub refusal. After access is corrected, retry the saved evaluator's publication; no model build is needed.
 
 Civo health returned HTTP 200. Anonymous entry redirected to email login, and anonymous access to the test evaluator returned 404. The temporary operator test session was removed at the end of the test.
+
+## Permission retry succeeded
+
+After the owner updated the token permissions, publication of the same tested release succeeded. No new model build was needed. The private repository is [BOLD publication acceptance](https://github.com/bold-lab-ai/lite-eval-bold-publication-acceptance-2c413be2), release `v1`, commit `fd734263e9a3e08c706987f08c2f1d8958d25937`.
+
+The downloaded GitHub ZIP was 23,274 bytes. Its revision matched the release. It returned fitness 16.0 over three seeds for a separate valid input and rejected a boolean input. The GitHub credential was absent from the release files. The earlier HTTP 403 blocker is resolved.

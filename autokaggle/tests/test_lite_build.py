@@ -959,3 +959,52 @@ def test_downloaded_git_archive_scores_without_git_metadata(harness, monkeypatch
         (unpacked / 'toy_adapter.py').write_text('raise RuntimeError("changed")')
         rejected = subprocess.run([sys.executable, 'evaluate.py', '--artifact', 'fixtures/valid/predictions.csv'], cwd=unpacked, capture_output=True, text=True)
         assert rejected.returncode == 1 and 'differs from the release' in rejected.stderr
+
+
+@pytest.mark.parametrize('phase', ['build', 'publication'])
+def test_poll_rechecks_completion_before_reporting_interruption(harness, monkeypatch, phase):
+    """The saved row can be older than the in-memory worker registry."""
+    import copy
+    app, _, _ = harness
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        initial = build(client, path)
+        assert initial['status'] == 'ready', initial
+        store = app.state.store
+        completed = lite_build._reload(store, identifier)
+        build_id = completed['lite_evaluator']['builds'][-1]['id']
+        old = copy.deepcopy(completed)
+        record = old['lite_evaluator']['builds'][-1]
+        if phase == 'build':
+            record.update(status='testing', stage='Scoring the examples from a fresh clone')
+            lite_build._RUNNING.add(build_id)
+        else:
+            record['publication'] = {'status': 'publishing', 'project_id': identifier}
+            completed['lite_evaluator']['builds'][-1]['publication'] = {'status': 'published', 'project_id': identifier}
+            lite_build._PUBLISHING.add(identifier)
+        store.save(old)
+        original = lite_build.view
+        first = True
+
+        def finish_between_read_and_view(project, *args, **kwargs):
+            nonlocal first
+            if first:
+                first = False
+                with store.lock(identifier):
+                    store.save(completed)
+                    lite_build._RUNNING.discard(build_id)
+                    lite_build._PUBLISHING.discard(identifier)
+            return original(project, *args, **kwargs)
+
+        monkeypatch.setattr(lite_build, 'view', finish_between_read_and_view)
+        try:
+            response = client.get(path + '/evaluator')
+            assert response.status_code == 200
+            result = response.json()
+            assert result['status'] == 'ready' and result['release'], result
+            assert not result['release'].get('interrupted')
+            if phase == 'publication':
+                assert result['release']['publication']['status'] == 'published'
+        finally:
+            lite_build._RUNNING.discard(build_id)
+            lite_build._PUBLISHING.discard(identifier)
