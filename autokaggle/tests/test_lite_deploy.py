@@ -123,3 +123,10 @@ def test_hosted_source_bundle_starts_without_the_build_image_and_pins_the_git_li
     import json
     started = json.loads(done.stdout.strip().splitlines()[-1])
     assert started == {"kind": "docker", "available": [False, "Evaluator builds are not installed on this server."], "page": 200}
+
+
+def test_deploy_keeps_the_github_token_off_the_cluster_when_publishing_is_off():
+    import inspect
+    from autokaggle.deploy import lite_web
+    body = inspect.getsource(lite_web.main)
+    assert body.index('private.pop("AUTOKAGGLE_LITE_GITHUB_TOKEN", None)') < body.index("for item in resources(")

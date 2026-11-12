@@ -40,6 +40,9 @@
     const active = ready(), blocked = busy();
     for (const id of ["sources-button", "send-message", "build-package", "retry-request", "continue-round"]) $(id).disabled = !active || blocked;
     $("message-input").disabled = !active || blocked;
+    const opening = active ? intake() : null;
+    $("attach-paper").hidden = !opening || opening.step !== "paper"; $("attach-paper").disabled = blocked;
+    $("message-input").placeholder = opening ? "Paste a link, or answer in a sentence…" : "Describe your question, answer, or what you want to change…";
     $("send-message").disabled ||= !$("message-input").value.trim();
     $("package-button").disabled = !active;
     $("results-button").disabled = !active;
@@ -123,7 +126,7 @@
     const data = state.data; if (!data) { renderChecklist(); controls(); return; }
     $("challenge-title").textContent = data.title || "Untitled research"; document.title = (data.title || "Research") + " · BOLD AutoKaggle Lite";
     $("welcome").hidden = true;
-    const messages = data.messages || [], key = JSON.stringify(messages);
+    const opening = intake(), messages = opening ? [{ role: "assistant", content: intakeText.paper }, ...opening.log] : data.messages || [], key = JSON.stringify(messages);
     if (state.messageKey !== key) {
       const transcript = $("transcript"), nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 120;
       const root = $("messages"); root.replaceChildren();
@@ -132,7 +135,7 @@
         if (message.role !== "user") { const mark = el("img"); mark.src = "/static/bold-butterfly.svg"; mark.alt = ""; role.append(mark); }
         role.append(el("span", message.role === "user" ? "You" : "BOLD AutoKaggle Lite")); row.append(role, el("div", message.content || "", "message-content")); root.append(row);
       }
-      if (!messages.length) root.append(el("p", "Share your research question, or add a paper and repository to start from existing work.", "empty"));
+      if (!messages.length) root.append(el("p", "Share your research question to continue.", "empty"));
       if (nearBottom || !state.messageKey) transcript.scrollTop = transcript.scrollHeight; state.messageKey = key;
     }
     $("proposal-banner").hidden = !data.proposal; $("proposal-summary").textContent = data.proposal?.summary || "Review the source-backed proposal before adding it to the definition.";
@@ -179,7 +182,7 @@
       const generation = state.generation; state.busy = true; controls(); modalError();
       try {
         const data = await api("/api/lite/projects", { method: "POST", body: JSON.stringify({ title: title.input.value.trim(), organizer_email: email.input.value.trim(), storage_accepted: true }) });
-        if (generation !== state.generation) return; dialog.close(); state.busy = false; await openSession(data.id); showSources();
+        if (generation !== state.generation) return; dialog.close(); state.busy = false; await openSession(data.id); $("message-input").focus();
       } catch (error) { if (generation === state.generation) await failure(error); }
       finally { if (generation === state.generation) { state.busy = false; controls(); } }
     });
@@ -230,8 +233,8 @@
     } return list;
   }
   function showSources() {
-    if (!ready()) return; showDialog("sources", "Start from a paper and repository", "WARM START");
-    content.append(el("p", "The agent reads the paper and selected repository files. Review its proposal before the extracted facts become part of your definition."));
+    if (!ready()) return; showDialog("sources", "Sources", "PAPER AND REPOSITORY");
+    content.append(el("p", "Add another paper or repository here. The agent reads the paper and selected repository files. Review its proposal before the extracted facts become part of your definition."));
     const form = el("form"), paper = field("Paper URL", "paper-url", "url", "A public paper, abstract, or direct PDF link."), repo = field("Public GitHub repository", "repository-url", "url", "The import records the exact commit it reads."), pdf = field("Or upload a paper PDF", "paper-file", "file", "PDF only, up to 16 MB. This is a reference paper, not a dataset."), brief = field("What do you want to investigate? (optional)", "source-brief", "textarea", "State what should change or improve beyond the source work.");
     pdf.input.accept = ".pdf,application/pdf"; brief.input.maxLength = 30000; paper.input.placeholder = "https://arxiv.org/abs/…"; repo.input.placeholder = "https://github.com/owner/repository";
     form.append(paper.wrap, repo.wrap, pdf.wrap, brief.wrap);
@@ -329,7 +332,71 @@
   }
   async function sendMessage() {
     const message = $("message-input").value.trim(); if (!message || busy() || !ready()) return;
+    if (intake()) { $("message-input").value = ""; stored(draftKey(), null); await answerIntake(message); return; }
     await mutate("/message", { message }, { label: "Sending your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
+  }
+  // Opening questions. A new session starts by asking, in the conversation, whether there is a paper and a repository.
+  // The answers are kept in this browser tab until the first request is sent; the saved transcript then takes over.
+  const intakeText = {
+    paper: "Is this work based on a paper? Paste its link or attach the PDF. If there is no paper, say so.",
+    repository: "Is there a code repository for it? Paste its public GitHub link. If there is none, say so.",
+    question: "What do you want to investigate? One or two sentences are enough."
+  };
+  const intakeKey = () => "autokaggle-lite-intake:" + state.id;
+  function intake() {
+    const data = state.data;
+    // A new session holds only the service's greeting. The opening questions take its place until the researcher's first request is saved.
+    if (!state.id || !data || data.messages?.some(message => message.role !== "assistant") || data.sources?.length || data.proposal || data.status === "working") return null;
+    if (state.intake?.id !== state.id) {
+      let saved; try { saved = JSON.parse(stored(intakeKey()) || "null"); } catch (_) {}
+      state.intake = { step: "paper", paper: "", repository: "", brief: "", pdf: "", done: {}, log: [], ...(saved || {}), id: state.id, file: null };
+      // A reloaded page cannot keep a chosen file. Ask for the paper again.
+      if (state.intake.pdf) { state.intake.pdf = ""; state.intake.done.paper = false; state.intake.step = "paper"; state.intake.log.push({ role: "assistant", content: "The page was reloaded, so the attached PDF is gone. " + intakeText.paper }); }
+    }
+    return state.intake;
+  }
+  function saveIntake() { const { file, id, ...kept } = state.intake; stored(intakeKey(), JSON.stringify(kept)); }
+  async function answerIntake(text, file) {
+    const it = intake(); if (!it || busy()) return;
+    const say = (role, content) => it.log.push({ role, content }); let note = "";
+    if (file) {
+      say("user", "Attached " + file.name);
+      if (!file.name.toLowerCase().endsWith(".pdf") || file.size > 16 * 1024 * 1024) note = "That file cannot be used. Choose a PDF of 16 MB or less. ";
+      else { it.file = file; it.pdf = file.name; it.paper = ""; it.done.paper = true; }
+    } else {
+      say("user", text);
+      const links = (text.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(link => link.replace(/[.,;:!?]+$/, ""));
+      const repository = links.find(link => /^https?:\/\/(www\.)?github\.com\/[^\/\s]+\/[^\/\s#?]+/i.test(link)), paper = links.find(link => link !== repository);
+      const none = /^\s*(no|none|nope|n\/a|not yet|nothing)\b/i.test(text) || /\b(no|not a|without|don't have|do not have)\b[^.]{0,20}\b(paper|preprint|publication|repo|repository|code|github|link)\b/i.test(text);
+      if (repository) { it.repository = repository; it.done.repository = true; }
+      const fresh = paper && !it.done.paper;  // A link in a later answer does not replace the paper already given.
+      if (fresh) { it.paper = paper; it.done.paper = true; }
+      if (it.step === "paper" && !fresh) {
+        if (none && !repository) it.done.paper = true;
+        else if (!repository && text.length >= 60 && !it.brief) { it.brief = text; note = "I will use that as your research question. "; }
+        else if (!repository) note = "I did not find a link. ";
+      } else if (it.step === "repository" && !repository) {
+        if (none) it.done.repository = true; else note = links.length ? "I can read public GitHub repositories only. " : "I did not find a GitHub link. ";
+      } else if (it.step === "question") it.brief = text;
+    }
+    it.step = !it.done.paper ? "paper" : !it.done.repository ? "repository" : !it.brief ? "question" : "send";
+    if (it.step !== "send") { say("assistant", note + intakeText[it.step]); saveIntake(); state.messageKey = ""; render(); $("transcript").scrollTop = $("transcript").scrollHeight; return; }
+    saveIntake(); state.messageKey = ""; render();
+    const generation = state.generation;
+    if (it.file) {
+      state.busy = true; controls();
+      try { const formData = new FormData(); formData.append("file", it.file); const data = await api(path("/paper"), { method: "POST", body: formData }); if (generation !== state.generation) return; state.data = data; it.file = null; }
+      catch (error) { if (generation === state.generation) { await failure(error); restartIntake(it, "The PDF could not be read. "); } return; }
+      finally { if (generation === state.generation) { state.busy = false; controls(); } }
+    }
+    const sent = () => { stored(intakeKey(), null); state.intake = null; $("transcript").scrollTop = $("transcript").scrollHeight; };
+    if (it.paper || it.repository || it.pdf) await mutate("/import", { paper_url: it.paper, repository_url: it.repository, brief: it.brief }, { label: "Reading the source material…", after: sent });
+    else await mutate("/message", { message: it.brief }, { label: "Sending your answer…", after: sent });
+    if (generation === state.generation && state.intake === it && intake() === it) restartIntake(it, "That did not go through. Check the links. ");
+  }
+  function restartIntake(it, note) {
+    Object.assign(it, { step: "paper", paper: "", repository: "", pdf: "", file: null, done: {} });
+    it.log.push({ role: "assistant", content: note + intakeText.paper }); saveIntake(); state.messageKey = ""; render();
   }
   async function signOut() {
     if (state.busy) return; state.busy = true; controls();
@@ -411,6 +478,8 @@
     } catch (error) { if (generation === state.generation) await failure(error); }
     finally { if (generation === state.generation) { state.busy = false; controls(); } }
   }
+  $("attach-paper").addEventListener("click", () => $("paper-attach").click?.());
+  $("paper-attach").addEventListener("change", () => { const file = $("paper-attach").files?.[0]; $("paper-attach").value = ""; if (file) answerIntake("", file); });
   $("message-form").addEventListener("submit", event => { event.preventDefault(); sendMessage(); });
   $("message-input").addEventListener("input", () => { if (state.id) stored(draftKey(), $("message-input").value); controls(); });
   $("message-input").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); } });

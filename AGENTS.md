@@ -155,6 +155,10 @@ Use descriptive branch names without AI product or model names. Keep those names
 
 ### Lite requirements before merge — 10 November 2026
 
+Changed at the project owner's request on 12 November 2026: for Internal, a tested evaluator that every collaborator can download is sufficient. A separate GitHub repository for each problem is optional. Lite can still publish one when an owner account is configured. The clean-clone scoring test below still applies to the downloadable release.
+
+Requested by the project owner on 12 November 2026: start a new Internal session by asking, in the conversation, whether there is a paper and whether there is a repository. Do not use a separate start control below the message box for this.
+
 - Each onboarded Lite problem must have its own GitHub evaluator repository and a versioned YAML evaluation config. Keep the repo accessible to the lab members who work on the problem. Pin the evaluator release to a Git commit. Include the task adapter, input contract, dependency setup, required asset references, and one documented local scoring command.
 - Before marking a benchmark ready, clone its evaluator repository into a clean directory and score a known sample of the declared artifact type. A collaborator must be able to supply a compatible checkpoint, policy, or output and receive the defined fitness and a machine-readable result. Use the declared metric, seeds, and failure rules. A template adapter or a run that requires files from the author's laptop does not pass. Evaluation runs on the collaborator's machine. It requires no hosted evaluator on Civo.
 - Make BOLD OS the home for Lite onboarding. Put each problem in the Problem Bank and link its evaluator version under Benchmarks. Collaborators open and resume onboarding from BOLD OS. Use stable IDs and update the same records on retry. Keep Lite's backend as needed to support this workflow. Replace the standalone challenge page as the destination for an onboarded problem.

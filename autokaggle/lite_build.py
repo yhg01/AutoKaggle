@@ -679,7 +679,10 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None,
 
     @app.post("/api/projects/{project_id}/lite/evaluator/build")
     def start(project_id: str, body: Start, request: Request):
-        lite_get(project_id, request)
+        saved = lite_get(project_id, request)
+        # A repeated request is answered from the saved record, even while the build holds the project lock.
+        if body.request_id in (saved.get("lite_evaluator") or {}).get("requests", {}):
+            return view(saved, runtime, github)
         with editing(project_id, request) as item:
             state = _state(item)
             if body.request_id in state["requests"]:

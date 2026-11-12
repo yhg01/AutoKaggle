@@ -33,8 +33,9 @@ sessions were idle and the database passed its integrity check.
 
 ## GitHub publishing settings
 
-`deploy` reads an optional token from `$HOME/.config/autokaggle/lite-github.env` (`AUTOKAGGLE_LITE_GITHUB_TOKEN`) and
-places it only in the `lite-secrets` Secret. `deploy --github-owner NAME` sets `AUTOKAGGLE_LITE_GITHUB_OWNER` in
+Publishing is optional for Internal and is off on the hosted service. A downloadable release is sufficient. When an
+owner is set, `deploy` reads a token from `$HOME/.config/autokaggle/lite-github.env` (`AUTOKAGGLE_LITE_GITHUB_TOKEN`) and
+places it only in the `lite-secrets` Secret. Without an owner the token is not sent to the cluster. `deploy --github-owner NAME` sets `AUTOKAGGLE_LITE_GITHUB_OWNER` in
 `lite-config`. The owner is kept on later deployments unless the option is given again; an empty value turns
 publishing off. Both values enter the deployment's settings hash, so a change restarts Lite. The pinned runtime
 packages include `dulwich` and `urllib3` for the token route. Hosted Lite cannot build evaluators, so these settings

@@ -137,6 +137,8 @@ def main():
             prior = next((x.get("data", {}) for x in configs if x["metadata"]["name"] == "lite-config"), {})
             members = args.members if args.members is not None else prior.get("AUTOKAGGLE_LITE_MEMBERS", MEMBERS)
             owner = args.github_owner if args.github_owner is not None else prior.get("AUTOKAGGLE_LITE_GITHUB_OWNER", "")
+            if not owner:  # Without an owner publishing is off. Keep an unused credential off the cluster.
+                private.pop("AUTOKAGGLE_LITE_GITHUB_TOKEN", None)
             for item in resources(source, digest, private, addresses, members=members, github_owner=owner):
                 kube.run("apply", "--server-side", "--field-manager=autokaggle-lite", "-f", "-", document=item)
             print(json.dumps({"host": HOST, "source_sha256": digest, "source_bytes": len(source), "github_owner": owner or None,
