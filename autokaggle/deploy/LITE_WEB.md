@@ -337,3 +337,19 @@ Civo volume expansion requires an offline volume. A larger PVC request does not 
 ## Temporary email access — 12 November 2026
 
 The owner approved access for any verified email while BOLD OS sign-in is prepared. Set `AUTOKAGGLE_LITE_ACCESS_POLICY=verified_email`; keep `AUTOKAGGLE_PRIVATE_MODE=1`. Existing member lists are retained but are not required in this mode. `members` restores the previous admission rule. The rollout command accepts `--lite-access-policy verified_email` only for the Lite service. It preserves the existing build runtime and other settings. See [the collaborator plan](../docs/LITE_BOLD_OS_AUTH_PLAN.md).
+
+
+## Automatic evaluator publication — 12 November 2026
+
+The approved BOLD connection uses `AUTOKAGGLE_LITE_GITHUB_OWNER=bold-lab-ai` and the private token file already configured for Lite. Enable automatic publication with the existing-service updater:
+
+```sh
+python -m autokaggle.deploy.rollout lite \
+  --model-env "$HOME/.config/autokaggle/deepseek.env" \
+  --github-env "$HOME/.config/autokaggle/lite-github.env" \
+  --github-owner bold-lab-ai --auto-publish
+```
+
+The updater preserves the current access policy, runtime mounts, and database. It waits for active builds and publications to finish before replacing the service. The token stays in `lite-secrets`; build jobs receive no GitHub credential. Later updates preserve the automatic setting unless `--no-auto-publish` is supplied.
+
+The tested commit is published only after acceptance checks pass. Publication failures retain the local release and show a retry action. A service restart during publication also shows a retry action. Retrying reuses the repository and release tag. This version does not resume an interrupted publication without a retry request. GitHub access is required to download the private repository or its ZIP.

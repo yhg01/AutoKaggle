@@ -81,6 +81,7 @@ test("Starting a build sends one request identity and polls the saved build",asy
   return url.includes("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;};
  await h.click("evaluator-button");await h.clickText("Build evaluator");const call=h.calls.find(c=>c.url.endsWith("/lite/evaluator/build"));
  assert.deepEqual(Object.keys(JSON.parse(call.options.body)),["request_id"]);assert.match(h.$("dialog-content").textContent,/Building/);
+ await h.clickText("Build evaluator");assert.equal(h.calls.filter(c=>c.url.endsWith("/evaluator/build")).length,1);
  assert.ok([...h.timers.values()].some(t=>t.ms===3000));});
 test("A ready evaluator shows the bound release, its measured fitness, and the scoring command",async()=>{const h=harness();await flush();
  const build={status:"ready",evaluator_version:2,contract_version:"v1",tests:[{name:"valid example",passed:true,detail:"Observed 1.0; expected 1.0."}],model:{agent:"opencode",name:"deepseek-v4-pro",provider:"DeepSeek",reasoning:"medium",requests:41},runtime:{kind:"docker"},
@@ -101,7 +102,7 @@ test("A tested release is published on request and then shows its private reposi
  await h.clickText("Publish to GitHub");text=h.$("dialog-content").textContent;
  assert.equal(h.calls.filter(c=>c.url.endsWith("/lite/evaluator/publish")).length,1);
  assert.match(text,/Published to the private GitHub repository bold-test\/lite-eval-t-12345678/);assert.match(text,/git clone https:\/\/github\.com\/bold-test\/lite-eval-t-12345678\.git evaluator/);
- assert.match(text,/lock file does not name this repository/);assert.match(text,/Publish again/);});
+ assert.match(text,/lock file does not name this repository/);assert.doesNotMatch(text,/Publish again/);});
 test("The evaluator dialog offers no publishing control when the server has none",async()=>{const h=harness();await flush();
  const build={status:"ready",evaluator_version:1,contract_version:"v1",tests:[],published:null,evidence:{commit:"c".repeat(40),tag:"v1",fixture:"f",expected_fitness:1,observed_fitness:1,command:"python evaluate.py --artifact f"},bundle_url:"/api/projects/p1/lite/evaluator/bundle",config_url:"/api/projects/p1/lite/evaluator/config",readme_url:"/api/projects/p1/lite/evaluator/readme.md"};
  const view=evaluatorView({status:"ready",draft:false,release:build,builds:1,publishing:{available:false,reason:"Publishing needs a GitHub login on this server. Sign in with gh, or provide GH_TOKEN.",owner:"bold-test",repository:null}});
@@ -156,3 +157,18 @@ test("Opening answers survive a reload, and a failed first request asks again",a
  assert.match(h.$("messages").textContent,/That did not go through\. Check the links\. Is this work based on a paper\?/);assert.equal(h.$("attach-paper").hidden,false);});
 test("A saved session with messages does not show the opening questions",async()=>{const h=harness();await flush();assert.doesNotMatch(h.$("messages").textContent,/Is this work based on a paper/);assert.equal(h.$("attach-paper").hidden,false);
  await h.input("message-input","A correction.");await h.click("send-message");assert.deepEqual(posts(h).map(p=>p[0]),["message"]);});
+
+ test("Automatic publication keeps polling and offers retry and a pinned ZIP",async()=>{const h=harness();await flush();
+ const release={status:"ready",evaluator_version:1,tests:[],publication:{status:"publishing"},published:null,
+ evidence:{commit:"c".repeat(40),tag:"v1",fixture:"f",expected_fitness:1,observed_fitness:1,command:"python evaluate.py --artifact f"},
+ bundle_url:"/api/projects/p1/lite/evaluator/bundle",config_url:"/api/projects/p1/lite/evaluator/config",readme_url:"/api/projects/p1/lite/evaluator/readme.md"};
+ let view=evaluatorView({status:"ready",draft:false,release,publishing:{automatic:true,available:true,owner:"bold-test"}});
+ h.handler=async(url,options)=>{if(url.endsWith("/evaluator/publish"))view={...view,release:{...release,publication:{status:"published"},published:{url:"https://github.com/bold-test/eval",zip_url:"https://github.com/bold-test/eval/archive/"+"c".repeat(40)+".zip",repository:"bold-test/eval",tag:"v1",address_recorded:true}}};return url.includes("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;};
+ await h.click("evaluator-button");assert.match(h.$("dialog-content").textContent,/Publishing the tested evaluator/);
+ assert.ok([...h.timers.values()].some(t=>t.ms===3000));
+ await h.clickText("Rebuild evaluator");assert.equal(h.calls.filter(c=>c.url.endsWith("/evaluator/build")).length,0);
+ view={...view,release:{...release,publication:{status:"failed",error:"The service restarted."}}};
+ await h.click("evaluator-button");assert.match(h.$("dialog-content").textContent,/Retry publication/);
+ await h.clickText("Retry publication");assert.match(h.$("dialog-content").textContent,/Download GitHub ZIP/);
+ assert.doesNotMatch(h.$("dialog-content").textContent,/Retry publication/);
+ });

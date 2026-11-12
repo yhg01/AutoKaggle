@@ -324,7 +324,7 @@ def push_release(repo, repository, commit, version, github):
     """Push main and the release tags in one all-or-nothing push without force, then confirm GitHub shows the tested commit."""
     tag, main = f"refs/tags/v{version}", "refs/heads/main"
     local = {name: value for name, value in github.local_refs(repo).items() if name == main or re.fullmatch(r"refs/tags/v\d+", name)}
-    if local.get(tag) != commit or main not in local:
+    if local.get(tag) != commit or local.get(main) != commit:
         raise PublishError("The saved release does not match its tested commit. Build the evaluator again.")
     before = github.remote_refs(repo, repository)
     for name, value in local.items():

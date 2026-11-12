@@ -14,7 +14,9 @@ from . import web, lite_jobs
 from .probe_cluster import private_kubeconfig, Kubectl
 
 
-def update(kube, service, source, digest, model, *, build_image=None, github_owner=None, github_token=None, lite_access_policy=None):
+def update(kube, service, source, digest, model, *, build_image=None, github_owner=None, github_token=None, lite_access_policy=None, auto_publish=None):
+    if auto_publish is not None and service != 'lite':
+        raise ValueError('Automatic evaluator publication can only be changed on the Lite service.')
     if lite_access_policy is not None and (service != 'lite' or lite_access_policy not in {'members', 'verified_email'}):
         raise ValueError('The Lite access policy can only be changed on the Lite service.')
     namespace=web.NAMESPACE
@@ -33,6 +35,7 @@ for i,b in rows:
  for key in ('conversation','lite','onboarding','_source_import'):
   if d.get(key,{}).get('status') in ('queued','working','running') or d.get(key,{}).get('_inflight'):active.append(i)
  if any(b.get('status') in ('queued','building','testing') for b in d.get('lite_evaluator',{}).get('builds',[])):active.append(i)
+ if any((b.get('publication') or {}).get('status') in ('queued','publishing') for b in d.get('lite_evaluator',{}).get('builds',[])):active.append(i)
 if active:raise SystemExit('Active project jobs: retry after they finish.')
 target=p.parent/('backup-'+time.strftime('%Y%m%d-%H%M%S')+'.sqlite3')
 c.backup(sqlite3.connect(target));target.chmod(0o600)
@@ -48,6 +51,7 @@ print(json.dumps({'projects':len(rows),'backup':target.name,'bodies_sha256':hash
     settings={'OPENAI_BASE_URL':'https://api.deepseek.com','AUTOKAGGLE_MODEL':'deepseek-v4-pro',
               'AUTOKAGGLE_LITE_PROVIDER':'deepseek','AUTOKAGGLE_LITE_DEEPSEEK_MODEL':'deepseek-v4-pro'}
     if github_owner:settings['AUTOKAGGLE_LITE_GITHUB_OWNER']=github_owner
+    if auto_publish is not None:settings['AUTOKAGGLE_LITE_AUTO_PUBLISH']='1' if auto_publish else '0'
     if lite_access_policy is not None:settings['AUTOKAGGLE_LITE_ACCESS_POLICY']=lite_access_policy
     changes={'volumes':[{'name':'source','configMap':{'name':name}}]}
     if build_image:
@@ -73,11 +77,12 @@ def main():
     p.add_argument('service',choices=['web','lite']);p.add_argument('--model-env',type=Path,required=True)
     p.add_argument('--build-image');p.add_argument('--github-owner');p.add_argument('--github-env',type=Path)
     p.add_argument('--lite-access-policy',choices=['members','verified_email'])
+    p.add_argument('--auto-publish',action=argparse.BooleanOptionalAction,default=None)
     a=p.parse_args();model=dotenv_values(a.model_env)
     if not model.get('DEEPSEEK_API_KEY'):raise ValueError('The private model file has no DeepSeek key.')
     token=(dotenv_values(a.github_env).get('AUTOKAGGLE_LITE_GITHUB_TOKEN') if a.github_env else None)
     source,digest=web.bundle()
     with private_kubeconfig() as config:
-        print(json.dumps(update(Kubectl(config),a.service,source,digest,model,build_image=a.build_image,github_owner=a.github_owner,github_token=token,lite_access_policy=a.lite_access_policy)))
+        print(json.dumps(update(Kubectl(config),a.service,source,digest,model,build_image=a.build_image,github_owner=a.github_owner,github_token=token,lite_access_policy=a.lite_access_policy,auto_publish=a.auto_publish)))
 
 if __name__=='__main__':main()

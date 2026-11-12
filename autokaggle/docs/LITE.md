@@ -10,11 +10,11 @@ One accepted contract produces a private website preview, README, research ZIP, 
 
 **BOLD OS as the project home.** Collaborators start and resume Lite from BOLD OS. The Problem Bank holds the problem record and its status. Benchmarks links the problem to the evaluator repo and pinned version. Show incomplete work as a draft until the scoring test passes. Preserve the BOLD OS record IDs and repo ID so a retry updates the same records. Lite can supply the interview and build backend. The existing standalone preview is part of the current implementation and does not satisfy this requirement.
 
-These are merge requirements. The evaluator build and its clean-clone scoring check are implemented for local use and the configured Internal Civo build service; see **Build evaluator** below. Publishing a tested release to a private GitHub repository is implemented; see **Publish to GitHub**. It has run only under one developer account. Publishing under `bold-lab-ai` with the lab's template and access list, and a write integration for the BOLD OS sections, are still needed.
+These are merge requirements. The evaluator build and its clean-clone scoring check are implemented for local use and the configured Internal Civo build service; see **Build evaluator** below. Publishing a tested release to a private GitHub repository is implemented; see **Publish to GitHub**. Automatic publication uses the configured BOLD GitHub connection. Project access lists and a write integration for the BOLD OS sections remain separate work.
 
 ## Build evaluator
 
-After a contract is accepted, **Evaluator → Build evaluator** produces a tested evaluator release for that exact contract version. A build publishes nothing; publishing is a separate action. See the [10 November build record](LITE_EVALUATOR_BUILD_2026-11-10.md) for what has and has not been tested.
+After a contract is accepted, **Evaluator → Build evaluator** produces a tested evaluator release for that exact contract version. On the configured Civo Lite service, a successful build automatically publishes the tested commit to a private BOLD GitHub repository. See the [10 November build record](LITE_EVALUATOR_BUILD_2026-11-10.md) for what has and has not been tested.
 
 1. **Freeze.** The build reads the frozen `contract.json` of the current package and binds to its version and digest. It derives the metric direction: `success_rate`, `accuracy`, and `mean_score` are maximized; `rmse` and `mae` are minimized. A local-only source, private scoring targets, or a reserved adapter module name stops the build with a named decision before any model call.
 2. **Implement.** A coding agent (opencode, pinned in `deploy/lite-build.Dockerfile`) works in a disposable workspace. It writes the task adapter, an artifact loader for policies and checkpoints, `requirements.lock`, `assets.json`, three example artifacts, their expected scores, and a separate calculation of those scores. It must report a blocker instead of inventing a decision that affects scoring. The instructions are in `prompts/lite_build.md`.
@@ -45,7 +45,9 @@ Limits of this version:
 
 ## Publish to GitHub
 
-**Evaluator → Publish to GitHub** pushes the tested release for the current contract to a private repository for that problem. It is available when `AUTOKAGGLE_LITE_GITHUB_OWNER` names the account or organization that holds evaluator repositories and the server has a usable GitHub credential.
+Automatic publication starts only after all release checks pass. Failed builds create no repository. Each problem keeps one repository; tested updates add `v1`, `v2`, and later tags. A failed or interrupted publication keeps the tested local release available. Retry checks the remote state and reuses the same repository. An older contract is never published as the current release. Existing sessions are not published in bulk when this setting is enabled.
+
+With `AUTOKAGGLE_LITE_AUTO_PUBLISH=1`, a successful evaluator check automatically publishes the tested release for the current contract to a private repository for that problem. The dialog shows publication progress, the repository link, and a ZIP download pinned to the tested commit. **Retry publication** retries a failed push without another build. Services with automatic publication disabled retain **Evaluator → Publish to GitHub**. It is available when `AUTOKAGGLE_LITE_GITHUB_OWNER` names the account or organization that holds evaluator repositories and the server has a usable GitHub credential.
 
 - **One repository per problem.** The name is `lite-eval-<title>-<first eight characters of the problem ID>`. It is fixed at the first build and does not follow later title changes. The repository ID and URL are saved on the problem before the push, so a retry reuses the same repository.
 - **The tested commit, unchanged.** The push carries `main` and the `v<N>` release tags in one all-or-nothing push, without force. Afterwards the application reads the refs back from GitHub and requires the tested commit.
@@ -66,7 +68,7 @@ For hosted Lite, the deployer reads the token from the private file `$HOME/.conf
 Limits of this version:
 
 - Hosted builds require the Internal Kubernetes runtime described in `deploy/LITE_WEB.md`. Admission follows the configured Lite access policy. They do not run researcher training jobs.
-- Repository access is not managed. The creator is the only member until someone adds collaborators on GitHub. The project's access list is not yet applied.
+- Repository access follows GitHub organization and repository permissions. Lite does not add collaborators automatically. Email access to Lite does not grant access to a private GitHub repository.
 - The lab-approved repository template and its project-tracking files are not applied.
 - BOLD OS Problem Bank and Benchmarks records are not written.
 - After a repository is transferred or renamed, publishing follows it by ID. Earlier releases keep the old address in their lock file.
@@ -190,3 +192,7 @@ Imports allow up to 256 MiB compressed, 1 GiB extracted, 40,000 files, and 128 M
 ## Conversation and task-specific requirements
 
 The agent asks for missing decisions in chat. Secondary functions are in **Session tools**. Once the relevant step is ready, the chat shows the package, evaluator, or result action. Custom scores require a metric name, exact definition, and direction. Optimization requires constraints. Forecasting requires a time and leakage policy. Generation requires a reference and sample policy. Environment tasks retain episode, seed, and termination requirements. These additions do not relax Full's execution or private-answer controls.
+
+### Downloaded evaluator ZIP
+
+The GitHub ZIP of a new release can run without a Git checkout. `revision.txt` uses Git's [archive substitution](https://git-scm.com/docs/gitattributes#_export_subst) to record the release commit. The scorer checks the release file digests before execution. The revision is provenance metadata, not a signature or proof of independent reproduction. The generic researcher-code runner still requires a clean Git checkout; the archive option applies only to a complete evaluator release with its matching lock and contract.

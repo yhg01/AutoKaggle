@@ -55,7 +55,10 @@
     $("thinking-text").textContent = state.loading ? "Opening the saved session…" : state.data?.stage || "Saving your request…";
     $("composer-hint").textContent = !active ? "Create a session to start." : blocked ? "Your request is in progress. You can return to this session later." : "Enter to send · Shift + Enter for a new line";
     $("session-state").textContent = state.data?.status === "working" ? "Agent working" : state.data?.package?.status === "stale" ? "Package needs an update" : state.data?.ready ? "Definition recorded" : "Internal draft";
-    for (const button of content.querySelectorAll("[data-mutation]")) button.disabled = blocked || state.auth || (button.dataset.packageRequired === "true" && state.data?.package?.status !== "ready");
+    for (const button of content.querySelectorAll("[data-mutation]")) button.disabled = blocked || state.auth ||
+      (button.dataset.packageRequired === "true" && state.data?.package?.status !== "ready") ||
+      (button.dataset.evaluatorAction && (evaluatorActive(state.evaluator) ||
+        (button.dataset.evaluatorAction === "build" && (!state.evaluator?.available || !state.evaluator?.contract.accepted))));
   }
   function clearPrivate() {
     pendingFiles = []; renderAttachments();
@@ -487,7 +490,7 @@
     failed: ["Draft · the build did not pass", "The evaluator stays a draft. The cause is shown below."],
     stale: ["Draft · the contract changed", "The contract changed after the last tested evaluator. Build again for the current contract."]
   };
-  const evaluatorActive = view => ["queued", "building", "testing"].includes(view?.status);
+  const evaluatorActive = view => ["queued", "building", "testing"].includes(view?.status) || ["queued", "publishing"].includes(view?.release?.publication?.status);
   function renderEvaluator(view) {
     if (state.dialog !== "evaluator" || !dialog.open) return; content.replaceChildren();
     const [label, detail] = evaluatorText[view.status] || evaluatorText.not_built, release = view.release, latest = view.latest;
@@ -500,6 +503,8 @@
       content.append(el("h3", "Tested release", "section-label"), el("p", `Evaluator version ${release.evaluator_version}, commit ${e.commit}. The example ${e.fixture} has expected fitness ${e.expected_fitness}; the fresh clone scored ${e.observed_fitness}.`));
       const pub = release.published, link = pub && safeURL(pub.url);
       if (link) { const p = el("p", "Published to the private GitHub repository "), a = el("a", pub.repository + " ↗"); a.href = link; a.target = "_blank"; a.rel = "noopener noreferrer"; p.append(a, el("span", ` at ${pub.tag}.` + (pub.address_recorded ? "" : " This release was built before its repository address was set, so its lock file does not name this repository. Rebuild and publish again to record it."))); content.append(p); }
+      if (["queued", "publishing"].includes(release.publication?.status)) content.append(el("p", "Publishing the tested evaluator to GitHub…", "hint"));
+      if (release.publication?.status === "failed") content.append(el("p", "GitHub publication needs a retry. " + release.publication.error, "extraction-notes"));
       content.append(el("pre", `git clone ${link ? link + ".git" : "evaluator.bundle"} evaluator && cd evaluator && git checkout ${tag}\npython -m venv .venv && . .venv/bin/activate\npython -m pip install -r requirements.lock\npython fetch_assets.py\n${e.command}    # expected fitness ${e.expected_fitness}\npython evaluate.py --artifact PATH --output results.json`, "contract"));
     }
     const shown = release || latest;
@@ -508,16 +513,19 @@
     if (view.earlier_releases?.length) content.append(el("p", "Earlier tested releases are kept: " + view.earlier_releases.map(r => `version ${r.evaluator_version} (contract ${r.contract_version})`).join(", ") + ".", "hint"));
     const actions = el("div", null, "dialog-actions");
     if (release) for (const [text, url, download] of [["Download release ↓", release.bundle_url, true], ["Download YAML config ↓", release.config_url, true], ["Read README ↗", release.readme_url, false]]) { const a = artifactLink(text, url, download); if (a) actions.append(a); }
+    const zip = safeURL(release?.published?.zip_url);
+    if (zip) { const a = el("a", "Download GitHub ZIP ↓", "button secondary"); a.href = zip; a.target = "_blank"; a.rel = "noopener noreferrer"; actions.append(a); }
     const start = button(release ? "Rebuild evaluator" : "Build evaluator", buildEvaluator, true, true);
+    start.dataset.evaluatorAction = "build";
     start.disabled = evaluatorActive(view) || !view.available || !view.contract.accepted || busy(); actions.append(start);
     const publishing = view.publishing;
-    if (release && publishing?.available) { const send = button(release.published ? "Publish again" : "Publish to GitHub", publishEvaluator, false, true); send.disabled = evaluatorActive(view) || busy(); actions.append(send); }
+    if (release && publishing?.available && (!release.published || release.publication?.status === "failed")) { const send = button(release.publication?.status === "failed" ? "Retry publication" : "Publish to GitHub", publishEvaluator, false, true); send.dataset.evaluatorAction = "publish"; send.disabled = evaluatorActive(view) || busy(); actions.append(send); }
     content.append(actions);
     if (release && publishing?.available && !release.published) content.append(el("p", publishing.repository ? `Publishing updates the private repository ${publishing.repository.name}.` : `Publishing creates a private repository under ${publishing.owner} and pushes the tested commit unchanged.`, "hint"));
     else if (release && publishing?.owner && !publishing.available) content.append(el("p", publishing.reason, "hint"));
     if (!view.available) content.append(el("p", view.unavailable_reason || "Evaluator builds are not available on this server.", "hint"));
     else if (!view.contract.accepted) content.append(el("p", "Resolve and accept the open contract decisions first.", "hint"));
-    else content.append(el("p", `A build may use up to ${view.settings.minutes} minutes and ${view.settings.requests} model requests. It publishes nothing. The release stays in this session until it is published.`, "hint"));
+    else content.append(el("p", `A build may use up to ${view.settings.minutes} minutes and ${view.settings.requests} model requests. ` + (publishing?.automatic ? "After the checks pass, the tested release is published to a private GitHub repository. Downloads need access to that repository." : "The release stays in this session until it is published."), "hint"));
   }
   async function loadEvaluator() {
     const generation = state.generation; clearTimeout(state.evaluatorPoll);
