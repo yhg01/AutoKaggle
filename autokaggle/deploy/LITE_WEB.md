@@ -353,3 +353,5 @@ python -m autokaggle.deploy.rollout lite \
 The updater preserves the current access policy, runtime mounts, and database. It waits for active builds and publications to finish before replacing the service. The token stays in `lite-secrets`; build jobs receive no GitHub credential. Later updates preserve the automatic setting unless `--no-auto-publish` is supplied.
 
 The tested commit is published only after acceptance checks pass. Publication failures retain the local release and show a retry action. A service restart during publication also shows a retry action. Retrying reuses the repository and release tag. This version does not resume an interrupted publication without a retry request. GitHub access is required to download the private repository or its ZIP.
+
+Deployment check: source `70f0b34c50cbee54bd31c242b727d441ed5b00ad7e75ca6fd5c9222596ff69a1`, implementation commit `b6999df`. The GitHub connection authenticates, but repository creation currently returns HTTP 403. The tested evaluator is saved for retry. See [the publication check](../docs/AUTO_PUBLICATION_2026-11-12.md).

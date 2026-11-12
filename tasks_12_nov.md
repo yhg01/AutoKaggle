@@ -78,5 +78,8 @@ Deployed temporary email access on 12 November at 11:22 UTC from commit `5cf7668
 - [x] Show repository, ZIP download, publication progress, and retry after failure.
 - [x] Keep the tested release after failed or interrupted publication; prevent concurrent edits during a push.
 - [x] Support scoring from GitHub ZIP downloads with a recorded revision and file integrity checks.
-- [ ] Verify live publication under yhg01, then one private BOLD repository.
-- [ ] Deploy automatic publication to Civo Lite and verify preserved sessions.
+- [x] Verify live publication under yhg01 and run the downloaded GitHub ZIP.
+- [ ] Complete BOLD publication: Civo build and all ten checks passed, but GitHub rejected repository creation with HTTP 403. Token scope/permissions need correction; retry requires no new build.
+- [x] Deploy automatic publication to Civo Lite and verify all ten existing sessions were preserved.
+
+See `autokaggle/docs/AUTO_PUBLICATION_2026-11-12.md` for the live browser test, exact deployment, and GitHub permission blocker.
