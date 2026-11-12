@@ -67,6 +67,7 @@ For hosted Lite, the deployer reads the token from the private file `$HOME/.conf
 
 Limits of this version:
 
+- Release checks test the primary fitness and declared fixtures. They do not yet test every secondary output or reference-data provenance requirement in the scientific definition. Review generated adapters before treating a result as fully compliant with that definition. A missing required diagnostic or reference identity needs a corrected evaluator release.
 - Hosted builds require the Internal Kubernetes runtime described in `deploy/LITE_WEB.md`. Admission follows the configured Lite access policy. They do not run researcher training jobs.
 - Repository access follows GitHub organization and repository permissions. Lite does not add collaborators automatically. Email access to Lite does not grant access to a private GitHub repository.
 - The lab-approved repository template and its project-tracking files are not applied.

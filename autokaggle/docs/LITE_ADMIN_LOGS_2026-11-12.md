@@ -19,7 +19,7 @@ Lite did not save provider request/response traces before this repair. Those old
 
 ## Verification
 
-- 208 Python regression checks passed; one optional Docker check was skipped. After the final validation-record change, 20 focused Python checks passed. These sets overlap.
+- Final combined Python suite: 1,536 passed, one opt-in Docker check skipped. Three expected numeric-edge warnings came from scoring tests. The final focused build/log/provider run also passed 60 checks, with the same opt-in skip; these sets overlap. Earlier Docker acceptance was run separately.
 - All 278 JavaScript checks passed after PR #18 was included. JavaScript syntax and Git whitespace checks passed.
 - Browser checks used the local admin interface with a read-only copy of the affected session and a completed acceptance build. Verified messages, correct turn count, contract fields, agent logs, test logs, and new model inputs and outputs.
 - A live DeepSeek V4 Pro interview through the browser completed in 81.53 seconds. The saved trace recorded 5,136 input tokens and 7,952 output tokens. The latter includes 6,370 reasoning tokens. The reasoning text was not saved.
@@ -36,4 +36,8 @@ The review also found a separate generated-evaluator gap. The existing acceptanc
 
 ## Deployment
 
-The previous Civo evaluator build finished and published successfully. Deploy only while all current jobs are idle. Record the final release and live checks here after deployment.
+Deployed Lite from source commit `3b31781` after all active jobs finished. Source digest: `cfe84b24cd0a0255c21aa211e9001dd3e77552403367e6fd7eb1a00b25d7e982`. Private backup: `/data/projects/backup-20261112-182255.sqlite3`. All 11 existing project bodies matched their pre-release digest. The temporary live-test project and operator login sessions were removed.
+
+The service kept private mode, temporary verified-email admission, the Kubernetes build runtime, automatic publication, and the BOLD GitHub owner. Full retained its existing deployed source. Both services had an available replica.
+
+Live API checks confirmed 27 saved messages and 10 interview turns for the affected session, a completed build log, anonymous denial, ordinary-account denial, and no provider traces in the researcher view. A new DeepSeek V4 Pro request completed in 80.54 seconds with accepted schema validation, 5,143 input tokens, and 9,726 output tokens. The output count includes 8,270 reasoning tokens; reasoning text was not saved. Browser checks were local; the deployed origin remains a separate uncompleted browser check.

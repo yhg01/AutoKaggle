@@ -91,13 +91,13 @@ See `autokaggle/docs/AUTO_PUBLICATION_2026-11-12.md` for the live browser test, 
 - [x] Capture new model requests and responses with private, bounded diagnostics.
 - [x] Add administrator-only build logs and update Civo logs during a running build.
 - [x] Check the UI with the affected saved session, a completed build, and a live DeepSeek interview.
-- [ ] Deploy after the existing Civo evaluator job finishes, then verify the live admin routes.
+- [x] Deploy after the existing Civo evaluator job finished. Live admin routes, new request traces, access denial, and preservation of all 11 project bodies passed. Source commit `3b31781`; digest `cfe84b24cd0a0255c21aa211e9001dd3e77552403367e6fd7eb1a00b25d7e982`.
 
 See `autokaggle/docs/LITE_ADMIN_LOGS_2026-11-12.md` for cause, checks, and limits. Earlier Lite provider responses were not saved and cannot be recovered.
 
 ## PR review and monitoring follow-up
 
 - [x] Review and merge PR #18 into the feature branch. GitHub file/archive links stay in chat; repository root links remain imports. A local browser test with DeepSeek V4 Pro confirmed the file-link path.
-- [ ] Complete the final combined checks, merge PR #17, and verify the Lite rollout.
+- [x] Final combined checks: 1,536 Python tests and 278 JavaScript tests passed; one opt-in Docker check was skipped. Lite rollout and live DeepSeek validation passed. PR #17 is ready for the authorized merge.
 - [x] Schedule private checks every 15 minutes through 08:00 London time on 13 November. Record only new failures or changes. The desktop app and computer must remain running.
 - [ ] Review the generated evaluator acceptance gap: primary-score fixture tests do not establish that all secondary outputs and reference-data provenance required by an accepted definition are implemented. A live generated release omitted these fields. Keep the private incident evidence outside Git. This needs a general acceptance change and a new evaluator release; do not alter the accepted scientific definition or replace a published tag.
