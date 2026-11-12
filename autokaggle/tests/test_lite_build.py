@@ -1058,7 +1058,8 @@ def test_coding_revision_reuses_plan_only_for_the_same_contract(tmp_path):
     assert not lite_build.reuse_plan(job, previous, 'a'*64, record)
 
 
-def test_resumed_plan_skips_replanning_but_still_runs_code_review(tmp_path):
+@pytest.mark.parametrize("review_timeout", [False, True])
+def test_resumed_plan_skips_replanning_but_still_runs_code_review(tmp_path, review_timeout):
     from autokaggle.tests.test_lite_quality import plan
     work = tmp_path / 'work'; work.mkdir()
     contract = {'outputs': 'Return primary and secondary scores.'}
@@ -1071,14 +1072,19 @@ def test_resumed_plan_skips_replanning_but_still_runs_code_review(tmp_path):
         def run(self, argv, mounts, cwd, env, timeout, log, label):
             prompt = argv[-1]; prompts.append(prompt)
             if 'REVIEW_TASK' in prompt:
+                if review_timeout: return None, timeout
                 report = {'status': 'pass', 'summary': 'Reviewed', 'requirements': [{'id': 'R001', 'covered': True, 'evidence': 'test_output: observed both scores'}], 'findings': []}
                 (work / 'REVIEW.json').write_text(json.dumps(report))
             else:
                 (work / 'BUILD_REPORT.json').write_text(json.dumps({'status': 'ready', 'summary': 'Built', 'blockers': [], 'decisions': []}))
             return 0, 0
     chosen = {'model': 'test', 'provider': 'deepseek', 'effort': 'medium', 'requests': 1, 'minutes': 1}
-    lite_build.run_agent(Runtime(), tmp_path, chosen, 'test-only')
+    if review_timeout:
+        with pytest.raises(ValueError, match='time allowance ended before code review'):
+            lite_build.run_agent(Runtime(), tmp_path, chosen, 'test-only')
+    else:
+        lite_build.run_agent(Runtime(), tmp_path, chosen, 'test-only')
     assert len(prompts) == 2
     assert not any('PLAN_TASK' in p for p in prompts)
     assert 'REVIEW_TASK' in prompts[-1]
-    assert (tmp_path / 'review-1.json').is_file()
+    assert (tmp_path / 'review-1.json').is_file() is not review_timeout

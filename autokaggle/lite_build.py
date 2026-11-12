@@ -599,6 +599,11 @@ def run_agent(runtime, job, chosen, key, command=None, progress=None):
                     raise ValueError(" ".join(errors))
                 (workdir / "REVIEW.json").unlink(missing_ok=True)
                 code = phase("Read REVIEW_TASK.md. Independently inspect the whole contract, implementation, and tests. Write REVIEW.json only.")
+                if not (workdir / "REVIEW.json").is_file():
+                    if code is None:
+                        raise ValueError("The build time allowance ended before code review finished. Continue with another coding revision.")
+                    if gateway.usage["requests"] >= chosen["requests"]:
+                        raise ValueError("The model request allowance ended before code review finished. Continue with another coding revision.")
                 after, _ = acceptance.collect(workdir, {})
                 if before != after or (workdir / "quality.json").read_bytes() != plan_bytes:
                     raise ValueError("The review changed implementation files. It must report findings without changing the reviewed code.")
