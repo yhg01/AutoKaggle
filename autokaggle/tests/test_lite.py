@@ -646,3 +646,18 @@ def test_gym_adapter_requires_success_information_and_preserves_truncation(monke
     env.step = lambda action: (1, 0, True, False, {})
     with pytest.raises(ValueError, match="success key"):
         evaluate(123, {"policy_loader": "test_policy:load", "artifact_path": "unused"}, settings)
+
+
+@pytest.mark.parametrize("flag", ["false", "true", 2, -1, {}, [True]])
+def test_gym_success_status_cannot_turn_arbitrary_values_into_success(monkeypatch,flag):
+    import sys
+    from autokaggle.lite_gym_adapter import evaluate
+    class Env:
+        def reset(self,**kwargs):return 0,{}
+        def step(self,action):return 0,0,True,False,{"goal":flag}
+        def close(self):pass
+    monkeypatch.setitem(sys.modules,"gymnasium",SimpleNamespace(make=lambda *a,**k:Env()))
+    monkeypatch.setitem(sys.modules,"test_policy",SimpleNamespace(load=lambda path:SimpleNamespace(act=lambda obs:0)))
+    c=contract(adapter_entrypoint="gym_adapter:evaluate",env_id="Test-v0",seed_method="reset",success_key="goal")
+    with pytest.raises(ValueError,match="boolean"):
+        evaluate(1,{"policy_loader":"test_policy:load","artifact_path":"unused"},c)
