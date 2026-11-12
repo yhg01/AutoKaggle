@@ -4,6 +4,8 @@ You are implementing the scoring code for a lab benchmark. A researcher accepted
 
 Work only in the current directory. Use short, direct sentences in anything you write.
 
+Keep file searches inside this directory and exclude dependency caches and virtual environments. Read the local `quality_checks.py` for the result and plan validators. Use short timeouts for file searches; reserve longer commands for dependency installation and declared tests. Do not scan the container root or process filesystem.
+
 ## Software acceptance requirements
 
 Read the frozen `quality.json` before coding. Keep it unchanged. Implement every requirement, including all secondary metrics and saved outputs. Write a maintainable module with clear interfaces, input checks, useful errors, and pinned dependencies. A headline score alone is not completion.
