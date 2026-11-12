@@ -534,6 +534,9 @@ def run_agent(runtime, job, chosen, key, command=None, progress=None):
                      "Repairing the review findings" if "REVIEW.json" in prompt else "Implementing and testing the evaluator")
             if progress:
                 progress(label)
+            # Large scorer tests can exceed OpenCode's two-minute tool default.
+            # Keep each command bounded by this phase and the outer job deadline.
+            env["OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS"] = str(max(1, int(min(600, remaining) * 1000)))
             argv = command or agent_command(chosen["model"])
             argv = [prompt if arg == PROMPT else arg for arg in argv]
             code, _ = runtime.run(argv, {"work": (job / "work", "rw"), "home": (home, "rw")},

@@ -21,6 +21,23 @@ from autokaggle import lite, lite_acceptance as acceptance, lite_build, lite_pro
 from autokaggle.app import create_app
 from autokaggle.lite_gateway import Gateway
 
+
+@pytest.mark.parametrize("minutes", [1, 30])
+def test_shell_timeout_fits_the_remaining_build_allowance(tmp_path, minutes):
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work/contract.json").write_text('{"contract": {}}')
+    observed = []
+    class Runtime:
+        def gateway_host(self): return "127.0.0.1"
+        def run(self, argv, mounts, cwd, env, timeout, log, label):
+            observed.append((int(env["OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS"]), timeout))
+            return 0, 0
+    chosen = {"model": "test", "provider": "deepseek", "effort": "medium", "requests": 1, "minutes": minutes}
+    lite_build.run_agent(Runtime(), tmp_path, chosen, "test-only", command=["test-driver"])
+    shell, outer = observed[0]
+    assert 0 < shell <= min(600_000, outer * 1000)
+    if minutes == 30: assert shell > 120_000
+
 AGENT = r'''
 import json, os, sys
 from pathlib import Path
