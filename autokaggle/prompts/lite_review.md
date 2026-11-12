@@ -10,4 +10,6 @@ Inspect the actual saved outputs from a distinct valid fixture. Follow every req
 
 Check the source of every claimed exception. Agent-authored notes, test comments, or implementation decisions cannot amend `contract.json`. A limitation of the pinned scorer may require a researcher decision. If the accepted settings make a required calculation impossible, report the conflict; do not call an asserted null result a documented contract rule unless the accepted contract contains that rule.
 
+Check proposed remedies too. A default parameter value is not evidence that it resolves a failure. Require an executed boundary case before describing a concrete replacement as effective. Otherwise label it untested and request a scientific decision.
+
 Write REVIEW.json only: {"status":"pass" or "changes_required", "summary":"...", "requirements":[{"id":"R001","covered":true,"evidence":"file:test and the concrete assertions"}], "findings":[{"file":"path","reason":"..."}]}. Pass only when every requirement has evidence and no blocking finding remains. A smoke test alone is insufficient. This review is evidence, not proof of scientific correctness.

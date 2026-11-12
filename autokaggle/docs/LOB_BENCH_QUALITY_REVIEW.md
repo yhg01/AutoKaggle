@@ -24,6 +24,12 @@ Evidence at the accepted source commit:
 
 The researcher must decide whether to retain the 50-message protocol and explicitly mark those four curves unavailable, or change the diagnostic settings. A different horizon changes the diagnostic comparison and needs acceptance. An agent-written note or a test asserting null values is not approval of that rule.
 
+The accepted metric definition explicitly rejects missing or non-finite required secondary measurements. It therefore conflicts with those undefined values. The final live coding turn reported this conflict and left the release in **Draft · a decision is needed**. It reused the 73-requirement plan and finished after 49 model requests in 339.2 seconds.
+
+Do not assume that the scorer's default horizon of 100 resolves the conflict. Price differences remove one observation before the 100-observation rolling calculation, and conditional OFI features need further observations. Any replacement horizon must be tested with the pinned scorer before it is recommended as a resolution.
+
+The build and review prompts now require evidence for a proposed remedy. A separate live DeepSeek review rejected the untested horizon-100 proposal. This was a focused prompt check; it was not another scorer execution or a successful evaluator release.
+
 ## Remaining evidence
 
 The owner deferred the licensed research-data check. No result from this test qualifies the original problem for BOLD OS registration. A completed release still needs a controlled run on the declared research data and approval of that exact commit and report.
