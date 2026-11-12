@@ -25,7 +25,7 @@ def scrub(value):
         return [scrub(v) for v in value]
     if isinstance(value, str):
         value = re.sub(r"(?<![\w.+-])[\w.+-]{1,64}@[\w.-]{1,253}\.[A-Za-z]{2,63}", "[private email]", value)
-        for name in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "AUTOKAGGLE_ADMIN_ACCESS_CODE"):
+        for name in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "AUTOKAGGLE_ADMIN_ACCESS_CODE"):
             secret = os.getenv(name)
             if secret:
                 value = value.replace(secret, "[redacted credential]")

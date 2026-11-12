@@ -31,24 +31,18 @@ def stop(message):
     raise SystemExit(1)
 
 
-def explain(record, manifest, contract):
-    """Repeat one failed seed with its output visible. The runner itself discards worker output."""
+def explain(record, manifest, contract, diagnostic=None):
+    """Show the original worker error without executing the artifact a second time."""
     if record["status"] == "timeout":
         print(f"evaluate: seed {record['seed']} exceeded the time limit.", file=sys.stderr)
         return
     if record["status"] == "truncated":
         print(f"evaluate: seed {record['seed']} stopped before completion ({record.get('end_reason', 'truncated')}).", file=sys.stderr)
         return
-    with tempfile.TemporaryDirectory(prefix="evaluate-") as temporary:
-        job, target = Path(temporary) / "job.json", Path(temporary) / "result.json"
-        job.write_text(json.dumps({"seed": record["seed"], "manifest": manifest, "contract": contract}))
-        try:
-            done = subprocess.run([sys.executable, str(ROOT / "run.py"), "--worker", str(job), str(target)], cwd=ROOT,
-                                  capture_output=True, text=True, errors="replace", timeout=contract["timeout_seconds"])
-            cause = done.stderr.strip()[-2000:] or "The adapter returned an invalid record."
-        except subprocess.TimeoutExpired:
-            cause = "The repeated seed exceeded the time limit."
-    print(f"evaluate: seed {record['seed']} failed. Cause:\n{cause}", file=sys.stderr)
+    if diagnostic:
+        print(str(diagnostic)[-2000:], file=sys.stderr)
+    print(f"evaluate: seed {record['seed']} failed. Check the artifact format and adapter. "
+          "No automatic retry was run, to preserve the evaluation time limit.", file=sys.stderr)
 
 
 def main():
@@ -102,10 +96,10 @@ def main():
     summary = result["summary"]
     failed = [record for record in result["results"] if record["status"] != "completed"]
     if failed:
-        explain(failed[0], result["manifest"], contract["contract"])
+        explain(failed[0], result["manifest"], contract["contract"], result.get("diagnostics", {}).get(str(failed[0]["seed"])))
     # With the zero failure rule the runner reports 0.0 even when no seed completed. That is not a measured fitness.
     scored = summary["status"] == "complete" and summary["completed"] > 0
-    print(json.dumps({"fitness": summary["score"] if scored else None, "metric": summary["metric"], "direction": lock["direction"],
+    print(json.dumps({"fitness": summary["score"] if scored else None, "metric": contract["contract"].get("metric_name", summary["metric"]) if summary["metric"] == "custom" else summary["metric"], "direction": lock["direction"],
                       "status": summary["status"] if scored or summary["status"] != "complete" else "no_completed_seed",
                       "completed": summary["completed"], "failed": summary["failed"],
                       "seeds": len(result["results"]), "contract_version": lock["contract_version"],

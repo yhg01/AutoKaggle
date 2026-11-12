@@ -2,7 +2,7 @@
 
 Lite is the internal ML research mode. Open `/lite`. On the separate Lite host, `/` also opens Lite. The original Full host retains the Full interview.
 
-One accepted contract produces a private website preview, README, research ZIP, fixed seed list, result schemas, local runner, and result record. Lite supports supervised batch evaluation and interactive environments. It accepts predictions, a checkpoint, or a policy as the contract permits. It does not start hosted compute or rent nodes.
+One accepted contract produces a private website preview, README, research ZIP, fixed seed list, result schemas, local runner, and result record. Lite supports batch evaluation, interactive environments, optimization, forecasting, generation, and custom evaluation. It accepts the artifact defined by the contract. Researchers run their experiments locally. The service can prepare and test a small evaluator in a bounded build job; it does not rent nodes.
 
 ## Required workflow before merging Lite into main
 
@@ -10,7 +10,7 @@ One accepted contract produces a private website preview, README, research ZIP, 
 
 **BOLD OS as the project home.** Collaborators start and resume Lite from BOLD OS. The Problem Bank holds the problem record and its status. Benchmarks links the problem to the evaluator repo and pinned version. Show incomplete work as a draft until the scoring test passes. Preserve the BOLD OS record IDs and repo ID so a retry updates the same records. Lite can supply the interview and build backend. The existing standalone preview is part of the current implementation and does not satisfy this requirement.
 
-These are merge requirements. The evaluator build and its clean-clone scoring check are implemented for local use; see **Build evaluator** below. Publishing a tested release to a private GitHub repository is implemented; see **Publish to GitHub**. It has run only under one developer account. Publishing under `bold-lab-ai` with the lab's template and access list, and a write integration for the BOLD OS sections, are still needed.
+These are merge requirements. The evaluator build and its clean-clone scoring check are implemented for local use and the configured Internal Civo build service; see **Build evaluator** below. Publishing a tested release to a private GitHub repository is implemented; see **Publish to GitHub**. It has run only under one developer account. Publishing under `bold-lab-ai` with the lab's template and access list, and a write integration for the BOLD OS sections, are still needed.
 
 ## Build evaluator
 
@@ -65,7 +65,7 @@ For hosted Lite, the deployer reads the token from the private file `$HOME/.conf
 
 Limits of this version:
 
-- Hosted Lite cannot build evaluators, because builds need Docker. It therefore has no tested release to publish yet. Its publishing configuration is in place for when hosted builds exist.
+- Hosted builds require the Internal Kubernetes runtime described in `deploy/LITE_WEB.md`. They are for approved lab members. They do not run researcher training jobs.
 - Repository access is not managed. The creator is the only member until someone adds collaborators on GitHub. The project's access list is not yet applied.
 - The lab-approved repository template and its project-tracking files are not applied.
 - BOLD OS Problem Bank and Benchmarks records are not written.
@@ -73,9 +73,9 @@ Limits of this version:
 
 ## Start a session
 
-1. Start the existing app with `OPENROUTER_API_KEY` in the private environment file. Lite calls OpenRouter directly. The default model is `openai/gpt-6.1-sol` with medium reasoning. `AUTOKAGGLE_LITE_MODEL` can select another compatible model. Package generation is deterministic.
+1. Configure a model provider in the private environment. The 12 November rollout uses `DEEPSEEK_API_KEY`, `AUTOKAGGLE_LITE_PROVIDER=deepseek`, and `deepseek-v4-pro`. OpenRouter remains supported. Package generation is deterministic.
 2. Open `/lite`. Create a session, enter the organizer email, and accept storage and model processing.
-3. Add a public paper URL, a text PDF up to 16 MiB, a public GitHub repository, or both. Add the intended research question.
+3. Describe the research question. Paste a public paper or GitHub link in chat, or use **Attach** for multiple files. Documents, tables, text, code, and images are accepted. Each file is limited to 50 MiB; image interpretation is limited to 20 MiB. Images are interpreted by a model and need review. The earlier Sources dialog retains its 16 MiB PDF limit.
 4. Review the proposed contract. Source excerpts, pinned revisions, suggestions, and extraction errors remain visible. Edit the proposal or ask for a correction. Select **Accept** to record it.
 5. Answer only the remaining questions. The six groups are objective, source, artifact, evaluation, resources, and provenance. A scientific reference baseline is optional.
 6. Build the package. Open its website preview, download the ZIP, and download the evaluation config. The config is the same `contract.json` included in the ZIP. It includes every required seed.
@@ -178,3 +178,13 @@ All endpoints retain owner access checks and same-origin writes.
 | `DELETE /api/projects/{id}` | Delete with `confirm: true`. |
 
 Queued requests return immediately. Poll the state endpoint while status is `working`. Repeated request IDs reuse the saved action. An ID with different input returns 409. Result retries reuse the saved result. A run that finishes after a revision can still submit evidence for its known built version. The service uses that version's frozen contract and marks the result historical. It does not score old evidence with new settings.
+
+## Server repository imports
+
+Public GitHub links create an immutable source snapshot on the server. The agent can read files and search that snapshot. It does not run repository code during import. The snapshot records the commit and each file digest. It excludes Git history, submodule downloads, and Git LFS downloads; missing assets remain explicit requirements.
+
+Imports allow up to 256 MiB compressed, 1 GiB extracted, 40,000 files, and 128 MiB per file. Each session can store six revisions. The service checks free space before download. Unsafe archive paths are rejected. Links and special files are omitted. Failed imports clean their temporary files. Deleting a session removes its stored snapshots. Source excerpts in model prompts remain bounded; a local file-search tool supplies further details.
+
+## Conversation and task-specific requirements
+
+The agent asks for missing decisions in chat. Secondary functions are in **Session tools**. Once the relevant step is ready, the chat shows the package, evaluator, or result action. Custom scores require a metric name, exact definition, and direction. Optimization requires constraints. Forecasting requires a time and leakage policy. Generation requires a reference and sample policy. Environment tasks retain episode, seed, and termination requirements. These additions do not relax Full's execution or private-answer controls.

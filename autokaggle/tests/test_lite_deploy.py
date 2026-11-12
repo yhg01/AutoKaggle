@@ -21,7 +21,7 @@ def test_lite_does_not_reuse_full_data_or_credentials():
     assert pod["securityContext"]["runAsNonRoot"] is True
     assert pod["containers"][0]["securityContext"]["readOnlyRootFilesystem"] is True
     claim = next(x for x in items if x["kind"] == "PersistentVolumeClaim")
-    assert claim["spec"]["resources"]["requests"]["storage"] == "1Gi"
+    assert claim["spec"]["resources"]["requests"]["storage"] == "10Gi"
 
 
 def test_lite_enables_private_access_consent_and_known_lab_member():

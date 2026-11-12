@@ -62,10 +62,11 @@ def private_settings(model_env: Path):
         os.fchmod(handle.fileno(), 0o600)
         handle.write("\n".join(k + "=" + v for k, v in existing.items() if v is not None) + "\n")
     model = dotenv_values(model_env)
-    key = model.get("OPENROUTER_API_KEY")
+    key = model.get("DEEPSEEK_API_KEY") or model.get("OPENROUTER_API_KEY")
     if not key:
-        raise ValueError("The selected private model file has no OpenRouter key.")
-    return {"AUTOKAGGLE_ADMIN_ACCESS_CODE": existing["AUTOKAGGLE_ADMIN_ACCESS_CODE"], "OPENAI_API_KEY": key}
+        raise ValueError("The selected private model file has no DeepSeek or OpenRouter key.")
+    return {"AUTOKAGGLE_ADMIN_ACCESS_CODE": existing["AUTOKAGGLE_ADMIN_ACCESS_CODE"], "OPENAI_API_KEY": key,
+            **({"DEEPSEEK_API_KEY": key} if model.get("DEEPSEEK_API_KEY") else {})}
 
 
 def manifest(kind, name, **body):
@@ -114,6 +115,9 @@ def resources(source, digest, private, node_ips, mail=None, mail_enabled=False):
                 "AUTOKAGGLE_REQUIRE_STORAGE_CONSENT": "1",
                 "AUTOKAGGLE_MODE": "model", "PYTHONPATH": "/runtime:/app", "PYTHONDONTWRITEBYTECODE": "1",
                 "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "HOME": "/tmp"}
+    if private.get("DEEPSEEK_API_KEY"):
+        settings.update(OPENAI_BASE_URL="https://api.deepseek.com", AUTOKAGGLE_MODEL="deepseek-v4-pro",
+                        AUTOKAGGLE_LITE_PROVIDER="deepseek", AUTOKAGGLE_LITE_DEEPSEEK_MODEL="deepseek-v4-pro")
     context = {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}}
     shared = [{"name": "runtime", "mountPath": "/runtime"}, {"name": "app", "mountPath": "/app"},
               {"name": "tmp", "mountPath": "/tmp"}]

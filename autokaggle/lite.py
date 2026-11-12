@@ -39,17 +39,25 @@ GROUPS = (
 )
 STRINGS = {"title", "objective", "source_url", "source_revision", "inputs", "outputs", "success_definition",
            "evaluation_protocol", "training_policy", "compute_budget", "dependencies", "adapter_entrypoint",
-           "allowed_data", "baseline", "env_id", "success_key"}
-ENUMS = {"task_kind": {"environment", "batch"}, "artifact_type": {"predictions", "checkpoint", "policy"},
-         "metric": {"success_rate", "mean_score", "accuracy", "rmse", "mae"},
+           "allowed_data", "baseline", "env_id", "success_key", "metric_name", "metric_definition",
+           "constraints", "temporal_policy", "generation_policy"}
+ENUMS = {"task_kind": {"environment", "batch", "optimization", "forecasting", "generation", "custom"}, "artifact_type": {"predictions", "checkpoint", "policy", "candidate", "code", "samples"},
+         "metric": {"success_rate", "mean_score", "accuracy", "rmse", "mae", "custom"},
+         "metric_direction": {"maximize", "minimize"},
          "failure_policy": {"zero", "fail_run"}, "answer_exposure": {"visible", "private", "environment_generated"},
          "seed_method": {"reset", "core_disp"}, "horizon_policy": {"require_termination", "fixed_horizon"}}
 INTS = {"evaluation_count": (1, 10000), "timeout_seconds": (1, 21600), "total_timeout_seconds": (1, 604800), "max_steps": (1, 100000000),
         "seed_start": (0, 2**32-1), "seed_end": (0, 2**32-1)}
 FIELDS = STRINGS | set(ENUMS) | set(INTS) | {"environment_imports", "environment_kwargs"}
 CONTRACT_HELP = {
-    "task_kind": "environment for interactive episodes; batch for supervised inference or prediction evaluation",
-    "metric": "success_rate, mean_score, accuracy, rmse, or mae; batch metrics are means across independently seeded evaluation runs",
+    "task_kind": "environment for interactive episodes; batch for fixed data; optimization for feasible candidates; forecasting for time-dependent evaluation; generation for generated samples; custom for other declared protocols",
+    "metric_name": "Name of a custom fitness measure, such as Sharpe ratio, F1, or energy",
+    "metric_definition": "Exact formula or pinned scorer, units, sample aggregation, invalid-case behavior, and numeric tolerance",
+    "metric_direction": "Whether larger or smaller custom fitness values are better",
+    "constraints": "Optimization feasibility rules, constraint tolerances, and treatment of infeasible candidates",
+    "temporal_policy": "Information available at each time, cutoff, leakage prevention, evaluation windows, and costs/execution/risk rules when applicable",
+    "generation_policy": "Sample count, reference data, sampling settings, scoring protocol, and variability",
+    "metric": "Built-in metric or custom. Custom requires metric_name, metric_definition and metric_direction. Per-run scalar fitness is averaged over fixed seeds. Define aggregation within each run explicitly.",
     "evaluation_count": "Number of episodes (environment) or independent seeded runs (batch), 1..10000",
     "timeout_seconds": "Maximum wall time per episode or seeded batch run, 1..21600; an exceeded limit must appear as timeout",
     "total_timeout_seconds": "Maximum wall time for the complete evaluation, 1..604800. Remaining seeds are timeout records when this total is reached.",
@@ -134,8 +142,8 @@ def clean_contract(value):
         reference(result["source_url"])
     if result.get("adapter_entrypoint") and not re.fullmatch(r"[A-Za-z_]\w*(?:\.\w+)*:[A-Za-z_]\w*", result["adapter_entrypoint"]):
         raise ValueError("Use module:function for the adapter entry point.")
-    if result.get("task_kind") == "environment" and result.get("artifact_type") == "predictions":
-        raise ValueError("Environment evaluation requires a policy or checkpoint, not a prediction file.")
+    if result.get("task_kind") == "environment" and result.get("artifact_type") not in {None, "policy", "checkpoint", "code"}:
+        raise ValueError("Environment evaluation requires a policy, checkpoint, or code artifact.")
     if result.get("failure_policy") == "zero" and result.get("metric") not in {None, "success_rate", "accuracy"}:
         raise ValueError("Use fail_run for error or unbounded score metrics. Zero could reward a failed run.")
     if result.get("horizon_policy") == "fixed_horizon" and (result.get("task_kind") != "environment" or not result.get("max_steps")):
@@ -168,6 +176,13 @@ def checklist(contract, open_decisions=None):
     groups = []
     for key, title, fields in GROUPS:
         fields = list(fields)
+        if key == "evaluation" and contract.get("metric") == "custom":
+            fields += ["metric_name", "metric_definition", "metric_direction"]
+        if key == "evaluation":
+            specific = {"optimization": "constraints", "forecasting": "temporal_policy", "generation": "generation_policy", "custom": "metric_definition"}
+            extra = specific.get(contract.get("task_kind"))
+            if extra and extra not in fields:
+                fields.append(extra)
         if key == "evaluation" and contract.get("task_kind") == "environment":
             fields.append("max_steps")
         if key == "submission" and contract.get("adapter_entrypoint") == "gym_adapter:evaluate":
@@ -201,6 +216,7 @@ def evaluator_files():
 
 
 def view(project):
+    from . import lite_providers
     state = project["lite"]
     current_version = version(state["contract"], state["sources"])
     built = state.get("package")
@@ -216,8 +232,8 @@ def view(project):
             "open_decisions": copy.deepcopy(state.get("open_decisions", [])),
             "checklist": checklist(state["contract"], state.get("open_decisions")), "ready": ready(state["contract"], state.get("open_decisions")) and not state.get("proposal"),
             "sources": [{k: r[k] for k in ("kind", "url", "title", "commit", "sha256", "truncated") if k in r} for r in state["sources"]],
-            "package": package, "model": {"configured": bool(os.getenv("OPENROUTER_API_KEY")),
-                "name": os.getenv("AUTOKAGGLE_LITE_MODEL", "openai/gpt-6.1-sol"), "calls": state["model_calls"],
+            "package": package, "model": {"configured": bool(lite_providers.key()),
+                "name": lite_providers.model(), "calls": state["model_calls"],
                 "round_calls": state["model_calls"]-state.get("round_start", 0), "limit": 30}}
 
 
@@ -345,7 +361,7 @@ def parse_proposal(state, response):
                 if matched:
                     evidence[field].update(source_url=matched.get("url"), source_revision=matched.get("commit", matched.get("sha256")))
         # Resolve only invalid combinations. Preserve all independent valid extraction.
-        if candidate.get("task_kind") == "environment" and candidate.get("artifact_type") == "predictions":
+        if candidate.get("task_kind") == "environment" and candidate.get("artifact_type") not in {None, "policy", "checkpoint", "code"}:
             candidate.pop("artifact_type", None)
             issues.append({"field": "artifact_type", "reason": "Choose a policy or checkpoint for an environment task."})
         if candidate.get("failure_policy") == "zero" and candidate.get("metric") not in {None, "success_rate", "accuracy"}:
@@ -374,6 +390,15 @@ def parse_proposal(state, response):
     question_field = parsed.get("question_field", "")
     if question_field not in FIELDS:
         question_field = missing[0] if missing else ""
+    if missing and (not question or re.search(r"review.{0,50}(accept|correct)|accept.{0,30}(contract|definition)", question, re.I)):
+        question_field = missing[0]
+        prompts = {
+            "source_url": "Does evaluation need external data or code, or is the full problem defined in this conversation? This determines what a collaborator must retrieve.",
+            "source_revision": "Which fixed version of the source should we use? A commit, dataset digest, or versioned definition keeps later scores comparable.",
+            "compute_budget": "What hardware and time limit should an attempt use? This makes resource use comparable.",
+            "dependencies": "Which software versions should the evaluator use? A fixed environment is needed to repeat the score."
+        }
+        question = prompts.get(question_field, "What should we record for " + question_field.replace("_", " ") + "? This is needed to run or interpret the evaluation.")
     if decisions and not question:
         question_field = decisions[0]["field"]
         question = "Please resolve " + question_field.replace("_", " ") + ": " + decisions[0]["reason"]
@@ -384,7 +409,7 @@ def parse_proposal(state, response):
     if question_field and state.get("question_counts", {}).get(key, 0) >= 2:
         question = "This decision still needs your review: " + question_field.replace("_", " ") + ". Edit its value in the proposed contract, or keep it open. The package stays a draft until it is defined."
     return {"id": secrets.token_hex(12), "contract": candidate, "evidence": evidence, "validation_notes": issues, "open_decisions": decisions, "resolved_decisions": resolutions,
-            "summary": parsed["summary"], "question": question, "question_field": question_field, "question_key": key, "created_at": now(),
+            "summary": ("The definition is still a draft. " + parsed["summary"] if missing and re.search(r"complete|ready", parsed["summary"], re.I) else parsed["summary"]), "question": question, "question_field": question_field, "question_key": key, "created_at": now(),
             "model": response.model, "usage": response.usage.model_dump() if response.usage else None}
 
 
@@ -399,7 +424,7 @@ def readme(project, contract_record):
         for field in fields:
             lines += [f"- **{field.replace('_', ' ')}:** {c.get(field, 'Not defined')}"]
         lines += [""]
-    extras = {field: c[field] for field in ("env_id", "environment_imports", "environment_kwargs", "success_key", "seed_method", "max_steps", "horizon_policy") if field in c}
+    extras = {field: c[field] for field in ("env_id", "environment_imports", "environment_kwargs", "success_key", "seed_method", "max_steps", "horizon_policy", "metric_name", "metric_definition", "metric_direction", "constraints", "temporal_policy", "generation_policy") if field in c}
     if extras:
         lines += ["## Adapter configuration", "", "```json", json.dumps(extras, indent=2), "```", ""]
     lines += ["The fixed seed list and evaluator file hashes are in contract.json. Keep that file unchanged with each result.", ""]
@@ -638,7 +663,14 @@ def register(app, store, pool, access, get, editing):
             if task.get("paper_url"):
                 records.append(sources.paper(task["paper_url"]))
             if task.get("repository_url"):
-                records.append(sources.repository(task["repository_url"], include_execution=True))
+                from . import repository_store
+                def progress(stage):
+                    with store.lock(identifier):
+                        fresh = reload(identifier)
+                        if fresh and fresh["lite"].get("job_id") == job_id:
+                            fresh["lite"]["stage"] = stage
+                            store.save(fresh)
+                records.append(repository_store.snapshot(task["repository_url"], store.directory(identifier), progress=progress))
             # Save fetched sources before a provider failure, so retry can reuse them.
             unique = {}
             for record in records:
@@ -653,7 +685,9 @@ def register(app, store, pool, access, get, editing):
                 state["sources"] = list(unique.values())
                 state["stage"] = "Reading sources and preparing a contract"
                 store.save(item)
-            proposal = propose(state)
+            model_state = copy.deepcopy(state)
+            model_state["_repository_directory"] = str(store.directory(identifier))
+            proposal = propose(model_state)
             with store.lock(identifier):
                 item = reload(identifier)
                 if not item or item.get("lite", {}).get("job_id") != job_id:
@@ -762,6 +796,34 @@ def register(app, store, pool, access, get, editing):
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         return queue(project_id, request, body, body.model_dump(exclude={"request_id"}))
+
+    @app.post("/api/projects/{project_id}/lite/attachments")
+    def upload_attachment(project_id: str, request: Request, file: UploadFile = File(...)):
+        from . import documents
+        lite_get(project_id, request)
+        try:
+            data = file.file.read(documents.MAX_DOCUMENT_BYTES + 1)
+            if not data or len(data) > documents.MAX_DOCUMENT_BYTES:
+                raise HTTPException(422, "Attach a nonempty file up to 50 MB. Use a shared link for larger datasets.")
+            name = Path((file.filename or "attachment").replace("\\", "/")).name[:180]
+            try:
+                record = documents.extract(data, name)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from None
+            source = {"kind": "attachment", "url": "uploaded:" + name, "title": name,
+                      "sha256": hashlib.sha256(data).hexdigest(), "text": record["text"][:60000],
+                      "truncated": record["truncated"] or len(record["text"]) > 60000, "imported_at": now()}
+            def save(item):
+                records = item["lite"]["sources"]
+                if any(r.get("sha256") == source["sha256"] for r in records):
+                    return
+                if len(records) >= 12:
+                    raise ValueError("Use at most twelve source records per session.")
+                records.append(source)
+                item["lite"]["messages"].append({"id": secrets.token_hex(8), "role": "source", "content": "Attached " + name + (" (text excerpt)" if source["truncated"] else "")})
+            return change(project_id, request, save)
+        finally:
+            file.file.close()
 
     @app.post("/api/projects/{project_id}/lite/paper")
     def upload_paper(project_id: str, request: Request, file: UploadFile = File(...)):

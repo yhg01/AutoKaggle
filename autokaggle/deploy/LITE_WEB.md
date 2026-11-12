@@ -140,8 +140,7 @@ owner is set, `deploy` reads a token from `$HOME/.config/autokaggle/lite-github.
 places it only in the `lite-secrets` Secret. Without an owner the token is not sent to the cluster. `deploy --github-owner NAME` sets `AUTOKAGGLE_LITE_GITHUB_OWNER` in
 `lite-config`. The owner is kept on later deployments unless the option is given again; an empty value turns
 publishing off. Both values enter the deployment's settings hash, so a change restarts Lite. The pinned runtime
-packages include `dulwich` and `urllib3` for the token route. Hosted Lite cannot build evaluators, so these settings
-have no effect until hosted builds exist. See [Publish to GitHub](../docs/LITE.md#publish-to-github).
+packages include `dulwich` and `urllib3` for the token route. The Internal build runtime described below supplies tested releases for publishing. See [Publish to GitHub](../docs/LITE.md#publish-to-github).
 
 Before a release, rehearse the pod locally: run the pinned image with a read-only root as user 1000, extract the source
 archive, install `web-requirements.lock` with the init container's command, and start the application with the
@@ -316,3 +315,19 @@ Do not restore an old database as part of a source rollback. Do not patch
 After restart or rollback, repeat health, login, membership, download, and model
 checks. Confirm the source annotation and compare saved project records. Old
 immutable source ConfigMaps can remain available for a later rollback.
+
+## Internal build runtime — 12 November
+
+`lite_kubernetes.py` runs bounded build and acceptance jobs on the existing node. The jobs use the default container runtime, a non-root user, a read-only root, no added capabilities, no service-account token, and mounts for one job only. Each job has a deadline, 2 CPU and 4 GiB memory limits. Network policies block incoming traffic, private destinations, the application port, the cluster API, and metadata. Public HTTPS is available for dependencies. A short-lived model gateway is available on the Lite pod. Provider and GitHub credentials stay in the trusted web process.
+
+This is an Internal lab service. Container isolation is not a claim of protection against all hostile code. Full's separate offline gVisor runner is unchanged. The Kubernetes control account can create, read, and remove jobs, and read pod status/logs. It cannot read secrets or execute commands in other pods.
+
+Install the pinned build image on each eligible node before use. Set `AUTOKAGGLE_LITE_BUILD_RUNTIME=kubernetes`, an immutable `AUTOKAGGLE_LITE_BUILD_IMAGE`, the Lite data claim, and the pod IP from the downward API. Apply `lite_jobs.resources` and run its network checks before enabling builds. The source updater preserves existing runtime add-ons and makes a private SQLite backup:
+
+```sh
+python -m autokaggle.deploy.rollout lite --model-env /private/deepseek.env \
+  --build-image IMAGE@sha256:DIGEST --github-owner OWNER --github-env /private/lite-github.env
+python -m autokaggle.deploy.rollout web --model-env /private/deepseek.env
+```
+
+Use `yhg01` for test publication. Set the production owner only after access is checked. No new node is rented. The Lite data volume is 10 GiB; repository imports stop before the disk is full.

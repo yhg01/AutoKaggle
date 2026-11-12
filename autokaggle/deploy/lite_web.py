@@ -36,9 +36,9 @@ def github_settings():
 
 def private_settings(model_env: Path):
     model = dotenv_values(model_env)
-    key = model.get("OPENROUTER_API_KEY")
+    key = model.get("DEEPSEEK_API_KEY") or model.get("OPENROUTER_API_KEY")
     if not key:
-        raise ValueError("The private model file must contain OPENROUTER_API_KEY.")
+        raise ValueError("The private model file must contain DEEPSEEK_API_KEY or OPENROUTER_API_KEY.")
     saved = dotenv_values(PRIVATE_ENV) if PRIVATE_ENV.exists() else {}
     admin = saved.get("AUTOKAGGLE_ADMIN_ACCESS_CODE") or secrets.token_urlsafe(36)
     if not 32 <= len(admin) <= 1024:
@@ -48,7 +48,8 @@ def private_settings(model_env: Path):
         os.fchmod(handle.fileno(), 0o600)
         handle.write("AUTOKAGGLE_ADMIN_ACCESS_CODE=" + admin + "\n")
         handle.write("AUTOKAGGLE_PUBLIC_BASE_URL=" + BASE_URL + "\n")
-    return {"AUTOKAGGLE_ADMIN_ACCESS_CODE": admin, "OPENAI_API_KEY": key, "OPENROUTER_API_KEY": key, **github_settings()}
+    return {"AUTOKAGGLE_ADMIN_ACCESS_CODE": admin, "OPENAI_API_KEY": key,
+            **({"DEEPSEEK_API_KEY": key} if model.get("DEEPSEEK_API_KEY") else {"OPENROUTER_API_KEY": key}), **github_settings()}
 
 
 def resources(source, digest, private, node_ips, *, members=MEMBERS, github_owner=""):
@@ -76,7 +77,7 @@ def resources(source, digest, private, node_ips, *, members=MEMBERS, github_owne
         # Namespace is shared only to reuse the installed issuer and mail Secret.
         item["metadata"]["namespace"] = web.NAMESPACE
         if item["kind"] == "PersistentVolumeClaim":
-            item["spec"]["resources"]["requests"]["storage"] = "1Gi"
+            item["spec"]["resources"]["requests"]["storage"] = "10Gi"
         if item["kind"] == "ConfigMap" and item["metadata"]["name"] == "lite-config":
             item["data"]["AUTOKAGGLE_PUBLIC_BASE_URL"] = BASE_URL
             item["data"]["AUTOKAGGLE_LITE_MEMBERS"] = members

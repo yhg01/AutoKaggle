@@ -194,7 +194,7 @@ def test_ready_release_scores_from_a_collaborator_clone_and_binds_evidence(harne
         parsed = yaml.safe_load(config)
         frozen = json.loads(client.get(path + "/config").text)
         assert parsed["protocol"]["seeds"] == frozen["seeds"] and parsed["contract"]["sha256"] == frozen["contract_sha256"]
-        assert parsed["metric"] == {"name": "accuracy", "direction": "maximize", "aggregation": "mean over the fixed seeds",
+        assert parsed["metric"] == {"name": "accuracy", "definition": frozen["contract"]["success_definition"], "direction": "maximize", "aggregation": "mean over the fixed seeds",
                                     "failure_policy": "zero", "success_definition": frozen["contract"]["success_definition"]}
 
 

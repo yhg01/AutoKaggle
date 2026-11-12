@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import html
 import json
+import os
 from pathlib import Path
 import re
 import uuid
@@ -15,7 +16,7 @@ from . import advisor, documents, lookup, observability, onboarding_setup, readi
 ITEMS = [
     ("question", "Research problem", "Problem", "What scientific problem should the research solve?", "Scientific question, practical value, and the outcome that would count as useful progress."),
     ("task", "Inputs and outputs", "Problem", "What should a solution produce from the available inputs?", "Inputs, required outputs, a useful metric, and the intended scientific outcome."),
-    ("data", "Data or environment", "Problem", "Which dataset or simulation setup provides the inputs and, if needed, their labels?", "Dataset or generator link, sources or problem instances, labels if needed, permission, and related samples or time ordering. Request a Google Drive link with Anyone with the link and Viewer access as the standard option. Other source links are accepted. Also offer CSV upload up to 200 MB using Data & checks at the bottom left. Do not require labels for optimization."),
+    ("data", "Data or environment", "Problem", "Which dataset or simulation setup provides the inputs and, if needed, their labels?", "Dataset or generator link, sources or problem instances, labels if needed, permission, and related samples or time ordering. Request a Google Drive link with Anyone with the link and Viewer access as the standard option. Other source links are accepted. Also offer CSV upload up to 200 MB using Data & checks in Session tools. Do not require labels for optimization."),
     ("methodology", "Methodology", "Method and deployment", "Should researchers use a particular method, or can they choose the approach?", "Required, allowed, or prohibited methods. Keep method choice distinct from the submitted artifact. A neural network is a method; a prediction file is an artifact."),
     ("deployment", "Deployment and evaluation", "Method and deployment", "Where would the solution run, and what information would it have when it makes a decision?", "Deployment setting, information available at decision time, state, timing, update and resource constraints, and how outputs produce the measured outcome. For trading, distinguish forecast error, backtest returns, and later market performance; define which determines success."),
     ("difficulty", "Reference method", "Reference baseline", "What is the strongest existing method you would compare against, and what result does it report?", "Relevant reference method, paper or code if known, reported score and evaluation conditions, and known requirements to run it. State unavailable or unknown materials explicitly. Reported results are not measured results from this system."),
@@ -137,7 +138,7 @@ DEFAULT_TITLES = {None, "", "Untitled challenge", "New challenge"}
 DATA_SOURCE_GUIDANCE = ('Please share a link. Our standard option is a Google Drive link set to '
                         '"Anyone with the link" with Viewer access. A direct dataset or repository URL also works.')
 CSV_UPLOAD_GUIDANCE = ('If your data is a CSV file up to 200 MB, you can upload it using '
-                       'Data & checks at the bottom left.')
+                       'Data & checks in Session tools.')
 DATA_LINK_GUIDANCE = DATA_SOURCE_GUIDANCE + " " + CSV_UPLOAD_GUIDANCE
 
 
@@ -156,7 +157,7 @@ def _data_link_question(state, text, requirement_id=None):
     normalized = text.lower()
     if not all(part in normalized for part in ("google drive", "anyone with the link", "viewer")):
         text = text.rstrip() + " " + DATA_SOURCE_GUIDANCE
-    if not all(part in normalized for part in ("csv", "200 mb", "data & checks", "bottom left")):
+    if not all(part in normalized for part in ("csv", "200 mb", "data & checks", "session tools")):
         text = text.rstrip() + " " + CSV_UPLOAD_GUIDANCE
     return text
 
@@ -767,6 +768,10 @@ def _provider(project, kind, context, reserve):
             request = {"model": advisor.model_name(), "reasoning": {"effort": effort}, "instructions": instructions,
                        "max_output_tokens": 10000 if kind == "scope" else 3500 if kind == "source" else 1600,
                        "text": {"format": {"type": "json_schema", "name": "onboarding_" + kind, "strict": True, "schema": schema}}}
+            if "api.deepseek.com" in os.getenv("OPENAI_BASE_URL", ""):
+                # DeepSeek counts reasoning in this cap. The old 1,600–10,000 cap
+                # could end the response before it produced any JSON.
+                request["max_output_tokens"] = 32768
             if kind == "scope":
                 request["tools"] = lookup.tools()
             items, usage, turn, cache = provider_input, {"input_tokens": 0, "output_tokens": 0}, [], {}

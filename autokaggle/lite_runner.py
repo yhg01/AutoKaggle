@@ -103,7 +103,7 @@ def run(package_dir, manifest_path, output_path):
         if not file.is_file() or digest(file) != manifest.get(field.replace("_path", "_sha256")):
             raise ValueError("The dependency lock does not match its SHA-256.")
         manifest[field] = str(file)
-    records = []
+    records, diagnostics = [], {}
     total_started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="autokaggle-lite-") as temporary:
         temporary = Path(temporary)
@@ -120,9 +120,11 @@ def run(package_dir, manifest_path, output_path):
                 continue
             try:
                 # The process timeout also covers environment reset/step and imports.
-                process = subprocess.Popen([sys.executable, str(package_dir / "run.py"), "--worker", str(job), str(target)],
-                    cwd=code_directory, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    start_new_session=os.name == "posix")
+                error_log = temporary / "worker-error.txt"
+                with error_log.open("wb") as errors:
+                    process = subprocess.Popen([sys.executable, str(package_dir / "run.py"), "--worker", str(job), str(target)],
+                        cwd=code_directory, stdout=subprocess.DEVNULL, stderr=errors,
+                        start_new_session=os.name == "posix")
                 try:
                     process.wait(timeout=min(contract["timeout_seconds"], remaining))
                 except subprocess.TimeoutExpired:
@@ -133,6 +135,9 @@ def run(package_dir, manifest_path, output_path):
                     process.wait()
                     raise
                 if process.returncode:
+                    with error_log.open("rb") as errors:
+                        errors.seek(max(0, error_log.stat().st_size - 2000))
+                        diagnostics[str(seed)] = errors.read(2000).decode(errors="replace")
                     raise ValueError("The adapter did not complete.")
                 record = validate_record(json.loads(target.read_text()), seed, contract["metric"])
             except subprocess.TimeoutExpired:
@@ -143,7 +148,7 @@ def run(package_dir, manifest_path, output_path):
             records.append(record)
     result = {"format": "bold.autokaggle.lite.results.v1", "challenge_version": contract_record["version"],
               "manifest": manifest, "results": records, "summary": summarize(records, contract),
-              "evidence_level": "researcher_reported"}
+              "evidence_level": "researcher_reported", "diagnostics": diagnostics}
     Path(output_path).write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
     return result
 

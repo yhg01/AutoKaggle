@@ -37,13 +37,14 @@
     finally { clearTimeout(timer); }
   }
   function controls() {
+    renderNextAction();
     const active = ready(), blocked = busy();
     for (const id of ["sources-button", "send-message", "build-package", "retry-request", "continue-round"]) $(id).disabled = !active || blocked;
     $("message-input").disabled = !active || blocked;
     const opening = active ? intake() : null;
-    $("attach-paper").hidden = !opening || opening.step !== "paper"; $("attach-paper").disabled = blocked;
+    $("attach-paper").hidden = !active; $("attach-paper").disabled = blocked;
     $("message-input").placeholder = opening ? "Paste a link, or answer in a sentence…" : "Describe your question, answer, or what you want to change…";
-    $("send-message").disabled ||= !$("message-input").value.trim();
+    $("send-message").disabled ||= !$("message-input").value.trim() && !pendingFiles.length;
     $("package-button").disabled = !active;
     $("results-button").disabled = !active;
     $("evaluator-button").disabled = !active;
@@ -57,6 +58,7 @@
     for (const button of content.querySelectorAll("[data-mutation]")) button.disabled = blocked || state.auth || (button.dataset.packageRequired === "true" && state.data?.package?.status !== "ready");
   }
   function clearPrivate() {
+    pendingFiles = []; renderAttachments();
     state.generation++; clearTimeout(state.poll); clearTimeout(state.evaluatorPoll); state.evaluator = null; state.data = null; state.busy = false; state.loading = false; state.messageKey = "";
     $("messages").replaceChildren(); $("message-input").value = ""; $("proposal-banner").hidden = true; $("recovery-banner").hidden = true; $("welcome").hidden = false; $("challenge-title").textContent = "Sign in to continue your research.";
     content.replaceChildren(); if (dialog.open) dialog.close(); renderChecklist(); controls();
@@ -144,8 +146,22 @@
     $("recovery-title").textContent = limit ? "This interview round is complete" : "Your answers are saved";
     $("recovery-detail").textContent = limit ? "Continue with the saved context for another bounded round. Open decisions still need a recorded answer." : "The agent could not finish its last request. Retry it without adding your answer again.";
     $("result-count").textContent = data.results?.length ? `(${data.results.length})` : "";
-    renderChecklist(); controls();
+    renderChecklist(); renderNextAction(); controls();
     if (data.status === "error") notice(data.error || "The agent could not finish this request. Your saved definition is still available. Retry the request or add a correction.", true);
+  }
+  function renderNextAction() {
+    const box = $("next-action"); box.replaceChildren(); box.hidden = true;
+    if (!ready() || busy() || intake()) return;
+    const field = state.data.proposal?.question_field || "";
+    const add = (text, label, action) => { box.hidden = false; box.append(el("p", text), button(label, action)); };
+    if (state.data.ready && state.data.package?.status !== "ready") {
+      add("The required decisions are recorded. Shall I prepare the versioned package?", "Prepare package", () => mutate("/build", {}, { after: showPackage }));
+    } else if (state.data.package?.status === "ready") {
+      add("Your package is ready. You can download it, review the evaluation module, or report a local result.", "Download package", showPackage);
+      box.append(button("Evaluation module", showEvaluator), button("Report a result", showResults));
+    } else if (["source_url", "source_revision"].includes(field)) {
+      add("Paste source links in your reply. You can also attach a paper for me to read.", "Attach a paper or source", showSources);
+    }
   }
   function schedule(delay = 1500) {
     clearTimeout(state.poll); if (state.data?.status !== "working" || state.auth) return;
@@ -159,6 +175,7 @@
   }
   async function openSession(id) {
     if (state.id) stored(draftKey(), $("message-input").value);
+    pendingFiles = []; renderAttachments();
     const generation = ++state.generation; clearTimeout(state.poll); state.id = id; state.data = null; state.messageKey = ""; state.loading = true; state.auth = false;
     $("messages").replaceChildren(); $("welcome").hidden = true; $("proposal-banner").hidden = true; $("challenge-title").textContent = "Opening your research…"; $("message-input").value = stored(draftKey()) || ""; renderChecklist(); controls();
     history.replaceState(null, "", "/lite?project=" + encodeURIComponent(id));
@@ -330,15 +347,65 @@
     }
     if (!state.data.results?.length) content.append(el("p", "No results have been recorded.", "empty")); controls();
   }
+  let pendingFiles = [];
+  function renderAttachments() {
+    const list = $("attachment-list"); list.replaceChildren();
+    for (const file of pendingFiles) {
+      const chip = el("span", null, "attachment-chip");
+      chip.append(el("span", `${file.name} · ${Math.ceil(file.size / 1024)} KB`), button("Remove", () => {
+        pendingFiles = pendingFiles.filter(other => other !== file); renderAttachments(); controls();
+      })); list.append(chip);
+    }
+  }
+  function addAttachments(files) {
+    if (!ready() || busy()) return;
+    for (const file of files) {
+      if (!file.size || file.size > 50 * 1024 * 1024) { notice("Files must contain data and be no larger than 50 MB. Use a shared link for larger datasets.", true); continue; }
+      if (pendingFiles.length >= 12) { notice("Attach at most twelve files at once.", true); break; }
+      if (!pendingFiles.some(other => other.name === file.name && other.size === file.size && other.lastModified === file.lastModified)) pendingFiles.push(file);
+    }
+    renderAttachments(); controls();
+  }
+  async function uploadAttachments() {
+    const generation = state.generation, opening = intake(), names = [];
+    state.busy = true; controls();
+    try {
+      while (pendingFiles.length) {
+        const file = pendingFiles[0], form = new FormData(); form.append("file", file);
+        notice("Reading " + file.name + "…");
+        const data = await api(path("/attachments"), { method: "POST", body: form });
+        if (generation !== state.generation) return false;
+        state.data = data; pendingFiles.shift(); names.push(file.name); renderAttachments();
+      }
+      if (opening && opening.step === "paper") {
+        opening.pdf = names.join(", "); opening.done.paper = true; opening.step = opening.done.repository ? "question" : "repository";
+        opening.log.push({ role: "user", content: "Attached " + names.join(", ") }, { role: "assistant", content: intakeText[opening.step] });
+        saveIntake();
+      }
+      render(); notice(); return true;
+    } catch (error) { await failure(error); return false; }
+    finally { if (generation === state.generation) { state.busy = false; controls(); } }
+  }
   async function sendMessage() {
-    const message = $("message-input").value.trim(); if (!message || busy() || !ready()) return;
+    let message = $("message-input").value.trim(); if ((!message && !pendingFiles.length) || busy() || !ready()) return;
+    if (pendingFiles.length) {
+      const opening = intake();
+      if (!await uploadAttachments()) return;
+      if (!message && opening) { state.messageKey = ""; render(); return; }
+      message ||= "Please read the attached files and use them to refine this experiment.";
+    }
     if (intake()) { $("message-input").value = ""; stored(draftKey(), null); await answerIntake(message); return; }
-    await mutate("/message", { message }, { label: "Sending your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
+    const links = (message.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(url => url.replace(/[.,;:!?]+$/, ""));
+    const repository = links.find(url => /^https:\/\/github\.com\/[^/]+\/[^/]+/i.test(url));
+    const paper = links.find(url => /^https:\/\/(arxiv\.org|doi\.org)\//i.test(url));
+    const tail = repository || paper ? "/import" : "/message";
+    const payload = repository || paper ? { paper_url: paper || "", repository_url: repository || "", brief: message } : { message };
+    await mutate(tail, payload, { label: "Reading your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
   }
   // Opening questions. A new session starts by asking, in the conversation, whether there is a paper and a repository.
   // The answers are kept in this browser tab until the first request is sent; the saved transcript then takes over.
   const intakeText = {
-    paper: "Is this work based on a paper? Paste its link or attach the PDF. If there is no paper, say so.",
+    paper: "Is this work based on a paper? Paste its link or attach a file. You can also attach notes, tables, code, or images. If there is no paper, say so.",
     repository: "Is there a code repository for it? Paste its public GitHub link. If there is none, say so.",
     question: "What do you want to investigate? One or two sentences are enough."
   };
@@ -346,12 +413,16 @@
   function intake() {
     const data = state.data;
     // A new session holds only the service's greeting. The opening questions take its place until the researcher's first request is saved.
-    if (!state.id || !data || data.messages?.some(message => message.role !== "assistant") || data.sources?.length || data.proposal || data.status === "working") return null;
+    if (!state.id || !data || data.messages?.some(message => message.role === "user") || data.proposal || data.status === "working") return null;
     if (state.intake?.id !== state.id) {
       let saved; try { saved = JSON.parse(stored(intakeKey()) || "null"); } catch (_) {}
       state.intake = { step: "paper", paper: "", repository: "", brief: "", pdf: "", done: {}, log: [], ...(saved || {}), id: state.id, file: null };
-      // A reloaded page cannot keep a chosen file. Ask for the paper again.
-      if (state.intake.pdf) { state.intake.pdf = ""; state.intake.done.paper = false; state.intake.step = "paper"; state.intake.log.push({ role: "assistant", content: "The page was reloaded, so the attached PDF is gone. " + intakeText.paper }); }
+      if (!saved && data.sources?.some(source => source.url?.startsWith("uploaded:"))) {
+        state.intake.pdf = data.sources.map(source => source.title).join(", "); state.intake.done.paper = true; state.intake.step = "repository";
+        state.intake.log.push({role: "assistant", content: "Your files are saved. " + intakeText.repository});
+      }
+      // Files already uploaded survive reload. A legacy local file selection does not.
+      if (state.intake.pdf && !data.sources?.some(source => source.url?.startsWith("uploaded:"))) { state.intake.pdf = ""; state.intake.done.paper = false; state.intake.step = "paper"; state.intake.log.push({ role: "assistant", content: "The page was reloaded, so the attached PDF is gone. " + intakeText.paper }); }
     }
     return state.intake;
   }
@@ -479,7 +550,12 @@
     finally { if (generation === state.generation) { state.busy = false; controls(); } }
   }
   $("attach-paper").addEventListener("click", () => $("paper-attach").click?.());
-  $("paper-attach").addEventListener("change", () => { const file = $("paper-attach").files?.[0]; $("paper-attach").value = ""; if (file) answerIntake("", file); });
+  $("paper-attach").addEventListener("change", () => { addAttachments(Array.from($("paper-attach").files || [])); $("paper-attach").value = ""; });
+  $("message-input").addEventListener("paste", event => {
+    const files = Array.from(event.clipboardData?.files || []); if (files.length) { event.preventDefault(); addAttachments(files); }
+  });
+  $("message-form").addEventListener("dragover", event => { if (event.dataTransfer?.types?.includes("Files")) event.preventDefault(); });
+  $("message-form").addEventListener("drop", event => { const files = Array.from(event.dataTransfer?.files || []); if (files.length) { event.preventDefault(); addAttachments(files); } });
   $("message-form").addEventListener("submit", event => { event.preventDefault(); sendMessage(); });
   $("message-input").addEventListener("input", () => { if (state.id) stored(draftKey(), $("message-input").value); controls(); });
   $("message-input").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); } });

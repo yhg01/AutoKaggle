@@ -55,7 +55,7 @@ def public_url(value):
     return parsed, host, sorted(addresses)[0]
 
 
-def fetch(url, limit=1024 * 1024, github_headers=None):
+def fetch(url, limit=1024 * 1024, github_headers=None, *, destination=None, deadline=30):
     """Resolve, validate, and connect to the same IP; repeat for every redirect."""
     for _ in range(5):
         parsed, host, address = public_url(url)
@@ -68,7 +68,7 @@ def fetch(url, limit=1024 * 1024, github_headers=None):
                 transport[0].shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
-        timer = threading.Timer(30, stop_reading)
+        timer = threading.Timer(deadline, stop_reading)
         timer.daemon = True
         timer.start()
         try:
@@ -99,6 +99,15 @@ def fetch(url, limit=1024 * 1024, github_headers=None):
             size = response.getheader("Content-Length")
             if size and int(size) > limit:
                 raise ValueError("This source exceeds the bounded import size. Use a paper PDF up to 16 MiB or a smaller repository.")
+            if destination is not None:
+                total = 0
+                with Path(destination).open("wb") as output:
+                    while chunk := response.read(1024 * 1024):
+                        total += len(chunk)
+                        if total > limit:
+                            raise ValueError("This repository exceeds the 256 MiB download limit.")
+                        output.write(chunk)
+                return b"", response.getheader("Content-Type", ""), url
             body = response.read(limit + 1)
             if len(body) > limit:
                 raise ValueError("This source exceeds the bounded import size.")
@@ -151,7 +160,16 @@ class PaperHTML(HTMLParser):
 
 
 def paper(url):
-    body, kind, final = fetch(url, MAX_PAPER)
+    requested = url
+    parsed = urlsplit(url)
+    if parsed.hostname == "arxiv.org" and re.fullmatch(r"/abs/\d{4}\.\d{4,5}(v\d+)?\.?", parsed.path):
+        url = "https://arxiv.org/pdf/" + parsed.path.removeprefix("/abs/").rstrip(".")
+    try:
+        body, kind, final = fetch(url, MAX_PAPER)
+    except (ValueError, OSError):
+        if url == requested:
+            raise
+        body, kind, final = fetch(requested, MAX_PAPER)
     if body.startswith(b"%PDF") or "application/pdf" in kind:
         try:
             result = subprocess.run([sys.executable, "-I", str(Path(__file__).with_name("source_reader.py"))],
@@ -172,8 +190,8 @@ def paper(url):
         raise ValueError("Use a public paper PDF, abstract page, or text document.")
     if len(text.strip()) < 100:
         raise ValueError("The paper has too little readable text. Try a public abstract or text PDF.")
-    return {"kind": "paper", "url": final, "requested_url": url, "title": title,
-            "sha256": hashlib.sha256(body).hexdigest(), "text": text[:40000],
+    return {"kind": "paper", "url": final, "requested_url": requested, "title": title,
+            "sha256": hashlib.sha256(body).hexdigest(), "text": text[:120000],
             "truncated": truncated, "imported_at": now()}
 
 
@@ -326,7 +344,8 @@ def register(app, store, pool, get, editing, conversation_output):
             if job["repository_url"]:
                 if update("Reading the frozen repository") is None:
                     return
-                records.append(repository(job["repository_url"]))
+                from . import repository_store
+                records.append(repository_store.snapshot(job["repository_url"], store.directory(identifier), update))
             with store.lock(identifier):
                 with store.connection() as con:
                     row = con.execute("SELECT body FROM projects WHERE id=?", (identifier,)).fetchone()

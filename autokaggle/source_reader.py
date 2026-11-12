@@ -14,14 +14,14 @@ def main():
     if reader.is_encrypted:
         raise ValueError("Encrypted PDF")
     parts, length = [], 0
-    for page in list(reader.pages)[:30]:
+    for page in list(reader.pages)[:60]:
         text = page.extract_text() or ""
-        parts.append(text[:40000 - length])
+        parts.append(text[:120000 - length])
         length += len(parts[-1])
-        if length >= 40000:
+        if length >= 120000:
             break
     print(json.dumps({"text": "\n".join(parts), "pages_total": len(reader.pages),
-                      "truncated": len(reader.pages) > 30 or length >= 40000}))
+                      "truncated": len(reader.pages) > 60 or length >= 120000}))
 
 
 if __name__ == "__main__":

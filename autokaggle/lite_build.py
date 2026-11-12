@@ -214,6 +214,9 @@ class DockerRuntime:
 
 def default_runtime():
     chosen = settings()
+    if chosen["runtime"] == "kubernetes":
+        from .lite_kubernetes import KubernetesRuntime
+        return KubernetesRuntime()
     return LocalRuntime() if chosen["runtime"] == "local" else DockerRuntime(chosen["cpus"], chosen["memory_gb"])
 
 
@@ -233,14 +236,14 @@ def freeze(project, directory):
     if not packaged and (module in RESERVED or "." in module):
         blockers.append({"field": "adapter_entrypoint", "reason": f"'{module}' cannot name the task adapter in an evaluator repository. "
                          "Use a top-level module name other than " + ", ".join(sorted(RESERVED)) + "."})
-    if c["source_url"].startswith("local:"):
+    if c["source_url"].startswith("local:") and c["source_url"] != "local:contract":
         blockers.append({"field": "source_url", "reason": "The source is a local reference. The build job and a collaborator cannot retrieve it. Provide a lab-accessible location."})
     if c.get("answer_exposure") == "private":
         blockers.append({"field": "answer_exposure", "reason": "The scoring targets are private. A Lite evaluator runs on each collaborator's machine and its repository cannot hold private answers. Decide where scoring targets come from."})
     spec = {"format": FORMAT, "problem_id": project["id"], "title": c.get("title", project["title"]),
             "contract_version": record["version"], "contract_sha256": record["contract_sha256"],
             "task_kind": c["task_kind"], "artifact_type": c["artifact_type"], "metric": c["metric"],
-            "direction": DIRECTION[c["metric"]], "failure_policy": c["failure_policy"],
+            "direction": c["metric_direction"] if c["metric"] == "custom" else DIRECTION[c["metric"]], "failure_policy": c["failure_policy"],
             "adapter": {"entrypoint": c["adapter_entrypoint"], "module": module, "packaged": packaged},
             "loader": "loader:load" if c["artifact_type"] in {"policy", "checkpoint"} else None,
             "independent_forbidden": sorted({"evaluate", "run", "gym_adapter", "check", module, "<dynamic import or execution>"}),
@@ -276,7 +279,7 @@ def evaluation_config(spec, record, files):
     assets = acceptance.parse_assets(files["assets.json"])
     protocol = {"description": c["evaluation_protocol"], "adapter": spec["adapter"]["entrypoint"], "seeds": record["seeds"],
                 "timeout_seconds": c["timeout_seconds"], "total_timeout_seconds": c["total_timeout_seconds"]}
-    for field in ("max_steps", "horizon_policy", "env_id", "environment_imports", "environment_kwargs", "seed_method", "success_key"):
+    for field in ("max_steps", "horizon_policy", "env_id", "environment_imports", "environment_kwargs", "seed_method", "success_key", "constraints", "temporal_policy", "generation_policy"):
         if field in c:
             protocol[field] = c[field]
     return {"schema": FORMAT, "evaluator_version": spec["evaluator_version"],
@@ -285,7 +288,7 @@ def evaluation_config(spec, record, files):
             "task": {"kind": c["task_kind"], "objective": c["objective"], "inputs": c["inputs"], "allowed_data": c["allowed_data"],
                      "answer_exposure": c["answer_exposure"]},
             "artifact": {"type": c["artifact_type"], "format": c["outputs"], "loader": spec["loader"]},
-            "metric": {"name": c["metric"], "direction": spec["direction"], "aggregation": "mean over the fixed seeds",
+            "metric": {"name": c.get("metric_name", c["metric"]) if c["metric"] == "custom" else c["metric"], "definition": c.get("metric_definition", c["success_definition"]), "direction": spec["direction"], "aggregation": "mean over the fixed seeds",
                        "failure_policy": c["failure_policy"], "success_definition": c["success_definition"]},
             "protocol": protocol,
             "dependencies": {"declared": c["dependencies"], "lock": "requirements.lock", "lock_sha256": _sha(files["requirements.lock"])},
@@ -306,7 +309,7 @@ def readme(spec, record, files):
              "## What is scored", "",
              f"- **Objective:** {c['objective']}",
              f"- **Artifact ({c['artifact_type']}):** {c['outputs']}",
-             f"- **Fitness:** `{c['metric']}`, {spec['direction']}d; the mean over {len(record['seeds'])} fixed seeds.",
+             f"- **Fitness:** `{c.get('metric_name', c['metric']) if c['metric'] == 'custom' else c['metric']}`, {spec['direction']}d; the mean over {len(record['seeds'])} fixed seeds.",
              f"- **Success:** {c['success_definition']}",
              f"- **Failure rule:** `{c['failure_policy']}`. " + ("A failed seed contributes zero." if c["failure_policy"] == "zero" else "Any failed seed makes the run incomplete, with no fitness."),
              f"- **Limits:** {c['timeout_seconds']} s per seed, {c['total_timeout_seconds']} s in total.", "",

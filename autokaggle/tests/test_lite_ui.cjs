@@ -109,7 +109,7 @@ test("The evaluator dialog offers no publishing control when the server has none
  await h.click("evaluator-button");const text=h.$("dialog-content").textContent;
  assert.doesNotMatch(text,/Publish to GitHub/);assert.match(text,/Publishing needs a GitHub login on this server/);});
 function blank(){const f=fixture();Object.assign(f,{title:"New internal experiment",messages:[{role:"assistant",content:"Start with the ML problem you want to study. You can add a paper and a GitHub repository."}],contract:{},ready:false,sources:[],proposal:null,stage:"",package:{status:"none"},model:{configured:true,calls:0,round_calls:0,limit:30}});return f;}
-function answered(h,f){h.handler=async(url,options)=>{if(options?.method==="POST"&&/\/lite\/(import|message|paper)$/.test(url)){if(url.endsWith("/paper"))f.sources=[{kind:"paper",url:"uploaded:paper.pdf",title:"paper.pdf"}];else f.messages=[...f.messages,{role:"user",content:"saved"},{role:"assistant",content:"Here is a proposed definition."}];return {ok:true,status:200,json:async()=>structuredClone(f)};}return null;};}
+function answered(h,f){h.handler=async(url,options)=>{if(options?.method==="POST"&&/\/lite\/(import|message|paper|attachments)$/.test(url)){if(url.endsWith("/paper")||url.endsWith("/attachments"))f.sources=[{kind:"paper",url:"uploaded:paper.pdf",title:"paper.pdf"}];else f.messages=[...f.messages,{role:"user",content:"saved"},{role:"assistant",content:"Here is a proposed definition."}];return {ok:true,status:200,json:async()=>structuredClone(f)};}return null;};}
 const posts=h=>h.calls.filter(c=>c.options?.method==="POST").map(c=>[c.url.split("/lite/")[1],typeof c.options.body==="string"?JSON.parse(c.options.body):"form"]);
 test("A new session opens with the paper question in the conversation, not a dialog or a start button",async()=>{const f=blank(),h=harness(f);await flush();
  assert.match(h.$("messages").textContent,/Is this work based on a paper\?/);assert.doesNotMatch(h.$("messages").textContent,/code repository/);assert.doesNotMatch(h.$("messages").textContent,/You can add a paper/);
@@ -118,7 +118,7 @@ test("A new session opens with the paper question in the conversation, not a dia
  assert.doesNotMatch(tools,/Paper & repository/);assert.match(html.slice(html.indexOf('id="message-form"'),html.indexOf("</form>")),/id="attach-paper"/);});
 test("Paper, repository, and question are asked in order and sent as one import",async()=>{const f=blank(),h=harness(f);await flush();answered(h,f);
  await h.input("message-input","It is https://arxiv.org/abs/2006.13760.");await h.click("send-message");
- assert.match(h.$("messages").textContent,/Is there a code repository for it\?/);assert.equal(h.$("attach-paper").hidden,true);assert.equal(posts(h).length,0);
+ assert.match(h.$("messages").textContent,/Is there a code repository for it\?/);assert.equal(h.$("attach-paper").hidden,false);assert.equal(posts(h).length,0);
  await h.input("message-input","https://gitlab.com/group/project");await h.click("send-message");
  assert.match(h.$("messages").textContent,/I can read public GitHub repositories only/);assert.equal(posts(h).length,0);
  await h.input("message-input","Yes: https://github.com/NetHack-LE/nle");await h.click("send-message");
@@ -136,18 +136,23 @@ test("Both links in one reply skip the repository question, and a long first rep
  assert.match(h.$("messages").textContent,/I will use that as your research question\. Is this work based on a paper\?/);
  await h.input("message-input","Paper https://arxiv.org/abs/1810.12894, code https://github.com/openai/random-network-distillation.");await h.click("send-message");
  assert.deepEqual(posts(h).map(([tail,body])=>[tail,body.paper_url,body.repository_url,/intrinsic rewards/.test(body.brief)]),[["import","https://arxiv.org/abs/1810.12894","https://github.com/openai/random-network-distillation",true]]);});
-test("An attached PDF answers the paper question and is uploaded before the import",async()=>{const f=blank(),h=harness(f);await flush();answered(h,f);
- h.$("paper-attach").files=[{name:"notes.txt",size:10}];await h.$("paper-attach").events.change();await flush();
- assert.match(h.$("messages").textContent,/Choose a PDF of 16 MB or less\. Is this work based on a paper\?/);
- h.$("paper-attach").files=[{name:"paper.pdf",size:2048}];await h.$("paper-attach").events.change();await flush();
- assert.match(h.$("messages").textContent,/Attached paper\.pdf/);assert.match(h.$("messages").textContent,/Is there a code repository/);
+test("Attachments are queued, removable, and uploaded before the source import",async()=>{const f=blank(),h=harness(f);await flush();answered(h,f);
+ h.$("paper-attach").files=[{name:"notes.txt",size:10},{name:"paper.pdf",size:2048}];await h.$("paper-attach").events.change();await flush();
+ assert.match(h.$("attachment-list").textContent,/notes.txt/);assert.match(h.$("attachment-list").textContent,/paper.pdf/);assert.equal(posts(h).length,0);
+ await h.click("send-message");assert.match(h.$("messages").textContent,/Attached notes.txt, paper.pdf/);assert.match(h.$("messages").textContent,/Is there a code repository/);
  await h.input("message-input","no repository");await h.click("send-message");await h.input("message-input","Reproduce table 2.");await h.click("send-message");
- assert.deepEqual(posts(h).map(([tail,body])=>[tail,body==="form"?"form":[body.paper_url,body.repository_url,body.brief]]),[["paper","form"],["import",["","","Reproduce table 2."]]]);});
+ assert.deepEqual(posts(h).map(([tail])=>tail),["attachments","attachments","import"]);
+});
+test("Attachments can be sent in an existing session without text",async()=>{const h=harness();await flush();
+ h.$("paper-attach").files=[{name:"notes.csv",size:64}];await h.$("paper-attach").events.change();await h.click("send-message");
+ assert.deepEqual(posts(h).map(([tail])=>tail),["attachments","message"]);
+ assert.match(posts(h)[1][1].message,/read the attached files/);
+});
 test("Opening answers survive a reload, and a failed first request asks again",async()=>{const f=blank(),h=harness(f);await flush();
  await h.input("message-input","https://arxiv.org/abs/2006.13760");await h.click("send-message");
  const saved=[...h.storage.entries()].find(([k])=>k.includes("intake"));assert.ok(saved);assert.equal(JSON.parse(saved[1]).paper,"https://arxiv.org/abs/2006.13760");assert.equal("file" in JSON.parse(saved[1]),false);
  h.handler=async(url,options)=>options?.method==="POST"&&url.endsWith("/import")?{ok:false,status:422,json:async()=>({detail:"Use a public GitHub repository link."})}:null;
  await h.input("message-input","https://github.com/owner/missing");await h.click("send-message");await h.input("message-input","A question.");await h.click("send-message");
  assert.match(h.$("messages").textContent,/That did not go through\. Check the links\. Is this work based on a paper\?/);assert.equal(h.$("attach-paper").hidden,false);});
-test("A saved session with messages does not show the opening questions",async()=>{const h=harness();await flush();assert.doesNotMatch(h.$("messages").textContent,/Is this work based on a paper/);assert.equal(h.$("attach-paper").hidden,true);
+test("A saved session with messages does not show the opening questions",async()=>{const h=harness();await flush();assert.doesNotMatch(h.$("messages").textContent,/Is this work based on a paper/);assert.equal(h.$("attach-paper").hidden,false);
  await h.input("message-input","A correction.");await h.click("send-message");assert.deepEqual(posts(h).map(p=>p[0]),["message"]);});
