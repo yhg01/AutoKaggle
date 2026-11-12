@@ -55,3 +55,12 @@ The browser declined the deployed Lite origin and the result-file upload. A requ
 ## Evidence rules
 
 A saved definition is not a measured evaluation. A generated module is not verified until it runs against checked examples. Model replays do not replace browser tests. Missing assets remain explicit blockers. Do not store secrets or private researcher transcripts in this file or Git.
+
+## Follow-up: link-based imports
+
+The owner requested GitHub and Google Drive links instead of a browser file upload.
+
+- GitHub source import already passed the live Civo LOB-Bench test. It stores a pinned source snapshot and supports local reads and search.
+- Google Drive dataset links are currently recorded as references. AutoKaggle does not download those files into its dataset or attachment store. This differs from the older problem-intake service.
+- Lite result reporting currently requires the runner JSON report. A GitHub or Drive artifact URL in its manifest is a provenance reference; it does not import the report or independently verify the artifact. A result-report URL import is not implemented.
+- After the owner reported enabling browser access, a new attempt to open the deployed Lite origin was still denied by the browser permission gate. No website request or login occurred. The cause cannot be assigned to this chat from the available evidence. No alternate route was used to bypass the denial.
