@@ -68,3 +68,5 @@ The owner requested GitHub and Google Drive links instead of a browser file uplo
 ## Temporary email access and BOLD OS handoff
 
 The owner approved temporary admission for any verified email while Slack/BOLD OS sign-in is prepared for 13 November. The collaborator plan is `autokaggle/docs/LITE_BOLD_OS_AUTH_PLAN.md`. The implementation uses `AUTOKAGGLE_LITE_ACCESS_POLICY=verified_email`; private mode, email-code verification, project ownership, and administrator controls remain enabled. The member-list mode remains available.
+
+Deployed temporary email access on 12 November at 11:22 UTC from commit `5cf7668`. Lite source digest: `b7fd58a1281cf41871fdbced740c19888f8eb7946867acb00bb3729adee498c9`. Full retains its previous source. The 134 focused tests passed. A live DeepSeek V4 Pro interview passed through a verified non-member account. Server checks confirmed non-member admission, anonymous denial, administrator denial, and private project isolation. All eight Lite project bodies were unchanged. Test identities were removed. Email delivery and browser sign-in were not retested.

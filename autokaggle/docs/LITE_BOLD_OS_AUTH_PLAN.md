@@ -31,6 +31,8 @@ The policy changes admission to Lite. It does not grant administrator privileges
 
 Use `autokaggle.deploy.rollout` for an existing deployment. It preserves runtime additions and takes a private database backup. The base Lite deployer also preserves the selected access policy when its option is omitted.
 
+Deployment evidence: the temporary mode is live on Civo as of 12 November 2026. The 134 focused tests and one live DeepSeek interview passed. Server checks confirmed verified non-member access, private project isolation, and no administrator access. All eight saved Lite projects were preserved. Email delivery and browser sign-in were not retested.
+
 ## Proposed sign-in flow
 
 1. The researcher opens Lite or an existing project link and selects **Continue with BOLD OS**.
