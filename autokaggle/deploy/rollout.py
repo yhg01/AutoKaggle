@@ -38,7 +38,7 @@ print(json.dumps({'projects':len(rows),'backup':target.name,'bodies_sha256':hash
 """
     evidence=json.loads(kube.run('exec','-n',namespace,running,'--','python','-c',backup))
     name=('lite-source-' if service=='lite' else 'source-')+digest[:16]
-    kube.run('apply','-f','-',document=web.manifest('ConfigMap',name,immutable=True,binaryData={'app.tar.gz':base64.b64encode(source).decode()}))
+    kube.run('apply','--server-side','--field-manager=autokaggle-rollout','-f','-',document=web.manifest('ConfigMap',name,immutable=True,binaryData={'app.tar.gz':base64.b64encode(source).decode()}))
     key=model['DEEPSEEK_API_KEY']
     private={'DEEPSEEK_API_KEY':key,'OPENAI_API_KEY':key}
     if github_token:private['AUTOKAGGLE_LITE_GITHUB_TOKEN']=github_token

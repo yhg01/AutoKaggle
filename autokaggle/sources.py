@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import advisor, conversation, onboarding_setup, workspace, observability
 from .store import now
+from .reader_process import command as reader_command
 
 MAX_PAPER = 16 * 1024 * 1024
 MAX_BRIEF = 6000
@@ -172,7 +173,7 @@ def paper(url):
         body, kind, final = fetch(requested, MAX_PAPER)
     if body.startswith(b"%PDF") or "application/pdf" in kind:
         try:
-            result = subprocess.run([sys.executable, "-I", str(Path(__file__).with_name("source_reader.py"))],
+            result = subprocess.run(reader_command(Path(__file__).with_name("source_reader.py")),
                 input=body, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20, check=True)
             parsed = json.loads(result.stdout)
             text = parsed["text"]
@@ -199,7 +200,7 @@ def uploaded_paper(data, filename):
     if not data.startswith(b"%PDF") or len(data) > MAX_PAPER:
         raise ValueError("Use a text PDF of at most 16 MiB.")
     try:
-        result = subprocess.run([sys.executable, "-I", str(Path(__file__).with_name("source_reader.py"))],
+        result = subprocess.run(reader_command(Path(__file__).with_name("source_reader.py")),
             input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20, check=True)
         parsed = json.loads(result.stdout)
         if not isinstance(parsed["text"], str) or len(parsed["text"].strip()) < 100:

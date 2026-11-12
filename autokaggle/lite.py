@@ -800,18 +800,25 @@ def register(app, store, pool, access, get, editing):
     @app.post("/api/projects/{project_id}/lite/attachments")
     def upload_attachment(project_id: str, request: Request, file: UploadFile = File(...)):
         from . import documents
-        lite_get(project_id, request)
+        item = lite_get(project_id, request)
         try:
+            if item["lite"]["status"] == "working":
+                raise HTTPException(409, "The agent is working. Wait before adding another attachment.")
             data = file.file.read(documents.MAX_DOCUMENT_BYTES + 1)
             if not data or len(data) > documents.MAX_DOCUMENT_BYTES:
                 raise HTTPException(422, "Attach a nonempty file up to 50 MB. Use a shared link for larger datasets.")
+            digest = hashlib.sha256(data).hexdigest()
+            if any(r.get("sha256") == digest for r in item["lite"]["sources"]):
+                return view(item)
+            if len(item["lite"]["sources"]) >= 12:
+                raise HTTPException(422, "Use at most twelve source records per session.")
             name = Path((file.filename or "attachment").replace("\\", "/")).name[:180]
             try:
                 record = documents.extract(data, name)
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from None
             source = {"kind": "attachment", "url": "uploaded:" + name, "title": name,
-                      "sha256": hashlib.sha256(data).hexdigest(), "text": record["text"][:60000],
+                      "sha256": digest, "text": record["text"][:60000],
                       "truncated": record["truncated"] or len(record["text"]) > 60000, "imported_at": now()}
             def save(item):
                 records = item["lite"]["sources"]
@@ -833,7 +840,8 @@ def register(app, store, pool, access, get, editing):
             if not data.startswith(b"%PDF") or len(data) > sources.MAX_PAPER:
                 raise HTTPException(422, "Use a text PDF of at most 16 MiB.")
             try:
-                extracted = subprocess.run([sys.executable, "-I", str(HERE / "source_reader.py")], input=data,
+                from .reader_process import command as reader_command
+                extracted = subprocess.run(reader_command(HERE / "source_reader.py"), input=data,
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20, check=True)
                 record = json.loads(extracted.stdout)
                 if len(record["text"].strip()) < 100:

@@ -12,6 +12,8 @@ import subprocess
 import sys
 import uuid
 
+from .reader_process import command as reader_command
+
 from fastapi import File, HTTPException, Request, UploadFile
 
 from .store import now
@@ -28,7 +30,7 @@ def extract(body, name="", content_type=""):
     if body.startswith((b"\x89PNG", b"\xff\xd8\xff", b"GIF8")) or (body.startswith(b"RIFF") and body[8:12] == b"WEBP"):
         return extract_image(body)
     try:
-        result = subprocess.run([sys.executable, "-I", str(READER), name[:180], content_type[:120]], input=body,
+        result = subprocess.run(reader_command(READER, name[:180], content_type[:120]), input=body,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=45, check=True)
         parsed = json.loads(result.stdout)
     except (subprocess.SubprocessError, ValueError):
