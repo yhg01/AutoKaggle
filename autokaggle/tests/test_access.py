@@ -47,6 +47,11 @@ def challenge(client):
 
 
 def sign_in(client, code=TEST_CODE):
+    seed_email_session(client)
+    return client.post("/api/access/login", json={"access_code": code}, headers=challenge(client))
+
+
+def seed_email_session(client):
     # Seed an email identity for focused access tests; this is not live delivery.
     if client.app.state.access.email_auth.identity(client.cookies.get(USER_COOKIE, "")) is None:
         token = secrets.token_urlsafe(32)
@@ -54,7 +59,6 @@ def sign_in(client, code=TEST_CODE):
             con.execute("INSERT OR IGNORE INTO email_accounts VALUES (?,?,?)", ("account_access_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "access-test@example.org", time.time()))
             con.execute("INSERT INTO email_sessions VALUES (?,?,?)", (hashlib.sha256(token.encode()).hexdigest(), "account_access_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", time.time() + USER_SESSION_SECONDS))
         client.cookies.set(USER_COOKIE, token, domain="testserver.local", path="/")
-    return client.post("/api/access/login", json={"access_code": code}, headers=challenge(client))
 
 
 def test_private_mode_requires_a_sufficient_access_code(tmp_path, monkeypatch):
@@ -131,6 +135,7 @@ def test_static_assets_require_validation_after_deployment(client):
 
 
 def test_invalid_access_code_does_not_create_session_and_is_throttled(client):
+    seed_email_session(client)
     headers = challenge(client)
     for _ in range(access.ATTEMPT_LIMIT):
         response = client.post("/api/access/login", json={"access_code": "wrong"}, headers=headers)
@@ -139,7 +144,16 @@ def test_invalid_access_code_does_not_create_session_and_is_throttled(client):
     denied = client.post("/api/access/login", json={"access_code": TEST_CODE}, headers=headers)
     assert denied.status_code == 429
     assert denied.headers["retry-after"] == str(access.ATTEMPT_WINDOW)
-    assert client.post("/api/projects", json={}).status_code == 401
+    assert access.ADMIN_COOKIE not in client.cookies
+    assert client.get("/api/internal/projects").status_code == 403
+
+
+def test_key_attempts_without_an_email_session_are_not_counted(client):
+    headers = challenge(client)
+    for _ in range(access.ATTEMPT_LIMIT * 3):
+        assert client.post("/api/access/login", json={"access_code": "wrong"}, headers=headers).status_code == 401
+    assert client.app.state.access._attempts == {}
+    assert sign_in(client).status_code == 200
 
 
 @pytest.mark.parametrize("origin", [None, "null", "https://other.example", "http://testserver"])

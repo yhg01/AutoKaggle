@@ -626,7 +626,9 @@ def test_publishing_creates_one_private_repository_and_pushes_the_tested_commit(
         revise(client, monkeypatch, path, title="Renamed toy problem", evaluation_count=4)
         second = build(client, path)
         assert second["release"]["evaluator_version"] == 2 and second["release"]["published"] is None
-        later = client.post(path + "/evaluator/publish").json()["release"]["published"]
+        reply = client.post(path + "/evaluator/publish")
+        assert reply.status_code == 200, reply.text
+        later = reply.json()["release"]["published"]
         newer = second["release"]["evidence"]["commit"]
         assert hub.created == ["bold-test/" + name] and later["address_recorded"] is True
         assert hub.refs(1000) == {"refs/heads/main": newer, "refs/tags/v1": commit, "refs/tags/v2": newer}
