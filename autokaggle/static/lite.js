@@ -43,7 +43,7 @@
     $("message-input").disabled = !active || blocked;
     const opening = active ? intake() : null;
     $("attach-paper").hidden = !active; $("attach-paper").disabled = blocked;
-    $("message-input").placeholder = opening ? "Paste a link, or answer in a sentence…" : "Describe your question, answer, or what you want to change…";
+    $("message-input").placeholder = codingReview() ? "What should change in the evaluator?" : opening ? "Paste a link, or answer in a sentence…" : "Describe your question, answer, or what you want to change…";
     $("send-message").disabled ||= !$("message-input").value.trim() && !pendingFiles.length;
     $("package-button").disabled = !active;
     $("results-button").disabled = !active;
@@ -177,12 +177,16 @@
     const generation = state.generation; try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; notice(); render(); schedule(); } catch (error) { if (generation === state.generation) { await failure(error); if (!state.auth) schedule(5000); } }
   }
   async function openSession(id) {
+    const arrival = new URLSearchParams(location.search);
+    if (arrival.get("project") === id && arrival.get("review") === "evaluator") stored("autokaggle-lite-code-review:" + id, "yes");
     if (state.id) stored(draftKey(), $("message-input").value);
     pendingFiles = []; renderAttachments();
     const generation = ++state.generation; clearTimeout(state.poll); state.id = id; state.data = null; state.messageKey = ""; state.loading = true; state.auth = false;
     $("messages").replaceChildren(); $("welcome").hidden = true; $("proposal-banner").hidden = true; $("challenge-title").textContent = "Opening your research…"; $("message-input").value = stored(draftKey()) || ""; renderChecklist(); controls();
     history.replaceState(null, "", "/lite?project=" + encodeURIComponent(id));
-    try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; notice(); render(); schedule(); }
+    try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; notice(); render(); schedule();
+      if (codingReview()) { $("message-input").placeholder = "What should change in the evaluator?"; notice("Code review: describe what should change. Your earlier context and release are saved."); }
+    }
     catch (error) { if (generation === state.generation) { $("challenge-title").textContent = "Session unavailable"; await failure(error); } }
     finally { if (generation === state.generation) { state.loading = false; controls(); } }
   }
@@ -398,6 +402,10 @@
       message ||= "Please read the attached files and use them to refine this experiment.";
     }
     if (intake()) { $("message-input").value = ""; stored(draftKey(), null); await answerIntake(message); return; }
+    if (codingReview()) {
+      await buildEvaluator(message);
+      return;
+    }
     const links = messageLinks(message);
     const repository = links.find(repositoryRoot);
     const paper = links.find(url => /^https:\/\/(arxiv\.org|doi\.org)\//i.test(url));
@@ -494,12 +502,12 @@
     queued: ["Queued", "The build is waiting for a slot."],
     building: ["Building", "A coding agent is implementing and testing the evaluator in a disposable workspace. This can take several minutes."],
     testing: ["Testing", "The examples are being scored from a fresh clone in a clean environment."],
-    ready: ["Ready", "This evaluator passed its scoring test from a fresh clone. It is bound to the current contract."],
+    ready: ["Software release", "Review the separate software checks and research-data validation below. A release alone does not establish research validation."],
     blocked: ["Draft · a decision is needed", "A decision or input that affects scoring is missing. Answer it in the conversation, accept the updated contract, then build again."],
     failed: ["Draft · the build did not pass", "The evaluator stays a draft. The cause is shown below."],
     stale: ["Draft · the contract changed", "The contract changed after the last tested evaluator. Build again for the current contract."]
   };
-  const evaluatorActive = view => ["queued", "building", "testing"].includes(view?.status) || ["queued", "publishing"].includes(view?.release?.publication?.status);
+  const evaluatorActive = view => ["queued", "building", "testing"].includes(view?.status) || ["queued", "publishing"].includes(view?.release?.publication?.status) || view?.release?.validation?.research_data === "running" || ["queued", "sending"].includes(view?.release?.review_invitation?.status);
   function renderEvaluator(view) {
     if (state.dialog !== "evaluator" || !dialog.open) return; content.replaceChildren();
     const [label, detail] = evaluatorText[view.status] || evaluatorText.not_built, release = view.release, latest = view.latest;
@@ -509,12 +517,18 @@
     else if (latest?.cause && !evaluatorActive(view)) { const box = el("div", null, "extraction-notes"); box.append(el("h3", "Why this build is not ready"), el("p", latest.cause)); content.append(box); }
     if (release) {
       const e = release.evidence, tag = e.tag;
+      const v = release.validation || {};
+      content.append(el("p", `Contract coverage: ${human(v.contract_coverage || "unassessed")}. Code review: ${human(v.code_review || "unassessed")}. Synthetic tests: ${human(v.synthetic || "unassessed")}. Declared research data: ${human(v.research_data || "not_run")}.`, "extraction-notes"));
+      if (release.registry) content.append(el("p", "BOLD OS: " + human(release.registry.status) + ". " + (release.registry.reason || ""), "hint"));
+      if (release.review_invitation) content.append(el("p", "Build review email: " + human(release.review_invitation.status) + ". " + (release.review_invitation.reason || ""), "hint"));
+      if (v.research_error) content.append(el("p", v.research_error, "extraction-notes"));
+      if (v.research_evidence) content.append(el("p", `Research run: observed ${v.research_evidence.observed_fitness}; expected ${v.research_evidence.expected_fitness}. Basis: ${v.research_evidence.expected_basis}`, "hint"));
       content.append(el("h3", "Tested release", "section-label"), el("p", `Evaluator version ${release.evaluator_version}, commit ${e.commit}. The example ${e.fixture} has expected fitness ${e.expected_fitness}; the fresh clone scored ${e.observed_fitness}.`));
       const pub = release.published, link = pub && safeURL(pub.url);
       if (link) { const p = el("p", "Published to the private GitHub repository "), a = el("a", pub.repository + " ↗"); a.href = link; a.target = "_blank"; a.rel = "noopener noreferrer"; p.append(a, el("span", ` at ${pub.tag}.` + (pub.address_recorded ? "" : " This release was built before its repository address was set, so its lock file does not name this repository. Rebuild and publish again to record it."))); content.append(p); }
       if (["queued", "publishing"].includes(release.publication?.status)) content.append(el("p", "Publishing the tested evaluator to GitHub…", "hint"));
       if (release.publication?.status === "failed") content.append(el("p", "GitHub publication needs a retry. " + release.publication.error, "extraction-notes"));
-      content.append(el("pre", `git clone ${link ? link + ".git" : "evaluator.bundle"} evaluator && cd evaluator && git checkout ${tag}\npython -m venv .venv && . .venv/bin/activate\npython -m pip install -r requirements.lock\npython fetch_assets.py\n${e.command}    # expected fitness ${e.expected_fitness}\npython evaluate.py --artifact PATH --output results.json`, "contract"));
+      content.append(el("pre", `git clone ${link ? link + ".git" : "evaluator.bundle"} evaluator && cd evaluator && git checkout ${tag}\npython -m venv .venv && . .venv/bin/activate\npython -m pip install -r requirements.lock\npython fetch_assets.py --mode synthetic\n${e.command}    # expected fitness ${e.expected_fitness}\npython evaluate.py --artifact PATH --output results.json`, "contract"));
     }
     const shown = release || latest;
     if (shown?.tests?.length) { content.append(el("h3", release ? "Fresh-clone tests" : "Tests from the last build", "section-label")); const ul = el("ul", null, "test-list"); for (const t of shown.tests) { const li = el("li", null, t.passed ? "test-pass" : "test-fail"); li.append(el("strong", (t.passed ? "✓ " : "✗ ") + human(t.name)), el("span", " — " + t.detail)); ul.append(li); } content.append(ul); }
@@ -530,11 +544,75 @@
     const publishing = view.publishing;
     if (release && publishing?.available && (!release.published || release.publication?.status === "failed")) { const send = button(release.publication?.status === "failed" ? "Retry publication" : "Publish to GitHub", publishEvaluator, false, true); send.dataset.evaluatorAction = "publish"; send.disabled = evaluatorActive(view) || busy(); actions.append(send); }
     content.append(actions);
+    if (release || latest || view.recoverable_draft) {
+      if (release?.validation?.contract_coverage === "passed") {
+        const check = button("Validate on research data", showResearchValidation); check.disabled = evaluatorActive(view); content.append(check);
+      }
+      if (release?.validation?.research_data === "validated") content.append(artifactLink("Download research validation ↓", path("/evaluator/research-report"), true));
+      if (release?.validation?.research_data === "validated" && !release.human_approval) content.append(button("Review and approve this version", showReleaseApproval));
+      if (release?.human_approval) content.append(el("p", "Human approval recorded for this exact version and research run.", "hint"));
+      if (release?.human_approval && ["failed", "pending_connection"].includes(release.registry?.status)) content.append(button("Retry BOLD OS registration", () => evaluatorAction("/registry/retry", {})));
+      if (release?.review_invitation?.status && release.review_invitation.status !== "sent") content.append(button("Retry review email", () => evaluatorAction("/review-email", {})));
+      content.append(button("Revise code in chat", () => {
+        stored("autokaggle-lite-code-review:" + state.id, "yes");
+        dialog.close(); state.dialog = null;
+        notice("Code review: describe what should change. The agent will inspect and test a new version. Use the Evaluator view to return to the scientific interview.");
+        $("message-input").placeholder = "What should change in the evaluator?"; $("message-input").focus();
+      }));
+      if (codingReview()) content.append(button("Return to scientific interview", () => {
+        stored("autokaggle-lite-code-review:" + state.id, null);
+        const url = new URL(location.href); url.searchParams.delete("review"); history.replaceState(null, "", url);
+        notice("Scientific interview: changes need contract acceptance before the next build."); dialog.close(); state.dialog = null;
+      }));
+    }
     if (release && publishing?.available && !release.published) content.append(el("p", publishing.repository ? `Publishing updates the private repository ${publishing.repository.name}.` : `Publishing creates a private repository under ${publishing.owner} and pushes the tested commit unchanged.`, "hint"));
     else if (release && publishing?.owner && !publishing.available) content.append(el("p", publishing.reason, "hint"));
     if (!view.available) content.append(el("p", view.unavailable_reason || "Evaluator builds are not available on this server.", "hint"));
     else if (!view.contract.accepted) content.append(el("p", "Resolve and accept the open contract decisions first.", "hint"));
     else content.append(el("p", `A build may use up to ${view.settings.minutes} minutes and ${view.settings.requests} model requests. ` + (publishing?.automatic ? "After the checks pass, the tested release is published to a private GitHub repository. Downloads need access to that repository." : "The release stays in this session until it is published."), "hint"));
+  }
+  async function evaluatorAction(tail, payload) {
+    if (busy() || !ready()) return;
+    const generation = state.generation; state.busy = true; modalError(); controls();
+    try {
+      const view = await api(path("/evaluator" + tail), {method:"POST", body:JSON.stringify(payload)});
+      if (generation !== state.generation) return;
+      state.evaluator = view; state.busy = false; showDialog("evaluator", "Evaluator", "RELEASE REVIEW"); renderEvaluator(view);
+      if (evaluatorActive(view)) state.evaluatorPoll = setTimeout(loadEvaluator, 3000);
+    } catch (error) { if (generation === state.generation) await failure(error); }
+    finally { if (generation === state.generation) { state.busy = false; controls(); } }
+  }
+  function showResearchValidation() {
+    showDialog("research-validation", "Validate on the declared research data", "MEASURED CHECK");
+    content.append(el("p", "Supply an actual research artifact and an expected score from an independent calculation or published scorer. Synthetic examples do not qualify. The server uses the existing resource limits."));
+    const form = el("form"), fields = {};
+    for (const [key, label, type] of [
+      ["artifact_url", "Artifact download link", "url"], ["artifact_sha256", "Artifact SHA-256", "text"], ["artifact_bytes", "Artifact size in bytes", "number"],
+      ["reference_url", "Reference download link (optional)", "url"], ["reference_sha256", "Reference SHA-256 (optional)", "text"], ["reference_bytes", "Reference size in bytes (optional)", "number"],
+      ["reference_expanded_bytes", "Expanded reference size in bytes (for a ZIP or tar archive)", "number"],
+      ["expected_fitness", "Independently established score", "number"], ["expected_basis", "Where does this expected score come from?", "textarea"]]) {
+      const f = field(label, "research-" + key, type); fields[key] = f.input;
+      f.input.required = !key.startsWith("reference_"); if (type === "number") f.input.step = "any"; form.append(f.wrap);
+    }
+    const submit = el("button", "Run the validation", "button primary"); submit.type = "submit"; form.append(submit);
+    form.addEventListener("submit", event => {
+      event.preventDefault(); const body = Object.fromEntries(Object.entries(fields).map(([k, input]) => [k, input.value.trim()]));
+      for (const k of ["artifact_bytes", "reference_bytes", "reference_expanded_bytes", "expected_fitness"]) body[k] = Number(body[k]);
+      body.reference_archive = body.reference_expanded_bytes > 0;
+      body.request_id = pendingID("/evaluator/research-check", body).id;
+      evaluatorAction("/research-check", body);
+    }); content.append(form);
+    content.append(el("p", "Licensed data can remain on your own machine. If the server cannot access it, this stage stays pending. Do not make licensed data public to pass this check.", "hint"));
+  }
+  function showReleaseApproval() {
+    const release = state.evaluator?.release, evidence = release?.validation?.research_evidence;
+    if (!evidence) return;
+    showDialog("release-approval", "Approve this validated version", "HUMAN REVIEW");
+    content.append(el("p", "Confirm that the scientific contract, evaluator code, declared reference data, and measured check meet your requirements. Approval applies only to this commit and research report. It makes this version eligible for the BOLD OS problem bank and benchmarks page."));
+    const form = el("form"), note = field("Your review note", "release-review-note", "textarea"); note.input.required = true; note.input.minLength = 10;
+    const submit = el("button", "Approve this version for BOLD OS", "button primary"); submit.type = "submit"; form.append(note.wrap, submit);
+    form.addEventListener("submit", event => { event.preventDefault(); evaluatorAction("/approve", {build_id:release.id, research_report_sha256:evidence.report_sha256, approved:true, note:note.input.value.trim()}); });
+    content.append(form);
   }
   async function loadEvaluator() {
     const generation = state.generation; clearTimeout(state.evaluatorPoll);
@@ -546,12 +624,15 @@
     } catch (error) { if (generation === state.generation) await failure(error); }
   }
   function showEvaluator() { if (!ready()) return; showDialog("evaluator", "Evaluator", "BUILD AND TEST"); content.append(el("p", "Loading the build record…", "hint")); loadEvaluator(); }
-  async function buildEvaluator() {
+  function codingReview() { return new URLSearchParams(location.search).get("review") === "evaluator" || stored("autokaggle-lite-code-review:" + state.id) === "yes"; }
+  async function buildEvaluator(feedback = "") {
+    feedback = typeof feedback === "string" ? feedback : "";
     if (busy() || !ready()) return;
-    const generation = state.generation, request = pendingID("/evaluator/build", { version: state.evaluator?.contract?.version || "", builds: state.evaluator?.builds || 0 });
+    const generation = state.generation, request = pendingID("/evaluator/build", { version: state.evaluator?.contract?.version || "", builds: state.evaluator?.builds || 0, feedback });
     state.busy = true; modalError(); controls();
     try {
-      const view = await api(path("/evaluator/build"), { method: "POST", body: JSON.stringify({ request_id: request.id }) }); if (generation !== state.generation) return;
+      const view = await api(path("/evaluator/build"), { method: "POST", body: JSON.stringify({ request_id: request.id, feedback: typeof feedback === "string" ? feedback : "" }) }); if (generation !== state.generation) return;
+      if (feedback) { $("message-input").value = ""; stored(draftKey(), null); showDialog("evaluator", "Evaluator", "CODE REVIEW"); }
       stored(request.key, null); state.evaluator = view; state.busy = false; renderEvaluator(view); reload();
       if (evaluatorActive(view)) state.evaluatorPoll = setTimeout(loadEvaluator, 3000);
     } catch (error) { if (generation === state.generation) await failure(error); }

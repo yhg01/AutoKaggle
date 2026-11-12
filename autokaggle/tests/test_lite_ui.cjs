@@ -80,7 +80,7 @@ test("Starting a build sends one request identity and polls the saved build",asy
  h.handler=async(url,options)=>{if(url.endsWith("/lite/evaluator/build")){view=evaluatorView({status:"building",builds:1,latest:{status:"building",stage:"The coding agent is implementing and testing the evaluator",tests:[],blockers:[]}});}
   return url.includes("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;};
  await h.click("evaluator-button");await h.clickText("Build evaluator");const call=h.calls.find(c=>c.url.endsWith("/lite/evaluator/build"));
- assert.deepEqual(Object.keys(JSON.parse(call.options.body)),["request_id"]);assert.match(h.$("dialog-content").textContent,/Building/);
+ assert.deepEqual(Object.keys(JSON.parse(call.options.body)),["request_id","feedback"]);assert.match(h.$("dialog-content").textContent,/Building/);
  await h.clickText("Build evaluator");assert.equal(h.calls.filter(c=>c.url.endsWith("/evaluator/build")).length,1);
  assert.ok([...h.timers.values()].some(t=>t.ms===3000));});
 test("A ready evaluator shows the bound release, its measured fitness, and the scoring command",async()=>{const h=harness();await flush();
@@ -90,7 +90,7 @@ test("A ready evaluator shows the bound release, its measured fitness, and the s
  const view=evaluatorView({status:"ready",draft:false,release:build,builds:2,earlier_releases:[{evaluator_version:1,contract_version:"v0",commit:"a".repeat(40)}]});
  h.handler=async url=>url.endsWith("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;
  await h.click("evaluator-button");const text=h.$("dialog-content").textContent;
- assert.match(text,/Ready/);assert.match(text,/git checkout v2/);assert.match(text,/expected fitness 1/);assert.match(text,/Download release/);assert.match(text,/Rebuild evaluator/);assert.match(text,/version 1 \(contract v0\)/);assert.match(text,/with deepseek-v4-pro on DeepSeek/);});
+ assert.match(text,/Software release/);assert.match(text,/git checkout v2/);assert.match(text,/expected fitness 1/);assert.match(text,/Download release/);assert.match(text,/Rebuild evaluator/);assert.match(text,/version 1 \(contract v0\)/);assert.match(text,/with deepseek-v4-pro on DeepSeek/);});
 test("A tested release is published on request and then shows its private repository",async()=>{const h=harness();await flush();
  const build={status:"ready",evaluator_version:1,contract_version:"v1",tests:[],published:null,evidence:{commit:"c".repeat(40),tag:"v1",fixture:"fixtures/valid/p.csv",expected_fitness:1,observed_fitness:1,command:"python evaluate.py --artifact fixtures/valid/p.csv"},
   bundle_url:"/api/projects/p1/lite/evaluator/bundle",config_url:"/api/projects/p1/lite/evaluator/config",readme_url:"/api/projects/p1/lite/evaluator/readme.md"};
@@ -188,3 +188,33 @@ test("Opening questions ask for the repository root when given a link inside a r
  await h.input("message-input","https://github.com/owner/repo");await h.click("send-message");
  await h.input("message-input","Reproduce the baseline.");await h.click("send-message");
  assert.deepEqual(posts(h).map(([tail,body])=>[tail,body.paper_url,body.repository_url,body.brief]),[["import","","https://github.com/owner/repo","Reproduce the baseline."]]);});
+function reviewedRelease(extra={}) { return {id:'b1',status:'ready',evaluator_version:1,tests:[],
+ evidence:{commit:'c'.repeat(40),tag:'v1',fixture:'fixtures/valid.csv',expected_fitness:1,observed_fitness:1,command:'python evaluate.py --mode synthetic --artifact fixtures/valid.csv'},
+ validation:{contract_coverage:'passed',code_review:'passed',synthetic:'passed',research_data:'not_run'},...extra}; }
+test('Coding feedback uses the build route and preserves the saved review mode',async()=>{
+ const h=harness();await flush();const release=reviewedRelease();
+ h.handler=async url=>url.includes('/lite/evaluator')?{ok:true,status:200,json:async()=>evaluatorView({status:'ready',release})}:null;
+ await h.click('evaluator-button');await h.clickText('Revise code in chat');
+ await h.input('message-input','Save the diagnostic output as required by the contract.');await h.click('send-message');
+ const call=h.calls.find(c=>c.url.endsWith('/evaluator/build'));
+ assert.equal(JSON.parse(call.options.body).feedback,'Save the diagnostic output as required by the contract.');
+ assert.equal(h.storage.get('autokaggle-lite-code-review:p1'),'yes');
+ assert.ok(!h.calls.some(c=>c.url.endsWith('/lite/message')));
+});
+test('Research validation and human approval are distinct from a software release',async()=>{
+ const h=harness();await flush();let release=reviewedRelease();
+ h.handler=async url=>url.includes('/lite/evaluator')?{ok:true,status:200,json:async()=>evaluatorView({status:'ready',release})}:null;
+ await h.click('evaluator-button');assert.match(h.$('dialog-content').textContent,/Declared research data: Not run/);
+ assert.doesNotMatch(h.$('dialog-content').textContent,/Review and approve this version/);
+ release=reviewedRelease({validation:{contract_coverage:'passed',code_review:'passed',synthetic:'passed',research_data:'validated',research_evidence:{report_sha256:'d'.repeat(64),expected_fitness:1,observed_fitness:1,expected_basis:'Independent result'}}});
+ await h.click('evaluator-button');assert.match(h.$('dialog-content').textContent,/Download research validation/);
+ await h.clickText('Review and approve this version');
+ assert.match(h.$('dialog-content').textContent,/exact|commit and research report/);
+ assert.ok(!h.calls.some(c=>c.url.endsWith('/evaluator/approve')));
+});
+test('A queued review email keeps the evaluator polling',async()=>{
+ const h=harness();await flush();const release=reviewedRelease({review_invitation:{status:'queued'}});
+ h.handler=async url=>url.includes('/lite/evaluator')?{ok:true,status:200,json:async()=>evaluatorView({status:'ready',release})}:null;
+ await h.click('evaluator-button');assert.match(h.$('dialog-content').textContent,/Build review email: Queued/);
+ assert.ok([...h.timers.values()].some(t=>t.ms===3000));
+});
