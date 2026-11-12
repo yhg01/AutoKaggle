@@ -43,3 +43,13 @@ Test repositories were created only under `yhg01`. The production owner is `bold
 Internal containers are for approved lab members. They are not claimed to withstand all hostile code. Full's separate security checks remain mandatory.
 
 The live Lite LOB-Bench import also completed after the storage and PDF fixes. DeepSeek selected a generation task and asked for reference stocks, date windows, sample counts, and data access. A Full source-application action now shows a visible wait message while the first interview question is prepared.
+
+Full live browser application of the LOB-Bench brief completed and asked for reference stocks, dates, and data permission. The DeepSeek scope response took several minutes. This is a remaining performance limit, not a completed speed improvement. The browser now shows a wait message during this step.
+
+The temporary operator test session was revoked after the Civo backend checks. Anonymous project lists were empty and direct project access was denied on both services.
+
+## Final deployment
+
+Both Civo services run source digest `c909b1150ecd43a9511408c2f60b2003400a8bb706d991d5e056e694bb6177ad` from feature commit `30bf39d`. The later commits update documentation only. Both health checks passed. The Full browser reopened the saved interview after rollout. All 34 original Full project bodies and six original Lite project bodies match their pre-rollout backups. Both services retain private mode. Lite retains the production BOLD repository owner and credential.
+
+Both persisted LOB-Bench snapshots contain the expected 26 files at the pinned commit. Local repository search found the scoring implementation. Final free storage was about 8.1 GiB for Full and 8.7 GiB for Lite. Full retains its onboarding runtime annotation and extra mounts.

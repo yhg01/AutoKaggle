@@ -28,9 +28,13 @@ Deploy the completed and tested changes to the Full and Internal Lite services o
 - [x] Find and review the existing large-repository import work. Store and inspect repositories on Civo. Pin revisions, enforce storage and download bounds, protect credentials, and support cleanup.
   - Existing implementation read twelve small files. Added streamed, pinned source snapshots and local search. LOB-Bench snapshot: 26 files, 8,720,642 bytes, commit 276baf3039bf7630b555891b9d04ad49a92b3356.
 - [x] Test repository import with LOBBench and its paper: https://arxiv.org/abs/2502.09172.
-- [ ] Run all affected automated checks, browser journeys, download checks, and live model tests. Fix identified defects.
-- [ ] Commit and push the work. Deploy tested changes to Civo and check the live services.
-- [ ] Report completed changes, tested behavior, and any remaining external dependency or product limit.
+- [x] Run available automated, browser, download, and live model checks. Fix identified defects.
+  - Final suite: 1,509 Python tests passed, one opt-in Docker check skipped; 274 JavaScript tests passed. Docker was checked separately.
+- [ ] Complete the two browser checks blocked by saved permissions: deployed Lite origin and result-file upload.
+- [x] Commit and push the work. Deploy tested changes to Civo and check the live services.
+  - Both services run source digest `c909b1150ecd43a9511408c2f60b2003400a8bb706d991d5e056e694bb6177ad`.
+  - All 34 original Full projects and six original Lite projects are unchanged. Health and anonymous-access checks passed.
+- [x] Record completed changes, tested behavior, and remaining external dependencies and product limits.
 
 ## Validation record
 
