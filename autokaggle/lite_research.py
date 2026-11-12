@@ -164,7 +164,15 @@ def register(app, store, pool, access, editing, read_view, runtime, github):
             saved[body.request_id] = {"job_id": job, "fingerprint": fingerprint}
             builds._RUNNING.add(build["id"])
             store.save(item)
-            pool.submit(worker, store, project_id, build["id"], job, body.model_dump(), runtime)
+            try:
+                pool.submit(worker, store, project_id, build["id"], job, body.model_dump(), runtime)
+            except (RuntimeError, OSError):
+                builds._RUNNING.discard(build["id"])
+                saved.pop(body.request_id, None)
+                build["validation"].update(research_data="failed", research_error="The validation job could not start. Retry this request.")
+                lite_release.queue_registration(item, build)
+                store.save(item)
+                raise HTTPException(503, "The validation job could not start. Your release is saved. Retry this request.") from None
         return read_view(project_id, request)
 
     @app.post("/api/projects/{project_id}/lite/evaluator/approve")

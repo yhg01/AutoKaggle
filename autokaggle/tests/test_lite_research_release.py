@@ -12,6 +12,23 @@ from autokaggle import lite_build, lite_quality, lite_release, sources
 from autokaggle.tests.test_lite_build import harness, accepted, build, settle
 
 
+def test_research_queue_failure_does_not_lock_the_session(harness, monkeypatch):
+    app, _, _ = harness
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        release = build(client, path)["release"]
+        app.state.pool.shutdown(wait=True)
+        body = {"request_id": "queue-retry", "artifact_url": "https://example.org/artifact.csv",
+                "artifact_sha256": "a"*64, "artifact_bytes": 10, "expected_fitness": 1,
+                "expected_basis": "Independently calculated result for the declared artifact."}
+        assert client.post(path + "/evaluator/research-check", json=body).status_code == 503
+        assert release["id"] not in lite_build._RUNNING
+        current = client.get(path + "/evaluator").json()["release"]
+        assert current["validation"]["research_data"] == "failed"
+        assert "could not start" in current["validation"]["research_error"]
+        assert client.post(path + "/evaluator/research-check", json=body).status_code == 503
+
+
 def test_safe_archive_rejects_links_duplicates_and_expansion(tmp_path):
     for kind in ("link", "duplicate", "large", "escape"):
         archive = tmp_path / (kind + ".tar")
