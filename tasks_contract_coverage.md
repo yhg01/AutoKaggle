@@ -19,7 +19,7 @@ Treat each generated verifier as a complete software project. The accepted scien
 - [ ] Test the UI return journey: build email/link, reopening the session, code feedback, bounded coding work, new results, and downloads.
 - [ ] Run the full workflow on a copy of Kaito's LOB-Bench contract. Check all metric/output requirements, invalid window and feature cases, reference provenance, and an iteration. Clearly report licensed-data checks that cannot run.
 - [ ] Run general regression cases across prediction, environments, optimization, forecasting, and generation. Include live DeepSeek model calls, browser tests, clean-clone/ZIP execution, and failure tests.
-- [ ] Review the OpenCode versus DeepSeek Harness choice using official sources. Do not attribute a contract/test design defect to a harness without evidence.
+- [x] Review the OpenCode versus DeepSeek Harness choice using official sources. Do not attribute a contract/test design defect to a harness without evidence.
 - [ ] Update documentation, commit, push, and open a PR with verified evidence and remaining limits.
 
 - [x] Register eligible releases in BOLD OS Problem Bank and Benchmarks only after a controlled research-data check and human approval. Keep stable project IDs and exact release commits.
@@ -43,8 +43,9 @@ The owner deferred Kaito's licensed research-data validation. Do not claim that 
 ## Verification in progress
 
 - AutoKaggle JavaScript: 281 tests passed.
-- Python full run: 1,565 passed, one skipped, and two checks stopped because local storage was low. After removal of this task's temporary files, both affected groups passed (14 tests). A final full run remains pending.
+- Python full run: 1,570 passed, one skipped. After later revision and registration fixes, the build group passed 47 tests (one skipped), and the research/registration group passed 23 tests.
 - The copied LOB-Bench interview was opened through the browser. Its ZIP downloaded and passed the archive check. Coding feedback was submitted through the chat. The live DeepSeek/OpenCode job produced 73 contract requirements. Its separate review found missing generated-CSV checks and a feature-list test with no behavioral assertion. Repair and re-review are running.
 - Gmail accepted a transport test sent only to the owner's account. Invitation content, saved send status, and duplicate protection passed integration tests. The local preview does not use production email sign-in; the complete deployed invitation journey is not claimed.
 - BOLD OS: 195 tests and the site build passed. The demo Firebase test passed registration, simultaneous retries, permissions, search, and database-rule checks. Browser checks covered both pages, notes, archive/restore, sign-out, another member's read-only controls, and light/dark/mobile layouts.
+- The AutoKaggle registration sender also passed against the local BOLD OS HTTP receiver, with a clearly labelled synthetic integration record. Both records and the exact-commit receipt were saved. A repeated delivery reused the receipt. This is an integration test, not a validation claim about Kaito's data.
 - Work is committed per solved sub-problem. The AutoKaggle PR remains to be opened after final checks.

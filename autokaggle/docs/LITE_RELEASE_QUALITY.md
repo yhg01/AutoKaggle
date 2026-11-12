@@ -36,6 +36,8 @@ The review email opens the saved session in evaluator review mode. **Revise code
 
 The new release repeats the checks. Earlier commits and tags remain available. A change to scientific meaning must return to the scientific interview and require acceptance before rebuilding. Email send status is recorded. An uncertain delivery needs an explicit retry after checking the inbox.
 
+A coding revision reuses the frozen requirement plan only when its contract digest still matches. This preserves requirement IDs and avoids unnecessary planning. A failed or incomplete review keeps the code in draft. The interface reports when the time or request allowance ended. File searches stay within the evaluator workspace. Long scoring commands remain bounded by the remaining job allowance.
+
 ## BOLD OS registration
 
 The release can enter the registration queue only when all of these are true:
@@ -57,5 +59,7 @@ The BOLD OS companion branch `codex/problem-bank-benchmarks` implements the auth
 ## Coding harness
 
 Keep OpenCode with the configured DeepSeek model for this change. The verified fault was incomplete acceptance coverage. A harness replacement does not fix that fault. The current OpenCode runtime is pinned to 1.19.5. DeepSeek Harness is a separate implementation choice and needs a controlled comparison before migration.
+
+The official DeepSeek Harness README still marks it as a developer preview with expected compatibility changes (checked 12 November 2026). No comparison run has established a quality gain for these evaluator tasks. A later comparison should use the same contracts, assets, model, budget, and independent acceptance tests. Compare completed releases, missed requirements, revision success, cost, and elapsed time.
 
 References: [OpenCode agents](https://opencode.ai/docs/agents/), [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
