@@ -398,13 +398,19 @@
       message ||= "Please read the attached files and use them to refine this experiment.";
     }
     if (intake()) { $("message-input").value = ""; stored(draftKey(), null); await answerIntake(message); return; }
-    const links = (message.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(url => url.replace(/[.,;:!?]+$/, ""));
-    const repository = links.find(url => /^https:\/\/github\.com\/[^/]+\/[^/]+/i.test(url));
+    const links = messageLinks(message);
+    const repository = links.find(repositoryRoot);
     const paper = links.find(url => /^https:\/\/(arxiv\.org|doi\.org)\//i.test(url));
     const tail = repository || paper ? "/import" : "/message";
     const payload = repository || paper ? { paper_url: paper || "", repository_url: repository || "", brief: message } : { message };
     await mutate(tail, payload, { label: "Reading your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
   }
+  // Only a repository root link can be imported; the server accepts exactly https://github.com/owner/repository.
+  // Other GitHub links, such as files, commits, or archives, stay in the message so the model can read them.
+  const messageLinks = text => (text.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(link => link.replace(/[.,;:!?]+$/, ""));
+  const githubLink = link => /^https?:\/\/(www\.)?github\.com\//i.test(link);
+  const repositoryRoot = link => /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/i.test(link);
+  const insideRepositoryNote = "That GitHub link points inside a repository. Paste the repository's main link, such as https://github.com/owner/repository. ";
   // Opening questions. A new session starts by asking, in the conversation, whether there is a paper and a repository.
   // The answers are kept in this browser tab until the first request is sent; the saved transcript then takes over.
   const intakeText = {
@@ -439,18 +445,21 @@
       else { it.file = file; it.pdf = file.name; it.paper = ""; it.done.paper = true; }
     } else {
       say("user", text);
-      const links = (text.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(link => link.replace(/[.,;:!?]+$/, ""));
-      const repository = links.find(link => /^https?:\/\/(www\.)?github\.com\/[^\/\s]+\/[^\/\s#?]+/i.test(link)), paper = links.find(link => link !== repository);
+      const links = messageLinks(text);
+      const repository = links.find(repositoryRoot), paper = links.find(link => !githubLink(link));
+      const inside = links.some(link => githubLink(link) && !repositoryRoot(link));
       const none = /^\s*(no|none|nope|n\/a|not yet|nothing)\b/i.test(text) || /\b(no|not a|without|don't have|do not have)\b[^.]{0,20}\b(paper|preprint|publication|repo|repository|code|github|link)\b/i.test(text);
       if (repository) { it.repository = repository; it.done.repository = true; }
       const fresh = paper && !it.done.paper;  // A link in a later answer does not replace the paper already given.
       if (fresh) { it.paper = paper; it.done.paper = true; }
       if (it.step === "paper" && !fresh) {
         if (none && !repository) it.done.paper = true;
-        else if (!repository && text.length >= 60 && !it.brief) { it.brief = text; note = "I will use that as your research question. "; }
-        else if (!repository) note = "I did not find a link. ";
+        // A bare link is not a research question, however long it is.
+        else if (!repository && text.replace(/https?:\/\/\S+/gi, "").trim().length >= 60 && !it.brief) { it.brief = text; note = "I will use that as your research question. "; }
+        else if (!repository) note = inside ? insideRepositoryNote : "I did not find a link. ";
       } else if (it.step === "repository" && !repository) {
-        if (none) it.done.repository = true; else note = links.length ? "I can read public GitHub repositories only. " : "I did not find a GitHub link. ";
+        if (none) it.done.repository = true;
+        else note = inside ? insideRepositoryNote : links.length ? "I can read public GitHub repositories only. " : "I did not find a GitHub link. ";
       } else if (it.step === "question") it.brief = text;
     }
     it.step = !it.done.paper ? "paper" : !it.done.repository ? "repository" : !it.brief ? "question" : "send";
