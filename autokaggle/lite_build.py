@@ -508,6 +508,24 @@ def restore_release(repository, commit, workspace):
             target.write_bytes(source.extractfile(member).read())
 
 
+def reuse_plan(job, previous_job, previous_digest, record_bytes):
+    """Retain requirement IDs for a coding revision of the same scientific contract."""
+    record = json.loads(record_bytes)
+    if previous_digest != record["contract_sha256"]:
+        return False
+    source = Path(previous_job) / "quality.json"
+    if source.is_symlink() or not source.is_file() or source.stat().st_size > acceptance.MAX_FILE:
+        return False
+    raw = source.read_bytes()
+    try:
+        quality.parse_plan(json.loads(raw), record["contract"])
+    except (ValueError, TypeError, KeyError):
+        return False
+    (Path(job) / "quality.json").write_bytes(raw)
+    (Path(job) / "work/quality.json").write_bytes(raw)
+    return True
+
+
 def run_agent(runtime, job, chosen, key, command=None, progress=None):
     """Run the coding agent with a one-job model token. The provider key stays in this process."""
     home, log = job / "home", job / "agent.log"
@@ -552,13 +570,14 @@ def run_agent(runtime, job, chosen, key, command=None, progress=None):
         if command is not None:  # Explicit test driver; never exposed by an API.
             code = phase(PROMPT)
         else:
-            code = phase("Read PLAN_TASK.md and write the complete quality.json plan. Do not write evaluator code.")
             workdir = job / "work"
-            report = read_report(workdir)
-            if report and report["status"] == "blocked":
-                return code, round(time.monotonic() - started, 1), dict(gateway.usage), gateway.token
-            if code != 0 and not (workdir / "quality.json").is_file():
-                return code, round(time.monotonic() - started, 1), dict(gateway.usage), gateway.token
+            if not (job / "quality.json").is_file():
+                code = phase("Read PLAN_TASK.md and write the complete quality.json plan. Do not write evaluator code.")
+                report = read_report(workdir)
+                if report and report["status"] == "blocked":
+                    return code, round(time.monotonic() - started, 1), dict(gateway.usage), gateway.token
+                if code != 0 and not (workdir / "quality.json").is_file():
+                    return code, round(time.monotonic() - started, 1), dict(gateway.usage), gateway.token
             contract = json.loads(frozen_contract)["contract"]
             plan_path = workdir / "quality.json"
             if plan_path.is_symlink() or not plan_path.is_file() or plan_path.stat().st_size > acceptance.MAX_FILE:
@@ -725,6 +744,7 @@ def _work(store, identifier, build_id, runtime, chosen, key, command):
             "previous_tests": previous.get("tests", []), "previous_failure": previous.get("cause"),
             "previous_blockers": previous.get("blockers", [])}, indent=2))
         previous_job = base / "jobs" / previous.get("id", "missing")
+        reuse_plan(job, previous_job, previous.get("contract_sha256"), record_bytes)
         for review in ("review-1.json", "review-2.json"):
             source = previous_job / review
             if source.is_file() and not source.is_symlink() and source.stat().st_size < 200000:

@@ -1038,3 +1038,47 @@ def test_poll_rechecks_completion_before_reporting_interruption(harness, monkeyp
         finally:
             lite_build._RUNNING.discard(build_id)
             lite_build._PUBLISHING.discard(identifier)
+
+
+def test_coding_revision_reuses_plan_only_for_the_same_contract(tmp_path):
+    from autokaggle.tests.test_lite_quality import plan
+    previous, job = tmp_path / 'previous', tmp_path / 'job'
+    previous.mkdir(); (job / 'work').mkdir(parents=True)
+    contract = {'outputs': 'Return primary and secondary scores.'}
+    record = json.dumps({'contract': contract, 'contract_sha256': 'a'*64}).encode()
+    frozen = json.dumps(plan(contract)).encode()
+    (previous / 'quality.json').write_bytes(frozen)
+    assert not lite_build.reuse_plan(job, previous, 'b'*64, record)
+    assert lite_build.reuse_plan(job, previous, 'a'*64, record)
+    assert (job / 'quality.json').read_bytes() == frozen
+    assert (job / 'work/quality.json').read_bytes() == frozen
+    changed = json.dumps({'contract': {'outputs': 'A different score.'}, 'contract_sha256': 'a'*64}).encode()
+    assert not lite_build.reuse_plan(job, previous, 'a'*64, changed)
+    (previous / 'quality.json').unlink(); (previous / 'quality.json').symlink_to(job / 'quality.json')
+    assert not lite_build.reuse_plan(job, previous, 'a'*64, record)
+
+
+def test_resumed_plan_skips_replanning_but_still_runs_code_review(tmp_path):
+    from autokaggle.tests.test_lite_quality import plan
+    work = tmp_path / 'work'; work.mkdir()
+    contract = {'outputs': 'Return primary and secondary scores.'}
+    raw = json.dumps(plan(contract)).encode()
+    (work / 'contract.json').write_text(json.dumps({'contract': contract}))
+    (work / 'quality.json').write_bytes(raw); (tmp_path / 'quality.json').write_bytes(raw)
+    prompts = []
+    class Runtime:
+        def gateway_host(self): return '127.0.0.1'
+        def run(self, argv, mounts, cwd, env, timeout, log, label):
+            prompt = argv[-1]; prompts.append(prompt)
+            if 'REVIEW_TASK' in prompt:
+                report = {'status': 'pass', 'summary': 'Reviewed', 'requirements': [{'id': 'R001', 'covered': True, 'evidence': 'test_output: observed both scores'}], 'findings': []}
+                (work / 'REVIEW.json').write_text(json.dumps(report))
+            else:
+                (work / 'BUILD_REPORT.json').write_text(json.dumps({'status': 'ready', 'summary': 'Built', 'blockers': [], 'decisions': []}))
+            return 0, 0
+    chosen = {'model': 'test', 'provider': 'deepseek', 'effort': 'medium', 'requests': 1, 'minutes': 1}
+    lite_build.run_agent(Runtime(), tmp_path, chosen, 'test-only')
+    assert len(prompts) == 2
+    assert not any('PLAN_TASK' in p for p in prompts)
+    assert 'REVIEW_TASK' in prompts[-1]
+    assert (tmp_path / 'review-1.json').is_file()
