@@ -92,6 +92,8 @@ For a long test command, set the shell tool's own timeout within the remaining j
 
 Preserve the test command's exit status when you shorten its output. A pipeline such as `python -m unittest | tail` can report success when the tests failed. Save the output, capture the test's status, show the short summary, then exit with the captured status. Confirm both the status and the test summary before claiming a pass.
 
+For provenance required by the accepted contract, test missing, malformed, and conflicting records as well as valid records. Do not complete a run with a null or invented seed, source identity, or version unless the contract explicitly permits that absence. Report the missing record clearly. Keep generation seeds separate from evaluator seeds.
+
 Finish by writing `BUILD_REPORT.json`:
 
 ```json

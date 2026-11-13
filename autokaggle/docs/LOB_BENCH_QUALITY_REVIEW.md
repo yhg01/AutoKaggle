@@ -10,6 +10,7 @@ The test uses a separate copy of the accepted LOB-Bench contract. It does not ch
 - One planning round searched the whole container and spent ten minutes in a file search. The prompts now name the local schema file and restrict searches to the evaluator workspace.
 - Saved output inspection found missing OFI divergence values. These values need a separate scientific decision. They are not all evidence of insufficient synthetic data.
 - The coding agent shortened test output with a shell pipeline that could hide a failed test's exit status. Build and review instructions now require the actual test status. A focused live DeepSeek check produced a command that returned zero for a passing test and one for a failing test. The server's separate acceptance process still checks its own exit status.
+- Additional inspection found that a missing or invalid generation-seed record could become null in an otherwise completed result. The contract requires that seed. Build and review prompts now require negative tests for missing, malformed, and conflicting provenance. A focused live review rejected this silent-null behavior. A separate evaluator seed does not replace the generation seed.
 
 ## Undefined OFI diagnostics
 
