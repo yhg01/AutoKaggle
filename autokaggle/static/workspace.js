@@ -304,6 +304,9 @@
     profileLink.textContent = event.detail.researcherName || "Profile";
     profileLink.title = event.detail.researcherName || "Edit your researcher name";
     profileLink.setAttribute("aria-label", "Edit your researcher name");
+    if (!ws.handoffOpened && ws.id && ws.conversation && !ws.busy && new URLSearchParams(location.search).get("review") === "handoff") {
+      ws.handoffOpened = true; run(() => open("share"));
+    }
     banner.hidden = !ws.conversation?.storage?.required;
     manager.disabled = false;
     if (changed) { ws.sourceDraft = null; ws.importRequest = null; ws.importSignature = null; clearTimeout(ws.timer); if (dialog.open) run(() => show(ws.tab)); }

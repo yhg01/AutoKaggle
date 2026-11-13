@@ -218,3 +218,23 @@ test('A queued review email keeps the evaluator polling',async()=>{
  await h.click('evaluator-button');assert.match(h.$('dialog-content').textContent,/Build review email: Queued/);
  assert.ok([...h.timers.values()].some(t=>t.ms===3000));
 });
+
+test("Handoff deep link checks access before offering a code",async()=>{
+ const h=harness(fixture(),"?project=p1&review=handoff");
+ h.handler=async url=>url.endsWith('/handoff')?{ok:true,status:200,json:async()=>({can_manage:false,members:[]})}:null;
+ await flush();assert.match(h.$('dialog-content').textContent,/Only the session owner/);assert.equal(h.calls.filter(c=>c.options.method).length,0);
+});
+test("Owner must click to issue a handoff and can revoke it",async()=>{
+ const h=harness(fixture(),"?project=p1&review=handoff");
+ h.handler=async(url,options)=>url.includes('/handoff')?{ok:true,status:200,json:async()=>options.method==='POST'?{code:'TEST-ONLY',expires_at:'2026-11-14T00:00:00Z'}:{can_manage:true,members:[]}}:null;
+ await flush();assert.equal(h.calls.filter(c=>c.options.method).length,0);
+ await h.clickText('Create handoff code');assert.match(h.$('dialog-content').textContent,/TEST-ONLY/);
+ await h.clickText('Revoke unused code');assert.match(h.$('dialog-content').textContent,/Unused codes revoked/);
+});
+test("Redeeming a handoff requires explicit consent and sends the supported API field",async()=>{
+ const h=harness();await flush();await h.click('sessions-button');
+ await h.input('handoff-redeem','TEST-ONLY');await h.submitFor('handoff-redeem');
+ assert.equal(h.calls.some(c=>c.url==='/api/handoffs/redeem'),false);
+ h.$('handoff-consent').checked=true;await h.submitFor('handoff-redeem');
+ assert.deepEqual(JSON.parse(h.calls.find(c=>c.url==='/api/handoffs/redeem').options.body),{code:'TEST-ONLY',accepted:true});
+});

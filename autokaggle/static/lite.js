@@ -221,11 +221,48 @@
         const row = el("article", null, "session-record"), text = el("div"); text.append(el("strong", project.title || "Untitled research"));
         const date = project.updated_at ? new Date(project.updated_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
         text.append(el("p", [date, project.id === state.id ? "Current session" : "Saved session"].filter(Boolean).join(" · "))); const actions = el("div", null, "session-actions"); actions.append(button("Resume →", async () => { dialog.close(); await openSession(project.id); }));
+        if (project.can_delete) actions.append(button("Share session", () => showHandoff(project.id)));
         if (project.can_delete) { const remove = el("button", "Delete", "text-button"); remove.type = "button"; remove.addEventListener("click", () => showDelete(project)); actions.append(remove); } row.append(text, actions); content.append(row);
       }
+      const join = el("form"), code = field("Handoff code", "handoff-redeem"); code.input.required = true;
+      const submit = el("button", "Join shared session", "button secondary"); submit.type = "submit";
+      const consentLabel=el("label",null,"consent"), consent=el("input");consent.type="checkbox";consent.required=true;consent.id="handoff-consent";
+      consentLabel.append(consent,el("span","I accept storage of this shared session and collaboration access."));
+      const privacy=el("a","Read the data-storage notice");privacy.href="/privacy";privacy.target="_blank";privacy.rel="noopener";
+      join.append(code.wrap,consentLabel,privacy,submit); content.append(join);
+      join.addEventListener("submit", async event => {
+        event.preventDefault(); if(!consent.checked){modalError("Accept the storage and collaboration notice first.");return;} submit.disabled = true; modalError();
+        try { const result = await api("/api/handoffs/redeem", {method:"POST", body:JSON.stringify({code:code.input.value.trim(),accepted:consent.checked})});
+          if (generation !== state.generation) return; location.href = result.redirect;
+        } catch(error) { if(generation===state.generation){modalError(error.message);submit.disabled=false;} }
+      });
       if (!(result.projects || []).length) content.append(el("p", "No Lite sessions yet. Create one to begin.", "empty"));
       if (state.access?.can_create_projects !== false) { const actions = el("div", null, "dialog-actions"); actions.append(button("New research session", showNew, true)); content.append(actions); }
     } catch (error) { if (generation === state.generation) await failure(error); }
+  }
+  async function showHandoff(id) {
+    showDialog("handoff", "Share this research session", "SESSION ACCESS");
+    const generation = state.generation, base = `/api/projects/${encodeURIComponent(id)}/handoff`;
+    const active = () => generation === state.generation && state.dialog === "handoff" && dialog.open;
+    content.append(el("p", "A handoff code gives another signed-in researcher ongoing edit access. It can be used once within 24 hours. Create a new code to replace an unused code. You can revoke access here."));
+    try {
+      const data = await api(base); if(!active())return;
+      if (!data.can_manage) { content.append(el("p", "Only the session owner can create handoff codes or manage collaborators.")); return; }
+      const output = el("div"), actions = el("div", null, "dialog-actions");
+      const create = button("Create handoff code", async () => {
+        create.disabled = true; modalError();
+        try { const value=await api(base,{method:"POST",body:"{}"});if(!active())return;
+          output.replaceChildren(el("code",value.code),el("p",`Expires ${new Date(value.expires_at).toLocaleString()}`));
+          output.append(button("Copy code",async()=>{try{await navigator.clipboard.writeText(value.code);}catch(_){modalError("Select and copy the code shown above.");}}));
+        } catch(e) {if(active())modalError(e.message);} finally{if(active())create.disabled=false;}
+      });
+      actions.append(create,button("Revoke unused code",async()=>{try{await api(base+"/codes",{method:"DELETE"});if(active())output.replaceChildren(el("p","Unused codes revoked."));}catch(e){if(active())modalError(e.message);}}));
+      content.append(actions,output);
+      for(const member of data.members || []) {
+        const row=el("div",null,"session-record");row.append(el("span",member.name||"Collaborator"));
+        row.append(button("Revoke access",async()=>{try{await api(base+"/"+encodeURIComponent(member.id),{method:"DELETE"});if(active())await showHandoff(id);}catch(e){if(active())modalError(e.message);}}));content.append(row);
+      }
+    }catch(e){if(active())modalError(e.message);}
   }
   function showDelete(project) {
     showDialog("delete", "Delete this research session?", "PERMANENT DELETION");
@@ -666,7 +703,7 @@
     try { state.access = await api("/api/access"); $("sign-out").hidden = !state.access.private_mode || state.access.auth_kind === "anonymous";
       if (state.access.private_mode && state.access.auth_kind === "anonymous") { state.id = new URLSearchParams(location.search).get("project"); authFailure(); return; }
       const id = new URLSearchParams(location.search).get("project"), destination = location.hash;
-      if (id) { await openSession(id); if (state.data && destination === "#results") showResults(); }
+      if (id) { await openSession(id); if (state.data && destination === "#results") showResults(); if(state.data && new URLSearchParams(location.search).get("review")==="handoff") showHandoff(id); }
       else controls();
     } catch (error) { await failure(error); }
   }
