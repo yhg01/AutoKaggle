@@ -858,6 +858,7 @@ def _work(store, identifier, build_id, runtime, chosen, key, command):
                 "command": f"python evaluate.py --mode synthetic --artifact {expected['valid']['artifact']}"}
     _finish(store, identifier, build_id, job, "ready", tests=tests, evidence=evidence, cause=None,
             validation={"build": "passed", "contract_coverage": "passed", "code_review": "passed", "synthetic": "passed",
+                        "known_score": "passed", "invalid_submission": "passed", "clean_clone": "passed",
                         "research_data": "not_run", "scope": "Only the declared synthetic fixtures were executed.",
                         "commit": commit, "contract_sha256": spec["contract_sha256"]},
             publication={"status": "queued", "attempts": 0} if auto_publish() else None)

@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 import re
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, parse_qs
 
 from . import notifications
 from .store import now
@@ -64,27 +64,39 @@ def registry_payload(item, build):
     if any(validation.get(k) != "passed" for k in ("build", "contract_coverage", "code_review", "synthetic")):
         raise ValueError("Complete the software and contract checks first.")
     research = validation.get("research_evidence") or {}
-    if (validation.get("research_data") != "validated" or research.get("passed") is not True
-            or research.get("mode") != "research" or research.get("commit") != commit
-            or research.get("contract_sha256") != contract or not research.get("reference_sha256")
-            or not research.get("report_sha256") or not research.get("artifact_sha256")
-            or not re.fullmatch(r"controlled-runtime:[a-f0-9]{16}", str(research.get("checked_by", "")))):
-        raise ValueError("Validation on the declared research data is still required.")
-    if (approval.get("commit") != commit or approval.get("contract_sha256") != contract
-            or approval.get("research_report_sha256") != research["report_sha256"] or not approval.get("approved_by")):
-        raise ValueError("Human approval of this release and its research validation is required.")
+    if validation.get("research_data") == "validated":
+        if (research.get("passed") is not True or research.get("mode") != "research" or research.get("commit") != commit
+                or research.get("contract_sha256") != contract or not research.get("reference_sha256")
+                or not research.get("report_sha256") or not research.get("artifact_sha256")
+                or not re.fullmatch(r"controlled-runtime:[a-f0-9]{16}", str(research.get("checked_by", "")))):
+            raise ValueError("The research validation evidence does not match this release.")
+    if approval and (validation.get("research_data") != "validated" or approval.get("commit") != commit
+            or approval.get("contract_sha256") != contract or approval.get("research_report_sha256") != research.get("report_sha256")
+            or not approval.get("approved_by")):
+        raise ValueError("The human approval does not match this release and its research report.")
     published = build.get("published") or {}
     if published.get("commit") != commit or not published.get("url"):
         raise ValueError("Publish this exact evaluator commit before BOLD OS registration.")
     c = item["lite"]["contract"]
-    return {"schema": "bold.autokaggle.registration.v1", "source_id": "autokaggle:" + item["id"],
-            "idempotency_key": hashlib.sha256(json.dumps([item["id"], commit, research["report_sha256"], approval.get("approved_at")], separators=(",", ":")).encode()).hexdigest(),
-            "destinations": ["problem_bank", "benchmarks"], "title": c.get("title", item["title"]),
+    project_id = lite.bold_project_id(c.get("bold_project_url", ""))
+    project_board = parse_qs(urlsplit(c["bold_project_url"]).fragment).get("board", [""])[0]
+    payload = {"schema": "bold.autokaggle.registration.v1", "source_id": "autokaggle:" + item["id"],
+            "destinations": ["problem_bank"], "project_id": project_id, "project_board": project_board,
+            "session": {"application": "lite"}, "title": c.get("title", item["title"]),
             "objective": c.get("objective"), "task_kind": c.get("task_kind"),
             "evaluator": {"repository": published["url"], "commit": commit, "version": build["evaluator_version"],
                           "zip_url": published["zip_url"], "contract_sha256": contract},
             "validation": validation, "human_approval": approval,
-            "source": {"url": c.get("source_url"), "revision": c.get("source_revision")}}
+            "details": {"submission_format": str(c.get("artifact_type", "")) + ": " + str(c.get("outputs", "")),
+                "metrics": " · ".join(str(c[k]) for k in ("metric", "metric_name", "metric_definition", "metric_direction", "success_definition") if c.get(k))[:8000],
+                "run_command": "python evaluate.py --mode research --artifact <artifact-path>",
+                "dependencies": c.get("dependencies", ""), "compute": c.get("compute_budget", ""),
+                "seeds": str(c.get("evaluation_protocol", "")) + "; fixed seeds are in the versioned evaluation config.",
+                "data_assets": " · ".join(str(c[k]) for k in ("source_url", "source_revision", "allowed_data", "inputs") if c.get(k))[:8000],
+                "limitations": validation.get("scope", "See the accepted evaluation contract and recorded checks.")}}
+    payload["idempotency_key"] = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return payload
+
 
 
 def queue_registration(item, build):
@@ -100,7 +112,7 @@ def queue_registration(item, build):
     build["registry"] = {**(old if old.get("idempotency_key") == payload["idempotency_key"] else {}),
                          "status": "pending_connection", "idempotency_key": payload["idempotency_key"],
                          "payload": payload, "queued_at": now(),
-                         "reason": "The BOLD OS Problem Bank and Benchmarks write connection must be configured."}
+                         "reason": "The BOLD OS Problem Bank write connection must be configured."}
 
 
 def deliver_registration(store, item, build, *, client=None):

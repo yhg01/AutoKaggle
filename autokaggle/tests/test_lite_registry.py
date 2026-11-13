@@ -10,7 +10,7 @@ def test_legacy_release_is_not_described_as_fully_validated():
 
 def eligible():
     from autokaggle import lite
-    item = {"id": "example", "title": "Example", "lite": {"contract": {"objective": "Measure performance", "task_kind": "generation"}}}
+    item = {"id": "example", "title": "Example", "lite": {"contract": {"bold_project_url": "https://bold-lab-ai.github.io/bold-os/project.html#id=diverging-runs", "objective": "Measure performance", "task_kind": "generation"}}}
     build = {"status": "ready", "evaluator_version": 1, "contract_sha256": "b"*64, "evidence": {"commit": "a"*40},
              "validation": {**{k: "passed" for k in ("build", "contract_coverage", "code_review", "synthetic")},
                  "research_data": "validated", "research_evidence": {"passed": True, "mode": "research", "commit": "a"*40, "contract_sha256": "b"*64,
@@ -22,10 +22,10 @@ def eligible():
     return item, build
 
 
-@pytest.mark.parametrize("change", ["research_pending", "old_commit", "new_report", "no_approval", "old_tests", "unpublished"])
-def test_registry_requires_current_research_validation_and_human_approval(change):
+@pytest.mark.parametrize("change", ["research_pending", "old_commit", "new_report", "old_tests", "unpublished"])
+def test_registry_rejects_mismatched_evidence_and_approval(change):
     item, build = eligible()
-    assert lite_release.registry_payload(item, build)["destinations"] == ["problem_bank", "benchmarks"]
+    assert lite_release.registry_payload(item, build)["destinations"] == ["problem_bank"]
     if change == "research_pending": build["validation"]["research_data"] = "not_run"
     if change == "old_commit": build["validation"]["research_evidence"]["commit"] = "0"*40
     if change == "new_report": build["human_approval"]["research_report_sha256"] = "0"*64
@@ -90,3 +90,23 @@ def test_registry_rejects_incomplete_or_reported_validation(field, value):
     build["validation"]["research_evidence"][field] = value
     lite_release.queue_registration(item, build)
     assert build["registry"]["status"] == "not_eligible"
+
+
+def test_checked_releases_register_before_research_validation_and_approval():
+    item, build = eligible()
+    build.pop("human_approval")
+    build["validation"].update(research_data="not_run", research_evidence={})
+    payload = lite_release.registry_payload(item, build)
+    assert payload["project_id"] == "diverging-runs"
+    assert payload["session"] == {"application": "lite"}
+    assert payload["human_approval"] == {}
+    assert payload["validation"]["research_data"] == "not_run"
+
+
+def test_registry_requires_project_link_even_for_old_releases():
+    from autokaggle import lite
+    item, build = eligible()
+    del item["lite"]["contract"]["bold_project_url"]
+    build["contract_version"] = lite.version(item["lite"]["contract"], [])
+    with pytest.raises(ValueError, match="BOLD OS project"):
+        lite_release.registry_payload(item, build)
