@@ -717,6 +717,7 @@ def register(app, store, pool, access, get, editing):
                 store.save(item)
             model_state = copy.deepcopy(state)
             model_state["_repository_directory"] = str(store.directory(identifier))
+            model_state["_bold_os_read_allowed"] = bool(access.enabled and os.getenv("AUTOKAGGLE_LITE_ACCESS_POLICY", "members") == "members")
             proposal = propose(model_state)
             with store.lock(identifier):
                 item = reload(identifier)
