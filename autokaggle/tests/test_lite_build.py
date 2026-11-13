@@ -78,7 +78,7 @@ if mode == "edit-trusted":
 
 
 def contract(**changes):
-    return {"title": "Toy label accuracy", "objective": "Measure label accuracy on five fixed rows.", "task_kind": "batch",
+    return {"bold_project_url": "https://bold-lab-ai.github.io/bold-os/project.html#id=diverging-runs", "title": "Toy label accuracy", "objective": "Measure label accuracy on five fixed rows.", "task_kind": "batch",
             "source_url": "https://github.com/example/toy-labels", "source_revision": "a" * 40, "inputs": "Five rows with ids 0 to 4.",
             "allowed_data": "Only the five published rows.", "answer_exposure": "visible", "artifact_type": "predictions",
             "outputs": "CSV with columns id,label and one row per id.", "adapter_entrypoint": "toy_adapter:evaluate", "metric": "accuracy",
