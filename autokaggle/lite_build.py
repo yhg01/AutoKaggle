@@ -1054,10 +1054,12 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None,
                      "contract_sha256": spec["contract_sha256"], "started_at": now(), "finished_at": None,
                      "blockers": blockers, "cause": None, "tests": [], "evidence": None}
             prior = next((b for b in reversed(state["builds"]) if b["status"] == "ready"), None)
+            # A retry from the Build button must retain saved code too. Contract
+            # changes still require a new plan and the complete release checks.
+            if state["builds"] and state["builds"][-1].get("draft_saved"):
+                build["draft_build_id"] = state["builds"][-1]["id"]
             if body.feedback.strip():
                 build.update(feedback=body.feedback.strip(), parent_commit=(prior or {}).get("evidence", {}).get("commit"))
-                if state["builds"] and state["builds"][-1].get("draft_saved"):
-                    build["draft_build_id"] = state["builds"][-1]["id"]
                 item["lite"]["messages"].append({"id": secrets.token_hex(8), "role": "user", "content": body.feedback.strip(),
                                                    "kind": "evaluator_review", "build_id": build["id"]})
                 item["lite"]["messages"].append({"id": secrets.token_hex(8), "role": "assistant", "kind": "evaluator_review",

@@ -278,6 +278,33 @@ def test_incomplete_builds_stay_draft_and_show_the_cause(harness, monkeypatch, a
         assert build(client, path)["status"] == "ready"
 
 
+@pytest.mark.parametrize("change_contract", [False, True])
+def test_build_button_resumes_saved_code_with_current_contract(harness, monkeypatch, change_contract):
+    app, mode, root = harness
+    mode["value"] = "wrong-expectation"
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        first = build(client, path)["latest"]
+        draft = Path(app.state.store.directory(identifier)) / "lite-evaluator/drafts" / first["id"]
+        assert (draft / "toy_adapter.py").is_file()
+        if change_contract:
+            revise(client, monkeypatch, path, compute_budget="Two CPUs for one minute")
+        # The second agent requires the previous implementation to be present
+        # before it writes anything. A clean workspace must fail this check.
+        script = root / "agent.py"
+        script.write_text(AGENT.replace(
+            'work, mode = Path(sys.argv[1]), sys.argv[2]',
+            'work, mode = Path(sys.argv[1]), sys.argv[2]\n'
+            'assert (work / "toy_adapter.py").is_file(), "Saved draft was lost"\n'
+            'assert json.loads((work / "contract.json").read_text())["contract"]["compute_budget"] == '
+            + repr("Two CPUs for one minute" if change_contract else "One CPU for one minute")))
+        mode["value"] = "ok"
+        second = build(client, path)["release"]
+        assert second is not None
+        if change_contract:
+            assert second["contract_version"] != first["contract_version"]
+
+
 def test_release_uses_application_files_and_only_publishable_agent_files(harness, monkeypatch, tmp_path):
     app, mode, _ = harness
     mode["value"] = "edit-trusted"
