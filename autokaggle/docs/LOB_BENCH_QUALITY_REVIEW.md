@@ -22,9 +22,11 @@ Evidence at the accepted source commit:
 - [Division into divergence windows](https://github.com/bold-lab-ai/sigma-0/blob/3e94398b7f7c8a84412f3a33d604aae937933ce4/src/lobpipeline/scorer/lob_bench/scoring.py#L573).
 - [Exclusion of OFI curves from the official plot](https://github.com/bold-lab-ai/sigma-0/blob/3e94398b7f7c8a84412f3a33d604aae937933ce4/src/lobpipeline/scorer/lob_bench/run_plotting.py#L500).
 
-The researcher must decide whether to retain the 50-message protocol and explicitly mark those four curves unavailable, or change the diagnostic settings. A different horizon changes the diagnostic comparison and needs acceptance. An agent-written note or a test asserting null values is not approval of that rule.
+On 13 November, the project owner approved retaining the 50-message protocol and explicitly marking the four OFI divergence diagnostics unavailable. The exception covers `ofi`, `ofi_up`, `ofi_stay`, and `ofi_down` only. Preserve the reason in the saved diagnostic output and README. Do not replace unavailable values with fabricated scores. All 21 full-window headline features, the other 17 divergence features, and the six price-response event types remain required.
 
-The accepted metric definition explicitly rejects missing or non-finite required secondary measurements. It therefore conflicts with those undefined values. The final live coding turn reported this conflict and left the release in **Draft · a decision is needed**. It reused the 73-requirement plan and finished after 49 model requests in 339.2 seconds.
+The decision was entered through the copied session's scientific interview, reviewed, and accepted through the browser. Only `metric_definition` and `evaluation_protocol` changed. The rebuilt contract version is `e017f02e1b87b2f3912ae912`. The original researcher session remains unchanged during this test.
+
+Before that approval, the accepted metric definition explicitly rejected missing or non-finite required secondary measurements. The fourth live coding turn reported the conflict and left the release in **Draft · a decision is needed**. It reused the 73-requirement plan and finished after 49 model requests in 339.2 seconds. The approved exception resolves that scientific conflict; it does not establish that the revised evaluator passes its software checks.
 
 Do not assume that the scorer's default horizon of 100 resolves the conflict. Price differences remove one observation before the 100-observation rolling calculation, and conditional OFI features need further observations. Any replacement horizon must be tested with the pinned scorer before it is recommended as a resolution.
 
