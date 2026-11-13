@@ -461,7 +461,7 @@
   const intakeText = {
     paper: "Is this work based on a paper? Paste its link or attach a file. You can also attach notes, tables, code, or images. If there is no paper, say so.",
     repository: "Is there a code repository for it? Paste its public GitHub link. If there is none, say so.",
-    question: "What do you want to investigate? One or two sentences are enough."
+    question: "What do you want to investigate? One or two sentences are enough. Which BOLD OS project is this evaluation for? Include its project page link."
   };
   const intakeKey = () => "autokaggle-lite-intake:" + state.id;
   function intake() {
@@ -491,7 +491,9 @@
     } else {
       say("user", text);
       const links = messageLinks(text);
-      const repository = links.find(repositoryRoot), paper = links.find(link => !githubLink(link));
+      const project = links.find(link => /^https:\/\/bold-lab-ai\.github\.io\/bold-os\/project\.html#/i.test(link));
+      if (project) it.project = project;
+      const repository = links.find(repositoryRoot), paper = links.find(link => !githubLink(link) && link !== project);
       const inside = links.some(link => githubLink(link) && !repositoryRoot(link));
       const none = /^\s*(no|none|nope|n\/a|not yet|nothing)\b/i.test(text) || /\b(no|not a|without|don't have|do not have)\b[^.]{0,20}\b(paper|preprint|publication|repo|repository|code|github|link)\b/i.test(text);
       if (repository) { it.repository = repository; it.done.repository = true; }
@@ -518,8 +520,8 @@
       finally { if (generation === state.generation) { state.busy = false; controls(); } }
     }
     const sent = () => { stored(intakeKey(), null); state.intake = null; $("transcript").scrollTop = $("transcript").scrollHeight; };
-    if (it.paper || it.repository || it.pdf) await mutate("/import", { paper_url: it.paper, repository_url: it.repository, brief: it.brief }, { label: "Reading the source material…", after: sent });
-    else await mutate("/message", { message: it.brief }, { label: "Sending your answer…", after: sent });
+    if (it.paper || it.repository || it.pdf) await mutate("/import", { paper_url: it.paper, repository_url: it.repository, brief: it.brief + (it.project ? "\nBOLD OS project: " + it.project : "") }, { label: "Reading the source material…", after: sent });
+    else await mutate("/message", { message: it.brief + (it.project ? "\nBOLD OS project: " + it.project : "") }, { label: "Sending your answer…", after: sent });
     if (generation === state.generation && state.intake === it && intake() === it) restartIntake(it, "That did not go through. Check the links. ");
   }
   function restartIntake(it, note) {

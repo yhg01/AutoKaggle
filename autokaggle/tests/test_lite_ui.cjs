@@ -238,3 +238,12 @@ test("Redeeming a handoff requires explicit consent and sends the supported API 
  h.$('handoff-consent').checked=true;await h.submitFor('handoff-redeem');
  assert.deepEqual(JSON.parse(h.calls.find(c=>c.url==='/api/handoffs/redeem').options.body),{code:'TEST-ONLY',accepted:true});
 });
+
+test("Project links stay in the brief and are not imported as papers",async()=>{
+ const f=blank(),h=harness(f);await flush();answered(h,f);
+ await h.input("message-input","No paper. Project https://bold-lab-ai.github.io/bold-os/project.html#id=diverging-runs");await h.click("send-message");
+ await h.input("message-input","No repository");await h.click("send-message");
+ assert.match(h.$("messages").textContent,/Which BOLD OS project/);
+ await h.input("message-input","Test a deterministic objective.");await h.click("send-message");
+ const sent=posts(h);assert.equal(sent.length,1);assert.equal(sent[0][0],"message");assert.match(sent[0][1].message,/#id=diverging-runs/);
+});
