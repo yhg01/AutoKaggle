@@ -57,7 +57,7 @@ def download(url, partial, limit):
                 raise
     if not shutil.which("curl"):
         raise OSError("this Python has no usable certificate store. Install its certificates, or place the verified file under assets/ yourself.")
-    done = subprocess.run(["curl", "-fsSL", "--proto", "=https", "--max-filesize", str(limit), "-o", str(partial), url],
+    done = subprocess.run(["curl", "-fsSL", "--proto", "=https", "--proto-redir", "=https", "--max-filesize", str(limit), "-o", str(partial), url],
                           capture_output=True, text=True, timeout=3600)
     if done.returncode:
         raise OSError("this Python has no usable certificate store, and curl failed: " + done.stderr.strip()[-200:])
@@ -65,11 +65,28 @@ def download(url, partial, limit):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=("research", "synthetic"), default="research")
+    args = parser.parse_args()
     assets = json.loads((ROOT / "assets.json").read_text())
     failed = False
     for asset in assets:
         target = (ROOT / asset["path"]).resolve()
-        if ROOT / "assets" not in target.parents or not asset["url"].startswith("https://"):
+        if ROOT / "assets" not in target.parents:
+            print("fetch_assets: an asset path is outside assets/.", file=sys.stderr)
+            failed = True
+            continue
+        if asset.get("source") == "local":
+            if args.mode == "synthetic":
+                print(f"not checked   {asset['path']} (research data)")
+                continue
+            from quality_checks import digest as artifact_digest
+            if not target.exists() or artifact_digest(target) != asset["sha256"]:
+                print(f"fetch_assets: supply licensed data at {asset['path']} or use evaluate.py --reference PATH. It will not be downloaded.", file=sys.stderr)
+                failed = True
+            continue
+        if ROOT / "assets" not in target.parents or not asset.get("url", "").startswith("https://"):
             print(f"fetch_assets: {asset['path']} is not an acceptable asset declaration.", file=sys.stderr)
             failed = True
             continue
@@ -77,6 +94,10 @@ def main():
             print(f"present   {asset['path']}")
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
+        if shutil.disk_usage(target.parent).free < asset["bytes"] + 64 * 1024 ** 2:
+            print(f"fetch_assets: insufficient disk space for {asset['path']} ({asset['bytes']} bytes).", file=sys.stderr)
+            failed = True
+            continue
         partial = target.with_name(target.name + ".part")
         try:
             size, value = download(asset["url"], partial, asset["bytes"])

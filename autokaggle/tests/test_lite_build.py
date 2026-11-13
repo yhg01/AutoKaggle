@@ -21,6 +21,23 @@ from autokaggle import lite, lite_acceptance as acceptance, lite_build, lite_pro
 from autokaggle.app import create_app
 from autokaggle.lite_gateway import Gateway
 
+
+@pytest.mark.parametrize("minutes", [1, 30])
+def test_shell_timeout_fits_the_remaining_build_allowance(tmp_path, minutes):
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work/contract.json").write_text('{"contract": {}}')
+    observed = []
+    class Runtime:
+        def gateway_host(self): return "127.0.0.1"
+        def run(self, argv, mounts, cwd, env, timeout, log, label):
+            observed.append((int(env["OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS"]), timeout))
+            return 0, 0
+    chosen = {"model": "test", "provider": "deepseek", "effort": "medium", "requests": 1, "minutes": minutes}
+    lite_build.run_agent(Runtime(), tmp_path, chosen, "test-only", command=["test-driver"])
+    shell, outer = observed[0]
+    assert 0 < shell <= min(600_000, outer * 1000)
+    if minutes == 30: assert shell > 120_000
+
 AGENT = r'''
 import json, os, sys
 from pathlib import Path
@@ -49,9 +66,9 @@ def evaluate(seed, manifest, contract):
 (work / "requirements.lock").write_text("# standard library only\n")
 (work / "assets.json").write_text("[]")
 for name, labels in (("valid", [0, 1, 1, 0, 1]), ("wrong", [0, 1, 1, 1, 0])):
-    (work / "fixtures" / name).mkdir(parents=True)
+    (work / "fixtures" / name).mkdir(parents=True, exist_ok=True)
     (work / "fixtures" / name / "predictions.csv").write_text("id,label\n" + "".join(f"{i},{v}\n" for i, v in enumerate(labels)))
-(work / "fixtures" / "invalid").mkdir()
+(work / "fixtures" / "invalid").mkdir(exist_ok=True)
 (work / "fixtures" / "invalid" / "predictions.csv").write_text("row,guess\n0,1\n")
 valid = 0.9 if mode == "wrong-expectation" else 1.0
 (work / "fixtures" / "expected.json").write_text(json.dumps({"tolerance": 1e-9, "cases": {
@@ -74,6 +91,17 @@ if mode == "edit-trusted":
     (work / "evaluate.py").write_text("print('{\"fitness\": 1.0}')\n")
     (work / "extra.txt").write_text("not publishable")
 (work / "BUILD_REPORT.json").write_text(json.dumps({"status": "ready", "summary": "Built a five-row accuracy scorer.", "blockers": [], "decisions": ["Used csv from the standard library."]}))
+c = json.loads((work / "contract.json").read_text())["contract"]
+requirements = [{"id": f"R{i:03d}", "field": k, "quote": v if isinstance(v, str) else json.dumps(v, sort_keys=True),
+                 "kind": "protocol", "behavior": "Check the toy scoring behavior."}
+                for i, (k, v) in enumerate(c.items(), 1) if k != "title"]
+(work / "quality.json").write_text(json.dumps({"schema": "bold.lite.quality.v1", "requirements": requirements,
+    "result_requirements": {"metrics": [], "outputs": [], "reference_required": False}}))
+(work / "coverage.json").write_text(json.dumps({r["id"]: ["test_adapter.Scores.test_score"] for r in requirements}))
+(work / "tests").mkdir(exist_ok=True)
+(work / "tests/test_adapter.py").write_text('import unittest\nimport toy_adapter\nclass Scores(unittest.TestCase):\n def test_score(self):\n  self.assertEqual(toy_adapter.evaluate(1,{"artifact_path":"fixtures/valid/predictions.csv"},{})["score"],1.0)\n')
+(work / "REVIEW.json").write_text(json.dumps({"status": "pass", "summary": "Test stand-in review, not live evidence.", "findings": [],
+    "requirements": [{"id": r["id"], "covered": True, "evidence": "test_adapter.Scores.test_score: unit-test stand-in"} for r in requirements]}))
 '''
 
 
@@ -149,7 +177,7 @@ def test_ready_release_scores_from_a_collaborator_clone_and_binds_evidence(harne
         assert release["contract_version"] == package["version"] == state["contract"]["version"]
         names = [t["name"] for t in release["tests"]]
         assert names == ["fresh clone", "release contents", "fresh environment", "declared assets", "independent calculation",
-                         "valid example", "wrong example", "wrong example scores worse", "invalid artifact rejected", "checkout unchanged"]
+                         "valid example", "wrong example", "wrong example scores worse", "invalid artifact rejected", "contract coverage", "checkout unchanged"]
         assert all(t["passed"] for t in release["tests"])
         evidence = release["evidence"]
         assert evidence["expected_fitness"] == evidence["observed_fitness"] == 1.0 and evidence["tag"] == "v1"
@@ -189,7 +217,7 @@ def test_ready_release_scores_from_a_collaborator_clone_and_binds_evidence(harne
 
         config = client.get(release["config_url"]).text
         assert f'version: "{package["version"]}"' in config and 'direction: "maximize"' in config
-        assert "python evaluate.py --artifact fixtures/valid/predictions.csv" in client.get(release["readme_url"]).text
+        assert "python evaluate.py --mode synthetic --artifact fixtures/valid/predictions.csv" in client.get(release["readme_url"]).text
         yaml = pytest.importorskip("yaml")
         parsed = yaml.safe_load(config)
         frozen = json.loads(client.get(path + "/config").text)
@@ -238,6 +266,9 @@ def test_incomplete_builds_stay_draft_and_show_the_cause(harness, monkeypatch, a
             assert state["latest"]["blockers"] == [
                 {"field": "source_revision", "reason": "Which label release should scoring use? The two releases differ in 40 rows."},
                 {"field": "other", "reason": "An unknown field is kept as other."}]
+            saved_messages = client.get(path).json()["messages"]
+            assert "Which label release should scoring use?" in saved_messages[-1]["content"]
+            assert "source_revision:" in saved_messages[-1]["content"]
         repo = Path(app.state.store.directory(identifier)) / "lite-evaluator" / "repo.git"
         if repo.exists():
             refs = subprocess.run(["git", "for-each-ref"], env={**os.environ, "GIT_DIR": str(repo)}, capture_output=True, text=True).stdout
@@ -245,6 +276,39 @@ def test_incomplete_builds_stay_draft_and_show_the_cause(harness, monkeypatch, a
         # A later correct build for the same contract becomes the release.
         mode["value"] = "ok"
         assert build(client, path)["status"] == "ready"
+
+
+@pytest.mark.parametrize("change_contract,queue_failure", [(False, False), (True, False), (True, True)])
+def test_build_button_resumes_saved_code_with_current_contract(harness, monkeypatch, change_contract, queue_failure):
+    app, mode, root = harness
+    mode["value"] = "wrong-expectation"
+    with TestClient(app) as client:
+        identifier, path = accepted(client, monkeypatch)
+        first = build(client, path)["latest"]
+        draft = Path(app.state.store.directory(identifier)) / "lite-evaluator/drafts" / first["id"]
+        assert (draft / "toy_adapter.py").is_file()
+        if queue_failure:
+            with monkeypatch.context() as stopped:
+                def reject(*args, **kwargs): raise RuntimeError("Test queue is unavailable")
+                stopped.setattr(app.state.pool, "submit", reject)
+                assert client.post(path + "/evaluator/build", json={"request_id": "queue-failure"}).status_code == 503
+        if change_contract:
+            revise(client, monkeypatch, path, compute_budget="Two CPUs for one minute")
+        # The second agent requires the previous implementation to be present
+        # before it writes anything. A clean workspace must fail this check.
+        script = root / "agent.py"
+        script.write_text(AGENT.replace(
+            'work, mode = Path(sys.argv[1]), sys.argv[2]',
+            'work, mode = Path(sys.argv[1]), sys.argv[2]\n'
+            'assert (work / "toy_adapter.py").is_file(), "Saved draft was lost"\n'
+            'assert "valid example" in json.loads((work / "REVISION_REQUEST.json").read_text())["previous_failure"]\n'
+            'assert json.loads((work / "contract.json").read_text())["contract"]["compute_budget"] == '
+            + repr("Two CPUs for one minute" if change_contract else "One CPU for one minute")))
+        mode["value"] = "ok"
+        second = build(client, path)["release"]
+        assert second is not None
+        if change_contract:
+            assert second["contract_version"] != first["contract_version"]
 
 
 def test_release_uses_application_files_and_only_publishable_agent_files(harness, monkeypatch, tmp_path):
@@ -262,7 +326,8 @@ def test_release_uses_application_files_and_only_publishable_agent_files(harness
         tracked = set(subprocess.run(["git", "ls-files"], cwd=clone, capture_output=True, text=True).stdout.split())
         assert tracked == {".gitignore", ".gitattributes", "revision.txt", "README.md", "assets.json", "contract.json", "evaluate.py", "evaluation.yaml", "evaluator.lock.json",
                            "fetch_assets.py", "gym_adapter.py", "requirements.lock", "run.py", "toy_adapter.py", "fixtures/check_expected.py",
-                           "fixtures/expected.json", "fixtures/valid/predictions.csv", "fixtures/wrong/predictions.csv", "fixtures/invalid/predictions.csv"}
+                           "fixtures/expected.json", "fixtures/valid/predictions.csv", "fixtures/wrong/predictions.csv", "fixtures/invalid/predictions.csv",
+                           "quality.json", "coverage.json", "quality_checks.py", "tests/test_adapter.py"}
 
 
 def test_build_requests_are_gated_and_idempotent(harness, monkeypatch):
@@ -818,7 +883,8 @@ def test_container_runtime_can_be_described_for_a_user_with_no_account_entry(mon
 
 def publication_settled(client, path):
     return settle(client, path + '/evaluator', lambda s: s['status'] not in lite_build.ACTIVE and
-                  (s.get('release', {}).get('publication') or {}).get('status') not in {'queued', 'publishing'})
+                  (s.get('release', {}).get('publication') or {}).get('status') not in {'queued', 'publishing'} and
+                  s.get('release', {}).get('id') not in lite_build._RUNNING)
 
 
 def test_automatic_publication_versions_one_repository(published, monkeypatch):
@@ -1008,3 +1074,53 @@ def test_poll_rechecks_completion_before_reporting_interruption(harness, monkeyp
         finally:
             lite_build._RUNNING.discard(build_id)
             lite_build._PUBLISHING.discard(identifier)
+
+
+def test_coding_revision_reuses_plan_only_for_the_same_contract(tmp_path):
+    from autokaggle.tests.test_lite_quality import plan
+    previous, job = tmp_path / 'previous', tmp_path / 'job'
+    previous.mkdir(); (job / 'work').mkdir(parents=True)
+    contract = {'outputs': 'Return primary and secondary scores.'}
+    record = json.dumps({'contract': contract, 'contract_sha256': 'a'*64}).encode()
+    frozen = json.dumps(plan(contract)).encode()
+    (previous / 'quality.json').write_bytes(frozen)
+    assert not lite_build.reuse_plan(job, previous, 'b'*64, record)
+    assert lite_build.reuse_plan(job, previous, 'a'*64, record)
+    assert (job / 'quality.json').read_bytes() == frozen
+    assert (job / 'work/quality.json').read_bytes() == frozen
+    changed = json.dumps({'contract': {'outputs': 'A different score.'}, 'contract_sha256': 'a'*64}).encode()
+    assert not lite_build.reuse_plan(job, previous, 'a'*64, changed)
+    (previous / 'quality.json').unlink(); (previous / 'quality.json').symlink_to(job / 'quality.json')
+    assert not lite_build.reuse_plan(job, previous, 'a'*64, record)
+
+
+@pytest.mark.parametrize("review_timeout", [False, True])
+def test_resumed_plan_skips_replanning_but_still_runs_code_review(tmp_path, review_timeout):
+    from autokaggle.tests.test_lite_quality import plan
+    work = tmp_path / 'work'; work.mkdir()
+    contract = {'outputs': 'Return primary and secondary scores.'}
+    raw = json.dumps(plan(contract)).encode()
+    (work / 'contract.json').write_text(json.dumps({'contract': contract}))
+    (work / 'quality.json').write_bytes(raw); (tmp_path / 'quality.json').write_bytes(raw)
+    prompts = []
+    class Runtime:
+        def gateway_host(self): return '127.0.0.1'
+        def run(self, argv, mounts, cwd, env, timeout, log, label):
+            prompt = argv[-1]; prompts.append(prompt)
+            if 'REVIEW_TASK' in prompt:
+                if review_timeout: return None, timeout
+                report = {'status': 'pass', 'summary': 'Reviewed', 'requirements': [{'id': 'R001', 'covered': True, 'evidence': 'test_output: observed both scores'}], 'findings': []}
+                (work / 'REVIEW.json').write_text(json.dumps(report))
+            else:
+                (work / 'BUILD_REPORT.json').write_text(json.dumps({'status': 'ready', 'summary': 'Built', 'blockers': [], 'decisions': []}))
+            return 0, 0
+    chosen = {'model': 'test', 'provider': 'deepseek', 'effort': 'medium', 'requests': 1, 'minutes': 1}
+    if review_timeout:
+        with pytest.raises(ValueError, match='time allowance ended before code review'):
+            lite_build.run_agent(Runtime(), tmp_path, chosen, 'test-only')
+    else:
+        lite_build.run_agent(Runtime(), tmp_path, chosen, 'test-only')
+    assert len(prompts) == 2
+    assert not any('PLAN_TASK' in p for p in prompts)
+    assert 'REVIEW_TASK' in prompts[-1]
+    assert (tmp_path / 'review-1.json').is_file() is not review_timeout

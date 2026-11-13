@@ -24,7 +24,7 @@ import sys
 import time
 
 LOCK_FORMAT = "bold.autokaggle.lite.evaluator.lock.v1"
-TRUSTED = ("evaluate.py", "fetch_assets.py", "run.py", "gym_adapter.py")
+TRUSTED = ("evaluate.py", "fetch_assets.py", "run.py", "gym_adapter.py", "quality_checks.py")
 GENERATED = ("README.md", "evaluation.yaml", "contract.json", ".gitignore")
 MAX_FILE, MAX_TOTAL, MAX_FILES = 2 * 1024 * 1024, 10 * 1024 * 1024, 200
 REQUIREMENT = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?:\[[A-Za-z0-9,._-]+\])?==[A-Za-z0-9][A-Za-z0-9.!+_-]*")
@@ -46,9 +46,10 @@ def collect(root, spec):
     files, errors, total = {}, [], 0
     reserved = set(TRUSTED) | set(GENERATED) | {"evaluator.lock.json", "check.py"}
     candidates = [p for p in sorted(root.glob("*.py")) if p.name not in reserved]
-    candidates += [root / name for name in ("requirements.lock", "assets.json", "NOTES.md") if (root / name).exists() or (root / name).is_symlink()]
-    if (root / "fixtures").is_dir() and not (root / "fixtures").is_symlink():
-        candidates += [p for p in sorted((root / "fixtures").rglob("*")) if not p.is_dir() or p.is_symlink()]
+    candidates += [root / name for name in ("requirements.lock", "assets.json", "NOTES.md", "quality.json", "coverage.json") if (root / name).exists() or (root / name).is_symlink()]
+    for folder in ("fixtures", "tests"):
+        if (root / folder).is_dir() and not (root / folder).is_symlink():
+            candidates += [p for p in sorted((root / folder).rglob("*")) if not p.is_dir() or p.is_symlink()]
     for path in candidates:
         name = path.relative_to(root).as_posix()
         if path.is_symlink() or not path.is_file():
@@ -87,18 +88,22 @@ def parse_assets(data):
         raise ValueError("assets.json: use a list of at most 50 assets.")
     seen = set()
     for asset in assets:
-        if not isinstance(asset, dict) or set(asset) != {"path", "url", "sha256", "bytes"}:
-            raise ValueError("assets.json: each asset needs exactly path, url, sha256, and bytes.")
+        if not isinstance(asset, dict):
+            raise ValueError("assets.json: each asset must be an object.")
+        local = asset.get("source") == "local"
+        required = {"path", "source", "sha256", "bytes", "mode"} if local else {"path", "url", "sha256", "bytes"}
+        if set(asset) != required or (local and asset["mode"] != "research"):
+            raise ValueError("assets.json: use path, url, sha256, bytes; or path, source=local, sha256, bytes, mode=research.")
         path = asset["path"]
         if (not isinstance(path, str) or not path.startswith("assets/") or ".." in Path(path).parts
                 or path.endswith("/") or not re.fullmatch(r"[A-Za-z0-9._/-]{8,200}", path) or path in seen):
             raise ValueError("assets.json: asset paths must be distinct plain paths under assets/.")
         seen.add(path)
-        if not isinstance(asset["url"], str) or not re.fullmatch(r"https://[^\s\"'<>]{4,1900}", asset["url"]):
+        if not local and (not isinstance(asset["url"], str) or not re.fullmatch(r"https://[^\s\"'<>]{4,1900}", asset["url"])):
             raise ValueError(f"assets.json: {path} needs an https URL.")
         if not isinstance(asset["sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", asset["sha256"]):
             raise ValueError(f"assets.json: {path} needs a SHA-256 digest.")
-        if type(asset["bytes"]) is not int or not 0 < asset["bytes"] <= 20 * 1024 ** 3:
+        if type(asset["bytes"]) is not int or not 0 < asset["bytes"] <= (1024 if local else 20) * 1024 ** 3:
             raise ValueError(f"assets.json: {path} needs its size in bytes.")
     return assets
 
@@ -249,7 +254,8 @@ def run_cases(root, python, spec, env):
     for name in ("valid", "wrong"):
         output = root / f"results.{name}.json"
         output.unlink(missing_ok=True)
-        code, out, err, seconds = _run([python, "evaluate.py", "--artifact", cases[name]["artifact"], "--output", output.name], root, limit, env)
+        mode = ["--mode", "synthetic"] if (root / "quality.json").is_file() else []
+        code, out, err, seconds = _run([python, "evaluate.py", "--artifact", cases[name]["artifact"], "--output", output.name, *mode], root, limit, env)
         summary = _last_json(out)
         fitness = summary.get("fitness") if summary else None
         results = json.loads(output.read_text()) if output.is_file() else {}
@@ -268,7 +274,8 @@ def run_cases(root, python, spec, env):
 
     output = root / "results.invalid.json"
     output.unlink(missing_ok=True)
-    code, out, err, seconds = _run([python, "evaluate.py", "--artifact", cases["invalid"]["artifact"], "--output", output.name], root, limit, env)
+    mode = ["--mode", "synthetic"] if (root / "quality.json").is_file() else []
+    code, out, err, seconds = _run([python, "evaluate.py", "--artifact", cases["invalid"]["artifact"], "--output", output.name, *mode], root, limit, env)
     summary = _last_json(out)
     rejected = code not in (0, None) and (summary is None or summary.get("completed") == 0)
     record("invalid artifact rejected", rejected,
@@ -276,6 +283,22 @@ def run_cases(root, python, spec, env):
            "The invalid artifact was not rejected. " + _tail(out or err, 600), artifact=cases["invalid"]["artifact"],
            exit_code=code, seconds=seconds, basis=cases["invalid"]["basis"][:600])
     output.unlink(missing_ok=True)
+    if (root / "quality.json").is_file():
+        target = root / "results.coverage.json"
+        target.unlink(missing_ok=True)
+        code, out, err, seconds = _run([python, "quality_checks.py", str(target)], root, limit, env)
+        coverage = json.loads(target.read_text()) if target.is_file() else {}
+        passed = code == 0 and coverage.get("passed") is True
+        errors = coverage.get("errors", [])
+        failures = "\n".join(str(error)[-1500:] for error in errors[:3]) if isinstance(errors, list) else ""
+        missing = [key for key, value in coverage.get("requirements", {}).items() if value is not True]
+        detail = ("Executed the tests mapped to each requirement." if passed else
+                  ("Required tests failed: " + failures if failures else
+                   "Requirements without passing tests: " + ", ".join(missing[:20]) if missing else
+                   _tail(err or out or json.dumps(coverage))))
+        record("contract coverage", passed, detail,
+               coverage=coverage, seconds=seconds)
+        target.unlink(missing_ok=True)
     return tests
 
 
@@ -346,7 +369,7 @@ def clone_run(source, ref, work, spec, allow_sdist):
         return report
     env = clean_env(work / "home", str(Path(python).parent))
     assets = parse_assets((root / "assets.json").read_bytes())
-    code, out, err, seconds = _run([python, "fetch_assets.py"], root, 3600, env)
+    code, out, err, seconds = _run([python, "fetch_assets.py", "--mode", "synthetic"], root, 3600, env)
     tests.append({"name": "declared assets", "passed": code == 0, "seconds": seconds,
                   "detail": f"Retrieved and verified {len(assets)} declared assets." if code == 0 else "A declared asset could not be retrieved or verified. " + _tail(err or out)})
     if code != 0:
@@ -382,7 +405,7 @@ def workspace_check(root, spec):
         report["tests"].append({"name": "scratch commit", "passed": False, "detail": str(exc)[:800]})
         return report
     env = clean_env(root / ".check-home", str(Path(sys.executable).parent))
-    code, out, err, _ = _run([sys.executable, "fetch_assets.py"], root, 3600, env)
+    code, out, err, _ = _run([sys.executable, "fetch_assets.py", "--mode", "synthetic"], root, 3600, env)
     report["tests"].append({"name": "declared assets", "passed": code == 0, "detail": "Assets verified." if code == 0 else _tail(err or out)})
     if code == 0:
         report["tests"] += run_cases(root, sys.executable, spec, env)

@@ -16,6 +16,10 @@ import time
 
 
 def digest(path):
+    path = Path(path)
+    if path.is_dir() or path.is_symlink():
+        from quality_checks import digest as artifact_digest
+        return artifact_digest(path)
     value = hashlib.sha256()
     with Path(path).open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
@@ -79,6 +83,9 @@ def run(package_dir, manifest_path, output_path):
     for source, name in (("lite_runner.py", "run.py"), ("lite_gym_adapter.py", "gym_adapter.py")):
         if digest(package_dir / name) != contract_record.get("evaluator_files", {}).get(source):
             raise ValueError("A packaged evaluator file was changed. Rebuild the package through Lite.")
+    helper = contract_record.get("evaluator_files", {}).get("lite_quality.py")
+    if helper and digest(package_dir / "quality_checks.py") != helper:
+        raise ValueError("The result evidence checks differ from the package.")
     contract, seeds = contract_record["contract"], contract_record["seeds"]
     manifest_path = Path(manifest_path).resolve()
     manifest = json.loads(manifest_path.read_text())
@@ -112,7 +119,7 @@ def run(package_dir, manifest_path, output_path):
         raise ValueError("Run the declared code commit with no changes to tracked files.")
     # Paths are local researcher choices. The web service never follows them.
     asset = Path(manifest.get("artifact_path", "")).resolve()
-    if not asset.is_file() or digest(asset) != manifest.get("artifact_sha256"):
+    if not (asset.is_file() or asset.is_dir()) or digest(asset) != manifest.get("artifact_sha256"):
         raise ValueError("The local artifact does not match its SHA-256.")
     manifest["artifact_path"] = str(asset)
     for field in ("dependencies_path",):
@@ -121,6 +128,14 @@ def run(package_dir, manifest_path, output_path):
             raise ValueError("The dependency lock does not match its SHA-256.")
         manifest[field] = str(file)
     records, diagnostics = [], {}
+    plan_path = package_dir / "quality.json"
+    plan = json.loads(plan_path.read_text()) if plan_path.is_file() else None
+    output_parent = Path(output_path).resolve().parent
+    output_parent.mkdir(parents=True, exist_ok=True)
+    if plan:
+        # A fresh directory prevents files from an earlier attempt satisfying checks.
+        durable = Path(tempfile.mkdtemp(prefix=Path(output_path).stem + "-outputs-", dir=output_parent))
+        manifest["output_directory"] = str(durable)
     total_started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="autokaggle-lite-") as temporary:
         temporary = Path(temporary)
@@ -128,7 +143,12 @@ def run(package_dir, manifest_path, output_path):
         for seed in seeds:
             target = temporary / "result.json"
             target.unlink(missing_ok=True)
-            job.write_text(json.dumps({"seed": seed, "manifest": manifest, "contract": contract}))
+            seed_manifest = dict(manifest)
+            if plan:
+                seed_output = durable / str(seed)
+                seed_output.mkdir()
+                seed_manifest["output_directory"] = str(seed_output)
+            job.write_text(json.dumps({"seed": seed, "manifest": seed_manifest, "contract": contract}))
             started = time.monotonic()
             record = {"seed": seed, "score": None, "steps": 0, "status": "failed"}
             remaining = contract["total_timeout_seconds"] - (started - total_started)
@@ -157,10 +177,21 @@ def run(package_dir, manifest_path, output_path):
                         diagnostics[str(seed)] = errors.read(2000).decode(errors="replace")
                     raise ValueError("The adapter did not complete.")
                 record = validate_record(json.loads(target.read_text()), seed, contract["metric"])
+                if plan:
+                    from quality_checks import result_evidence
+                    # Packaged environment adapters return their primary score in
+                    # the common scalar field. This does not invent secondary metrics.
+                    if contract.get("adapter_entrypoint", "").startswith("gym_adapter:") and record.get("status") == "completed":
+                        primary = contract.get("metric_name") if contract["metric"] == "custom" else contract["metric"]
+                        record.setdefault("metrics", {}).setdefault(primary, record["score"])
+                    record = result_evidence(record, seed_manifest, plan)
+                    record["output_directory"] = str(seed)
             except subprocess.TimeoutExpired:
                 record["status"] = "timeout"
-            except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+            except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+                diagnostics.setdefault(str(seed), str(exc)[:2000])
                 record["status"] = "failed"
+                record["score"] = None
             record["elapsed_seconds"] = round(time.monotonic() - started, 4)
             records.append(record)
     result = {"format": "bold.autokaggle.lite.results.v1", "challenge_version": contract_record["version"],
