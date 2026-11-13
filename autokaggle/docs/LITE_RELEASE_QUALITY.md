@@ -40,21 +40,19 @@ A coding revision reuses the frozen requirement plan only when its contract dige
 
 ## BOLD OS registration
 
-The release can enter the registration queue only when all of these are true:
+The release can enter the registration queue when the accepted contract matches the tested release, the build and contract coverage pass, software review and synthetic checks pass, and the exact commit is published on GitHub. A specific BOLD OS project link is required. BOLD OS verifies that the project exists. Paper and repository links cannot substitute for that project.
 
-- The current contract matches the tested release.
-- Build, contract coverage, code review, and synthetic tests passed.
-- A controlled run validated the declared research data.
-- A human approved that exact commit and research report.
-- That exact commit is published on GitHub.
+The Problem Bank shows three evidence stages: **Fully implemented**, **Checked**, and **Validated on the actual task**. Known-score, invalid-submission, and clean-clone checks are required for Checked. Only a controlled check on the declared research assets can establish Validated. Human approval is recorded separately and must name the exact validated commit and report. Earlier stages can be listed without implying research validation or human approval.
 
-The queue records one stable project identity and an idempotency key derived from the project, commit, research report, and approval time. Retries must update the same Problem Bank record and evaluator version under Benchmarks.
+The queue uses one stable AutoKaggle session identity. Its idempotency key covers the complete registration payload. Project, evidence, approval, or metadata changes get a new receipt while updating the same Problem Bank entry. Earlier evaluator releases remain available within that entry. There is no separate Benchmarks page.
 
-Configure `AUTOKAGGLE_BOLD_REGISTRY_URL` and `AUTOKAGGLE_BOLD_REGISTRY_TOKEN` in private server configuration after the BOLD OS registry branch is reviewed and deployed. The endpoint is `https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/v1/register_benchmark`. The adapter permits only that HTTPS endpoint. It does not follow redirects. No endpoint or write permission is assumed from the read-only MCP connection.
+Configure `AUTOKAGGLE_BOLD_REGISTRY_URL` and `AUTOKAGGLE_BOLD_REGISTRY_TOKEN` in private server configuration after the BOLD OS registry PR is reviewed and deployed. The endpoint is `https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/v1/register_benchmark`. The adapter permits only that HTTPS endpoint and does not follow redirects. A read-only MCP token cannot register records.
 
-The POST body is `{ "registration": <record> }`. The record uses `bold.autokaggle.registration.v1`. It contains `source_id`, `idempotency_key`, `destinations`, title, objective, task kind, pinned evaluator links, validation evidence, and human approval. The approved acting token goes in the Authorization header as `Bearer <token>`. The same key goes in the Idempotency-Key header. A successful response must contain both `problem_id` and `benchmark_id`, plus the matching `commit` and `idempotency_key`. A partial receipt, connection error, or permission denial leaves a visible retryable queue entry.
+The POST body is `{ "registration": <record> }`, using `bold.autokaggle.registration.v1`. It includes the BOLD project ID and optional board, `destinations: ["problem_bank"]`, objective, task, evaluator links, checks, descriptive metadata, and the full/Lite session type. Research evidence and human approval are included when present. The approved acting token goes in the Authorization header. A successful receipt must match `problem_id`, `benchmark_id`, `commit`, and `idempotency_key`. Partial receipts, connection errors, and permission denials remain retryable.
 
-The BOLD OS companion branch `codex/problem-bank-benchmarks` implements the authenticated transaction, pages, access rules, search, and revision history. It returns a receipt only after both records are saved. It is a separate branch for review; it is not deployed and has no pull request to main. This AutoKaggle repository does not bypass BOLD OS approval rules.
+The companion BOLD OS branch is `codex/problem-bank-benchmarks`. Its legacy release collection and endpoint names remain for compatibility. The page includes resume and handoff-management links. Handoff codes remain in AutoKaggle: only the owner can create or revoke a code, and the recipient must sign in and explicitly accept session access. The bank does not store a bearer code.
+
+Verification on 13 November used the local Firebase demo service. The real sender registered a checked fixture, retried without duplication, and updated the same record with synthetic research evidence. This proves transport and state handling, not validation of research data. The live project-question test used DeepSeek V4 Pro, not OpenRouter.
 
 ## Coding harness
 
