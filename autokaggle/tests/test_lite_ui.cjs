@@ -188,3 +188,12 @@ test("Opening questions ask for the repository root when given a link inside a r
  await h.input("message-input","https://github.com/owner/repo");await h.click("send-message");
  await h.input("message-input","Reproduce the baseline.");await h.click("send-message");
  assert.deepEqual(posts(h).map(([tail,body])=>[tail,body.paper_url,body.repository_url,body.brief]),[["import","","https://github.com/owner/repo","Reproduce the baseline."]]);});
+
+test("Project links stay in the brief and are not imported as papers",async()=>{
+ const f=blank(),h=harness(f);await flush();answered(h,f);
+ await h.input("message-input","No paper. Project https://bold-lab-ai.github.io/bold-os/project.html#id=diverging-runs");await h.click("send-message");
+ await h.input("message-input","No repository");await h.click("send-message");
+ assert.match(h.$("messages").textContent,/Which BOLD OS project/);
+ await h.input("message-input","Test a deterministic objective.");await h.click("send-message");
+ const sent=posts(h);assert.equal(sent.length,1);assert.equal(sent[0][0],"message");assert.match(sent[0][1].message,/#id=diverging-runs/);
+});
