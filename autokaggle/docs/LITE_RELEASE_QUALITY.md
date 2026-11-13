@@ -32,7 +32,7 @@ This check verifies execution against declared assets and an expected result. It
 
 ## Coding iteration
 
-The review email opens the saved session in evaluator review mode. **Revise code in chat** uses the normal chat box. The next coding job starts from the last tested commit and, when available, the saved failed draft. It receives the feedback, recent conversation, previous tests, failure, and review findings. Failed drafts retain bounded code files; they do not retain downloaded data, credentials, or dependency caches.
+The review email opens the saved session in evaluator review mode. **Revise code in chat** uses the normal chat box. The next coding job starts from the last tested commit and, when available, the saved failed draft. It receives the feedback, recent conversation, previous tests, failure, and review findings. **Build evaluator** also resumes a saved draft and its review context. A queue failure records a clear error and releases the session for another attempt. It does not discard an earlier draft. Failed drafts retain bounded code files; they do not retain downloaded data, credentials, or dependency caches.
 
 The new release repeats the checks. Earlier commits and tags remain available. A change to scientific meaning must return to the scientific interview and require acceptance before rebuilding. Email send status is recorded. An uncertain delivery needs an explicit retry after checking the inbox.
 

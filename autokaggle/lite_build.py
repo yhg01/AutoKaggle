@@ -744,10 +744,13 @@ def _work(store, identifier, build_id, runtime, chosen, key, command):
             target = job / "work" / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
-    if build.get("feedback"):
-        previous = item.get("lite_evaluator", {}).get("builds", [])[-2] if len(item.get("lite_evaluator", {}).get("builds", [])) > 1 else {}
+    if build.get("feedback") or build.get("draft_build_id"):
+        previous_builds = item.get("lite_evaluator", {}).get("builds", [])[:-1]
+        previous = next((b for b in reversed(previous_builds) if b["id"] == build.get("draft_build_id")),
+                        previous_builds[-1] if previous_builds else {})
         (job / "work" / "REVISION_REQUEST.json").write_text(json.dumps({
-            "feedback": build["feedback"], "parent_commit": build.get("parent_commit"),
+            "feedback": build.get("feedback") or "Continue the saved draft against the current accepted contract and complete the checks.",
+            "parent_commit": build.get("parent_commit"),
             "recent_messages": item["lite"]["messages"][-20:],
             "previous_tests": previous.get("tests", []), "previous_failure": previous.get("cause"),
             "previous_blockers": previous.get("blockers", [])}, indent=2))
@@ -1056,8 +1059,9 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None,
             prior = next((b for b in reversed(state["builds"]) if b["status"] == "ready"), None)
             # A retry from the Build button must retain saved code too. Contract
             # changes still require a new plan and the complete release checks.
-            if state["builds"] and state["builds"][-1].get("draft_saved"):
-                build["draft_build_id"] = state["builds"][-1]["id"]
+            draft = next((b for b in reversed(state["builds"]) if b.get("draft_saved") or b["status"] == "ready"), None)
+            if draft and draft.get("draft_saved"):
+                build["draft_build_id"] = draft["id"]
             if body.feedback.strip():
                 build.update(feedback=body.feedback.strip(), parent_commit=(prior or {}).get("evidence", {}).get("commit"))
                 item["lite"]["messages"].append({"id": secrets.token_hex(8), "role": "user", "content": body.feedback.strip(),
@@ -1076,7 +1080,13 @@ def register(app, store, pool, access, get, editing, runtime=None, command=None,
             store.save(item)
             result = view(item, runtime, github)
         if not blockers:
-            pool.submit(work, store, project_id, build["id"], runtime, settings(), key, command, github)
+            try:
+                pool.submit(work, store, project_id, build["id"], runtime, settings(), key, command, github)
+            except Exception as exc:
+                _RUNNING.discard(build["id"])
+                _finish(store, project_id, build["id"], directory / "lite-evaluator" / "jobs" / build["id"],
+                        "failed", cause="The build could not start. Your saved code and contract are unchanged. Try a new build.")
+                raise HTTPException(503, "The build could not start. Try again shortly.") from exc
         return result
 
     @app.post("/api/projects/{project_id}/lite/evaluator/publish")

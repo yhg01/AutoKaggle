@@ -12,6 +12,24 @@ from autokaggle import lite_build, lite_quality, lite_release, sources
 from autokaggle.tests.test_lite_build import harness, accepted, build, settle
 
 
+def test_build_queue_failure_does_not_lock_the_session(harness, monkeypatch):
+    app, _, _ = harness
+    with TestClient(app) as client:
+        _, path = accepted(client, monkeypatch)
+        app.state.pool.shutdown(wait=True)
+        body = {"request_id": "build-queue-retry"}
+        assert client.post(path + "/evaluator/build", json=body).status_code == 503
+        current = client.get(path + "/evaluator").json()
+        assert current["status"] == "failed"
+        assert current["latest"]["id"] not in lite_build._RUNNING
+        assert "could not start" in current["latest"]["cause"]
+        assert "could not start" in client.get(path).json()["messages"][-1]["content"]
+        replay = client.post(path + "/evaluator/build", json=body)
+        assert replay.status_code == 200 and replay.json()["builds"] == 1
+        assert client.post(path + "/evaluator/build", json={"request_id": "new-build"}).status_code == 503
+        assert client.get(path + "/evaluator").json()["builds"] == 2
+
+
 def test_research_queue_failure_does_not_lock_the_session(harness, monkeypatch):
     app, _, _ = harness
     with TestClient(app) as client:

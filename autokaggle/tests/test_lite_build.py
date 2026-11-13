@@ -278,8 +278,8 @@ def test_incomplete_builds_stay_draft_and_show_the_cause(harness, monkeypatch, a
         assert build(client, path)["status"] == "ready"
 
 
-@pytest.mark.parametrize("change_contract", [False, True])
-def test_build_button_resumes_saved_code_with_current_contract(harness, monkeypatch, change_contract):
+@pytest.mark.parametrize("change_contract,queue_failure", [(False, False), (True, False), (True, True)])
+def test_build_button_resumes_saved_code_with_current_contract(harness, monkeypatch, change_contract, queue_failure):
     app, mode, root = harness
     mode["value"] = "wrong-expectation"
     with TestClient(app) as client:
@@ -287,6 +287,11 @@ def test_build_button_resumes_saved_code_with_current_contract(harness, monkeypa
         first = build(client, path)["latest"]
         draft = Path(app.state.store.directory(identifier)) / "lite-evaluator/drafts" / first["id"]
         assert (draft / "toy_adapter.py").is_file()
+        if queue_failure:
+            with monkeypatch.context() as stopped:
+                def reject(*args, **kwargs): raise RuntimeError("Test queue is unavailable")
+                stopped.setattr(app.state.pool, "submit", reject)
+                assert client.post(path + "/evaluator/build", json={"request_id": "queue-failure"}).status_code == 503
         if change_contract:
             revise(client, monkeypatch, path, compute_budget="Two CPUs for one minute")
         # The second agent requires the previous implementation to be present
@@ -296,6 +301,7 @@ def test_build_button_resumes_saved_code_with_current_contract(harness, monkeypa
             'work, mode = Path(sys.argv[1]), sys.argv[2]',
             'work, mode = Path(sys.argv[1]), sys.argv[2]\n'
             'assert (work / "toy_adapter.py").is_file(), "Saved draft was lost"\n'
+            'assert "valid example" in json.loads((work / "REVISION_REQUEST.json").read_text())["previous_failure"]\n'
             'assert json.loads((work / "contract.json").read_text())["contract"]["compute_budget"] == '
             + repr("Two CPUs for one minute" if change_contract else "One CPU for one minute")))
         mode["value"] = "ok"
