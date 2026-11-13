@@ -247,3 +247,15 @@ test("Project links stay in the brief and are not imported as papers",async()=>{
  await h.input("message-input","Test a deterministic objective.");await h.click("send-message");
  const sent=posts(h);assert.equal(sent.length,1);assert.equal(sent[0][0],"message");assert.match(sent[0][1].message,/#id=diverging-runs/);
 });
+
+test('Handoff creation blocks concurrent revocation until it finishes',async()=>{
+ const h=harness(fixture(),'?project=p1&review=handoff');let finish;
+ h.handler=async(url,options)=>{
+  if(!url.includes('/handoff'))return null;
+  if(options.method==='POST')await new Promise(resolve=>{finish=resolve;});
+  return {ok:true,status:200,json:async()=>options.method==='POST'?{code:'TEST-ONLY',expires_at:'2026-11-14T00:00:00Z'}:{can_manage:true,members:[]}};
+ };
+ await flush();const creating=h.clickText('Create handoff code');await flush();
+ await h.clickText('Revoke unused code');assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,0);
+ finish();await creating;await h.clickText('Revoke unused code');assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,1);
+});

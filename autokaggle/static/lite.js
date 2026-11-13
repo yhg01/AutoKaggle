@@ -249,14 +249,16 @@
       const data = await api(base); if(!active())return;
       if (!data.can_manage) { content.append(el("p", "Only the session owner can create handoff codes or manage collaborators.")); return; }
       const output = el("div"), actions = el("div", null, "dialog-actions");
+      const setPending = value => { create.disabled=value; revoke.disabled=value; };
       const create = button("Create handoff code", async () => {
-        create.disabled = true; modalError();
+        if(create.disabled)return;setPending(true); modalError();
         try { const value=await api(base,{method:"POST",body:"{}"});if(!active())return;
           output.replaceChildren(el("code",value.code),el("p",`Expires ${new Date(value.expires_at).toLocaleString()}`));
           output.append(button("Copy code",async()=>{try{await navigator.clipboard.writeText(value.code);}catch(_){modalError("Select and copy the code shown above.");}}));
-        } catch(e) {if(active())modalError(e.message);} finally{if(active())create.disabled=false;}
+        } catch(e) {if(active())modalError(e.message);} finally{if(active())setPending(false);}
       });
-      actions.append(create,button("Revoke unused code",async()=>{try{await api(base+"/codes",{method:"DELETE"});if(active())output.replaceChildren(el("p","Unused codes revoked."));}catch(e){if(active())modalError(e.message);}}));
+      const revoke=button("Revoke unused code",async()=>{if(revoke.disabled)return;setPending(true);modalError();try{await api(base+"/codes",{method:"DELETE"});if(active())output.replaceChildren(el("p","Unused codes revoked."));}catch(e){if(active())modalError(e.message);}finally{if(active())setPending(false);}});
+      actions.append(create,revoke);
       content.append(actions,output);
       for(const member of data.members || []) {
         const row=el("div",null,"session-record");row.append(el("span",member.name||"Collaborator"));
