@@ -11,6 +11,7 @@ The test uses a separate copy of the accepted LOB-Bench contract. It does not ch
 - Saved output inspection found missing OFI divergence values. These values need a separate scientific decision. They are not all evidence of insufficient synthetic data.
 - The coding agent shortened test output with a shell pipeline that could hide a failed test's exit status. Build and review instructions now require the actual test status. A focused live DeepSeek check produced a command that returned zero for a passing test and one for a failing test. The server's separate acceptance process still checks its own exit status.
 - Additional inspection found that a missing or invalid generation-seed record could become null in an otherwise completed result. The contract requires that seed. Build and review prompts now require negative tests for missing, malformed, and conflicting provenance. A focused live review rejected this silent-null behavior. A separate evaluator seed does not replace the generation seed.
+- The sixth coding round passed its separate review and synthetic score checks. Its clean-clone coverage check then found two tests that read `build.json`, a build-only file. The release stayed blocked. Build instructions now state that tests must use shipped files. Failure summaries now show the saved assertion errors before scorer progress text. Two regression cases cover a failed coverage report with either zero or nonzero process status.
 
 ## Undefined OFI diagnostics
 

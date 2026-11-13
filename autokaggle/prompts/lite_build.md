@@ -25,7 +25,7 @@ Support locally supplied licensed data when the contract requires it. Missing li
 ## What is already here
 
 - `contract.json` — the frozen contract, its fixed seeds, and its digest. Read `contract` and `seeds` first. Never edit it.
-- `build.json` — the build summary: metric, direction, artifact type, adapter entry point, and loader entry point.
+- `build.json` — the build summary: metric, direction, artifact type, adapter entry point, and loader entry point. This is a build input and is not shipped. Released code and tests must use the packaged contract, release lock, or actual results instead. They must not need `build.json`, source excerpts, or build-task files.
 - `run.py` — the runner. It starts one fresh process per seed and calls the adapter. Never edit it.
 - `evaluate.py` — the command collaborators run: `python evaluate.py --artifact PATH`. Never edit it.
 - `fetch_assets.py` — downloads and verifies the files listed in `assets.json`. Never edit it.

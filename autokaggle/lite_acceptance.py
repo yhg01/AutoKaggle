@@ -288,8 +288,15 @@ def run_cases(root, python, spec, env):
         target.unlink(missing_ok=True)
         code, out, err, seconds = _run([python, "quality_checks.py", str(target)], root, limit, env)
         coverage = json.loads(target.read_text()) if target.is_file() else {}
-        record("contract coverage", code == 0 and coverage.get("passed") is True,
-               "Executed the tests mapped to each requirement." if code == 0 else _tail(err or out or json.dumps(coverage)),
+        passed = code == 0 and coverage.get("passed") is True
+        errors = coverage.get("errors", [])
+        failures = "\n".join(str(error)[-1500:] for error in errors[:3]) if isinstance(errors, list) else ""
+        missing = [key for key, value in coverage.get("requirements", {}).items() if value is not True]
+        detail = ("Executed the tests mapped to each requirement." if passed else
+                  ("Required tests failed: " + failures if failures else
+                   "Requirements without passing tests: " + ", ".join(missing[:20]) if missing else
+                   _tail(err or out or json.dumps(coverage))))
+        record("contract coverage", passed, detail,
                coverage=coverage, seconds=seconds)
         target.unlink(missing_ok=True)
     return tests
