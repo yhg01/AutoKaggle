@@ -90,6 +90,8 @@ Run `.venv/bin/python check.py check` until every line says PASS. Fix the evalua
 
 For a long test command, set the shell tool's own timeout within the remaining job allowance. A `timeout` command inside the shell does not extend the tool timeout. Save bounded test output to a file and inspect its failure summary. Do not dump full datasets, dependency trees, or verbose scorer logs into the model conversation.
 
+Preserve the test command's exit status when you shorten its output. A pipeline such as `python -m unittest | tail` can report success when the tests failed. Save the output, capture the test's status, show the short summary, then exit with the captured status. Confirm both the status and the test summary before claiming a pass.
+
 Finish by writing `BUILD_REPORT.json`:
 
 ```json

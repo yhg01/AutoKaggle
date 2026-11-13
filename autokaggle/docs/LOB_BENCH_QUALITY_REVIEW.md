@@ -9,6 +9,7 @@ The test uses a separate copy of the accepted LOB-Bench contract. It does not ch
 - Replanning the unchanged contract changed requirement IDs and consumed time. Coding revisions now reuse the validated frozen plan for the same contract digest.
 - One planning round searched the whole container and spent ten minutes in a file search. The prompts now name the local schema file and restrict searches to the evaluator workspace.
 - Saved output inspection found missing OFI divergence values. These values need a separate scientific decision. They are not all evidence of insufficient synthetic data.
+- The coding agent shortened test output with a shell pipeline that could hide a failed test's exit status. Build and review instructions now require the actual test status. A focused live DeepSeek check produced a command that returned zero for a passing test and one for a failing test. The server's separate acceptance process still checks its own exit status.
 
 ## Undefined OFI diagnostics
 
