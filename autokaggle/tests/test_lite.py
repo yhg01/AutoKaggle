@@ -20,7 +20,7 @@ from autokaggle.store import Store
 
 
 def contract(**changes):
-    return {"title": "A small reproducible experiment", "objective": "Measure policy success under fixed conditions.",
+    return {"bold_project_url": "https://bold-lab-ai.github.io/bold-os/project.html#id=diverging-runs", "title": "A small reproducible experiment", "objective": "Measure policy success under fixed conditions.",
         "task_kind": "environment", "source_url": "https://github.com/example/environment", "source_revision": "a"*40,
         "inputs": "A scalar observation", "allowed_data": "Only the declared training environment", "answer_exposure": "environment_generated",
         "artifact_type": "checkpoint", "outputs": "An integer action", "adapter_entrypoint": "adapter:evaluate",
