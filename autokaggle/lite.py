@@ -30,14 +30,14 @@ from .store import now
 HERE = Path(__file__).parent
 FORMAT = "bold.autokaggle.lite.contract.v1"
 GROUPS = (
-    ("objective", "Research objective", ("objective", "task_kind")),
+    ("objective", "Research objective", ("bold_project_url", "objective", "task_kind")),
     ("sources", "Data or environment", ("source_url", "source_revision", "inputs", "allowed_data", "answer_exposure")),
     ("submission", "Artifact and interface", ("artifact_type", "outputs", "adapter_entrypoint")),
     ("evaluation", "Evaluation protocol", ("metric", "success_definition", "evaluation_protocol", "evaluation_count", "failure_policy", "timeout_seconds", "total_timeout_seconds")),
     ("resources", "Training and resources", ("training_policy", "compute_budget")),
     ("provenance", "Reproduction record", ("dependencies",)),
 )
-STRINGS = {"title", "objective", "source_url", "source_revision", "inputs", "outputs", "success_definition",
+STRINGS = {"bold_project_url", "title", "objective", "source_url", "source_revision", "inputs", "outputs", "success_definition",
            "evaluation_protocol", "training_policy", "compute_budget", "dependencies", "adapter_entrypoint",
            "allowed_data", "baseline", "env_id", "success_key", "metric_name", "metric_definition",
            "constraints", "temporal_policy", "generation_policy"}
@@ -50,6 +50,7 @@ INTS = {"evaluation_count": (1, 10000), "timeout_seconds": (1, 21600), "total_ti
         "seed_start": (0, 2**32-1), "seed_end": (0, 2**32-1)}
 FIELDS = STRINGS | set(ENUMS) | set(INTS) | {"environment_imports", "environment_kwargs"}
 CONTRACT_HELP = {
+    "bold_project_url": "Required BOLD OS project link: https://bold-lab-ai.github.io/bold-os/project.html#id=<project-id>. Ask the researcher which existing project owns this experiment. Never infer project membership from a paper or repository.",
     "task_kind": "environment for interactive episodes; batch for fixed data; optimization for feasible candidates; forecasting for time-dependent evaluation; generation for generated samples; custom for other declared protocols",
     "metric_name": "Name of a custom fitness measure, such as Sharpe ratio, F1, or energy",
     "metric_definition": "Exact formula or pinned scorer, units, sample aggregation, invalid-case behavior, and numeric tolerance",
@@ -74,7 +75,7 @@ CONTRACT_HELP = {
     "seed_method": "reset for reset(seed=seed), core_disp for explicit core/disp seed API",
     "baseline": "Optional scientific reference; reported source scores are not reproduced results",
 }
-INTRO = ("Start with the ML problem you want to study. You can add a paper and a GitHub repository. "
+INTRO = ("Which BOLD OS project is this evaluation for? Paste its project page link and describe the problem. You can add a paper and a GitHub repository. "
          "I will read them, propose a short evaluation contract, and ask only for missing decisions. "
          "You approve the contract before it becomes the agreed experiment.")
 
@@ -117,6 +118,25 @@ def require_member(access, request):
         raise HTTPException(403, "AutoKaggle Lite is for approved lab members. Ask an administrator to add your account.")
 
 
+def bold_project_id(value):
+    """Validate a project reference. BOLD OS checks existence when registering."""
+    from urllib.parse import urlsplit, parse_qs
+    try:
+        url = urlsplit(value)
+        fields = parse_qs(url.fragment, strict_parsing=True)
+        ids = fields.get("id", [])
+        if (url.scheme != "https" or url.netloc != "bold-lab-ai.github.io"
+                or url.path != "/bold-os/project.html" or url.query
+                or set(fields) - {"id", "tab", "board"} or len(ids) != 1
+                or any(len(values) != 1 for values in fields.values())
+                or ("board" in fields and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", fields["board"][0]))
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", ids[0])):
+            raise ValueError()
+        return ids[0]
+    except (ValueError, TypeError):
+        raise ValueError("Paste the BOLD OS project page link, with #id=<project-id>. A project name or repository link is not enough.") from None
+
+
 def clean_contract(value):
     if not isinstance(value, dict) or set(value) - FIELDS:
         raise ValueError("Use the supported Lite contract fields.")
@@ -145,6 +165,8 @@ def clean_contract(value):
             if not isinstance(val, dict) or len(json.dumps(val, allow_nan=False)) > 4000:
                 raise ValueError("Environment arguments must be a small JSON object.")
         result[key] = val
+    if result.get("bold_project_url"):
+        bold_project_id(result["bold_project_url"])
     if result.get("source_url"):
         reference(result["source_url"])
     if result.get("adapter_entrypoint") and not re.fullmatch(r"[A-Za-z_]\w*(?:\.\w+)*:[A-Za-z_]\w*", result["adapter_entrypoint"]):
