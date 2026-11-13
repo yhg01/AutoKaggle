@@ -93,3 +93,35 @@ def test_reported_metadata_preserves_outputs_without_claiming_file_verification(
         if change == 'metric': altered['metrics']['secondary'] = float('inf')
         if change == 'mode': altered['reference']['mode'] = 'synthetic'
         with pytest.raises(ValueError): quality.validate_metadata(altered)
+
+
+@pytest.mark.parametrize("process_status", [0, 1])
+def test_coverage_failure_shows_assertion_instead_of_progress_output(tmp_path, monkeypatch, process_status):
+    from autokaggle import lite_acceptance as acceptance
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (tmp_path / "quality.json").write_text("{}")
+    (tmp_path / "contract.json").write_text(json.dumps({"seeds": [7], "contract": {"total_timeout_seconds": 1}}))
+    cases = {}
+    for name in ("valid", "wrong", "invalid"):
+        (fixtures / name).write_text("fixture")
+        cases[name] = {"artifact": "fixtures/" + name, "basis": "A known small test case."}
+        if name != "invalid": cases[name]["expected_score"] = 1 if name == "valid" else 0
+    (fixtures / "expected.json").write_text(json.dumps({"tolerance": 1e-9, "cases": cases}))
+    def run(argv, root, limit, env):
+        if "quality_checks.py" in argv:
+            Path(argv[-1]).write_text(json.dumps({"passed": False, "requirements": {"R001": False},
+                "errors": ["test_portable: FileNotFoundError: build.json is absent from the release"]}))
+            return process_status, "", "4it [00:00, 3000it/s]", 0
+        if "fixtures/check_expected.py" in argv:
+            return 0, '{"valid":1,"wrong":0}', "", 0
+        if "fixtures/invalid" in argv: return 2, '{"completed":0}', "invalid", 0
+        score = 1 if "fixtures/valid" in argv else 0
+        (root / argv[argv.index("--output") + 1]).write_text('{"results":[{}]}')
+        return 0, json.dumps({"fitness": score, "failed": 0}), "", 0
+    monkeypatch.setattr(acceptance, "_run", run)
+    report = acceptance.run_cases(tmp_path, "python", {"direction": "maximize"}, {})
+    row = next(item for item in report if item["name"] == "contract coverage")
+    assert not row["passed"]
+    assert "FileNotFoundError: build.json" in row["detail"]
+    assert "4it" not in row["detail"]

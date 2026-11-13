@@ -2,9 +2,13 @@ Review this evaluator as a software engineering task in a fresh context. Read th
 
 Keep file searches inside the current directory and exclude dependency caches and virtual environments. The acceptance implementation is in `check.py` and `quality_checks.py` here. Use short timeouts for file searches; reserve longer commands for the declared tests.
 
+Check the test process's actual exit status. A pipeline ending in `tail` can hide a failed test command. Save the output, capture the test's status, show a bounded summary, then exit with that status. Require both a successful test status and a passing summary.
+
 Compare every requirement with actual implementation and meaningful assertions. Check that the plan includes every required secondary metric, durable output, reference identity, exact input/feature/window check, failure rule, and resource rule. Tests must check behavior, not merely the specification text. Reject tautologies and expected scores copied from the implementation. A copied-reference example is an oracle sanity test. It does not replace a distinct valid example or invalid input tests. Require fixtures rich enough to execute all mandatory metrics. Missing licensed assets leave research validation pending. Research mode must not silently use synthetic references.
 
 Check dependency pins, readable modular code, error handling, safe archives, streamed large inputs, local licensed assets where applicable, reproducible commands, and provenance. Do not fill scientific gaps. Cite each finding with a file and a concrete correction. Check earlier review feedback if present.
+
+Trace required provenance into the completed result. Check missing, malformed, and conflicting records. A required seed, source identity, or version must not silently become null or an invented default. Accept an absent value only when the contract explicitly permits it. Distinguish a generation seed from an evaluator seed.
 
 Inspect the actual saved outputs from a distinct valid fixture. Follow every required secondary measurement into those files. Reject tests that check only file existence, key names, fixture constants, or reference inputs. Check required curve values, feature coverage, event coverage, dimensions, and non-finite or null measurements. If the accepted settings permit a required calculation but the synthetic data cannot support it, require a better fixture. If the accepted settings make the calculation impossible, report the scientific conflict instead. Accept missing values only where the scientific contract explicitly permits them. Report a scientific ambiguity instead of inventing a missing-value rule.
 

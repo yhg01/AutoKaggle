@@ -52,3 +52,17 @@ The owner deferred Kaito's licensed research-data validation. Do not claim that 
 - BOLD OS: 195 tests and the site build passed. The demo Firebase test passed registration, simultaneous retries, permissions, search, and database-rule checks. Browser checks covered both pages, notes, archive/restore, sign-out, another member's read-only controls, and light/dark/mobile layouts.
 - The AutoKaggle registration sender also passed against the local BOLD OS HTTP receiver, with a clearly labelled synthetic integration record. Both records and the exact-commit receipt were saved. A repeated delivery reused the receipt. This is an integration test, not a validation claim about Kaito's data.
 - Work is committed and pushed per solved sub-problem. AutoKaggle PR #19 is a draft. BOLD OS branch `codex/problem-bank-benchmarks` has no PR to main. Neither branch is deployed. The unchecked end-to-end items above are not claimed as complete.
+
+## Isolated follow-up — 13 November
+
+Another agent is changing the original worktree. The OFI follow-up now uses `codex/contract-coverage-ofi`, based on `ca6f0bc`, in a separate worktree. Preserve the other agent's work. [PR #21](https://github.com/yhg01/AutoKaggle/pull/21) contains the follow-up changes and targets the existing review branch.
+
+- The Build button now resumes saved draft code and review context. Empty queue failures do not hide an earlier saved draft. Queue failures clear the active-job lock and return a useful error. Six targeted retry tests passed.
+- Build and review prompts now preserve the actual test exit status when output is shortened. A live DeepSeek V4 Pro check returned a command tested against both passing and failing cases.
+- Five focused live DeepSeek review cases detected defects in prediction, interactive environments, optimization, forecasting, and generation. These checks exercise the reviewer prompt; they are not five complete evaluator builds.
+- The quality-check suite passed all 13 tests on the isolated branch.
+- The fifth LOB-Bench coding round passed 114 unit tests. Its separate review required stronger source-pin and generation-seed checks. The round saved its repairs but reached its time allowance before the second review. The sixth round continues those repairs against the same accepted contract.
+- The sixth round passed code review and fixture scoring. Clean-clone coverage failed because two tests needed the build-only `build.json`. The release stayed blocked. The failure summary now prioritizes assertion errors over scorer progress text.
+- The seventh browser-driven revision fixed the portable tests and required generation-seed handling. It passed the 63-requirement review, 140 evaluator tests, and every clean-clone acceptance check. Version `v1`, commit `12321e2f31c041f4a1130291633373b0912b2224`, was published through the UI to one private `yhg01` scratch repository. Research-data validation remains pending.
+- The final build/quality regression group passed 65 tests with one skipped. The downloaded GitHub ZIP's 43 locked files and YAML config matched the tested release.
+- The downloaded ZIP ran in a fresh container. The distinct synthetic example returned fitness 0.17048869967190391, generation seed 1337, both diagnostic files, and their hashes. Removing its generation-seed record returned exit status 2 and no completed score. Output inspection confirmed the four OFI exceptions, 17 finite five-window curves, and six price-response event types.
