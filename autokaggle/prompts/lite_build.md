@@ -25,7 +25,7 @@ Support locally supplied licensed data when the contract requires it. Missing li
 ## What is already here
 
 - `contract.json` — the frozen contract, its fixed seeds, and its digest. Read `contract` and `seeds` first. Never edit it.
-- `build.json` — the build summary: metric, direction, artifact type, adapter entry point, and loader entry point.
+- `build.json` — the build summary: metric, direction, artifact type, adapter entry point, and loader entry point. This is a build input and is not shipped. Released code and tests must use the packaged contract, release lock, or actual results instead. They must not need `build.json`, source excerpts, or build-task files.
 - `run.py` — the runner. It starts one fresh process per seed and calls the adapter. Never edit it.
 - `evaluate.py` — the command collaborators run: `python evaluate.py --artifact PATH`. Never edit it.
 - `fetch_assets.py` — downloads and verifies the files listed in `assets.json`. Never edit it.
@@ -89,6 +89,10 @@ Support locally supplied licensed data when the contract requires it. Missing li
 Run `.venv/bin/python check.py check` until every line says PASS. Fix the evaluator, not the expectation, unless the expectation was wrong; then correct its basis too.
 
 For a long test command, set the shell tool's own timeout within the remaining job allowance. A `timeout` command inside the shell does not extend the tool timeout. Save bounded test output to a file and inspect its failure summary. Do not dump full datasets, dependency trees, or verbose scorer logs into the model conversation.
+
+Preserve the test command's exit status when you shorten its output. A pipeline such as `python -m unittest | tail` can report success when the tests failed. Save the output, capture the test's status, show the short summary, then exit with the captured status. Confirm both the status and the test summary before claiming a pass.
+
+For provenance required by the accepted contract, test missing, malformed, and conflicting records as well as valid records. Do not complete a run with a null or invented seed, source identity, or version unless the contract explicitly permits that absence. Report the missing record clearly. Keep generation seeds separate from evaluator seeds.
 
 Finish by writing `BUILD_REPORT.json`:
 

@@ -9,6 +9,9 @@ The test uses a separate copy of the accepted LOB-Bench contract. It does not ch
 - Replanning the unchanged contract changed requirement IDs and consumed time. Coding revisions now reuse the validated frozen plan for the same contract digest.
 - One planning round searched the whole container and spent ten minutes in a file search. The prompts now name the local schema file and restrict searches to the evaluator workspace.
 - Saved output inspection found missing OFI divergence values. These values need a separate scientific decision. They are not all evidence of insufficient synthetic data.
+- The coding agent shortened test output with a shell pipeline that could hide a failed test's exit status. Build and review instructions now require the actual test status. A focused live DeepSeek check produced a command that returned zero for a passing test and one for a failing test. The server's separate acceptance process still checks its own exit status.
+- Additional inspection found that a missing or invalid generation-seed record could become null in an otherwise completed result. The contract requires that seed. Build and review prompts now require negative tests for missing, malformed, and conflicting provenance. A focused live review rejected this silent-null behavior. A separate evaluator seed does not replace the generation seed.
+- The sixth coding round passed its separate review and synthetic score checks. Its clean-clone coverage check then found two tests that read `build.json`, a build-only file. The release stayed blocked. Build instructions now state that tests must use shipped files. Failure summaries now show the saved assertion errors before scorer progress text. Two regression cases cover a failed coverage report with either zero or nonzero process status.
 
 ## Undefined OFI diagnostics
 
@@ -32,8 +35,18 @@ Do not assume that the scorer's default horizon of 100 resolves the conflict. Pr
 
 The build and review prompts now require evidence for a proposed remedy. A separate live DeepSeek review rejected the untested horizon-100 proposal. This was a focused prompt check; it was not another scorer execution or a successful evaluator release.
 
+## Release result
+
+The seventh coding round passed the separate 63-requirement review and every clean-clone acceptance check. All 140 evaluator tests passed. The independent scorer reproduced the copied-reference oracle score of 0 and the distinct synthetic example score of 0.17048869967190391. Invalid submissions received no completed score. The run used DeepSeek V4 Pro through OpenCode, with 68 model requests and 993.3 seconds of coding and review time.
+
+Publication was triggered through the browser. The private [scratch evaluator repository](https://github.com/yhg01/lite-eval-generative-lob-world-model-accuracy-lob-bench-ws-6c6675e6) contains version `v1`, commit `12321e2f31c041f4a1130291633373b0912b2224`. The downloaded GitHub ZIP contains all 43 files covered by the release lock, the YAML config, and the exact expanded revision marker. The original researcher repository was not modified.
+
+The downloaded ZIP also ran in a fresh bounded container. Its distinct synthetic example returned fitness 0.17048869967190391 and generation seed 1337. Both diagnostic files and their hashes were saved. The output inspection confirmed the four explicit OFI exceptions, 17 finite five-window divergence curves, and six price-response event types. Removing the generation-seed record from that artifact produced exit status 2 and zero completed seeds. This run used the GitHub download, not the coding workspace.
+
+The interface correctly reports **Software checks passed; research validation pending**. It also reports that BOLD OS registration is not yet eligible. The local preview has no review email configuration. Its email return journey remains untested; the earlier Gmail transport check does not establish that journey.
+
 ## Remaining evidence
 
-The owner deferred the licensed research-data check. No result from this test qualifies the original problem for BOLD OS registration. A completed release still needs a controlled run on the declared research data and approval of that exact commit and report.
+The owner deferred the licensed research-data check. No result from this test qualifies the original problem for BOLD OS registration. Research validation still needs a controlled run on the declared research data and approval of that exact commit and report.
 
 The review email transport test reached Gmail's accepted state using only the owner's account. It did not send an invitation to the researcher. The complete deployed email sign-in and return journey remains unclaimed.
