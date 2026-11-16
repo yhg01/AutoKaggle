@@ -34,6 +34,8 @@ The model tools are read-only. The existing release outbox prepares validated re
 
 BOLD OS PR #31 is still under review. Problem Bank registration remains pending until that receiver is deployed and an approved connection is configured. This branch does not create OS proposals or alter the BOLDiquette. Its local skill describes the application binding; the OS remains the source for lab rules and lab skills.
 
+The [registration check on 16 November](BOLD_OS_REGISTRATION_2026-11-16.md) confirmed acting-tool access for the new token. The live receiver still returns HTTP 404. The separate Lite release sender now waits for validated research evidence and human approval before sending a record. It requires member access and does not give the interview model a general write tool.
+
 ## Verification
 
 The focused test group passed 83 tests. Tests cover unknown actions, malformed arguments, undiscovered IDs, redirects, permission errors, oversized or invalid responses, credential filtering, call limits, deployment packaging, and denial under public email access.
