@@ -306,3 +306,10 @@ test("Revision review separates changes, removals, and already accepted facts",a
  assert.match(text,/Accepted agent suggestion/);assert.doesNotMatch(text,/Still to decide/);assert.match(text,/Next step/);
  const details=h.$("dialog-content").children.find(n=>n.tag==="details");assert.ok(details);assert.notEqual(details.open,true);
 });
+
+test("A current checked release does not receive its predecessor's upgrade notice",async()=>{
+ const h=harness();await flush();const release={validation:{build:"passed"},evidence:{commit:"c".repeat(40),tag:"v2"},tests:[]};
+ const view=evaluatorView({status:"ready",release,earlier_releases:[{evaluator_version:1,contract_version:"old",validation:{build:"legacy"}}]});
+ h.handler=async url=>url.endsWith("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;
+ await h.click("evaluator-button");assert.doesNotMatch(h.$("dialog-content").textContent,/older release needs the current checks/);
+});
