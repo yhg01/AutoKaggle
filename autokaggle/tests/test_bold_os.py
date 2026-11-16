@@ -4,6 +4,27 @@ import pytest
 from autokaggle import bold_os
 
 
+@pytest.mark.parametrize('private,policy,allowed', [(True,'members',True), (False,'members',False), (True,'verified_email',False), (None,'members',False)])
+def test_provider_binds_access_from_server_and_does_not_change_saved_state(monkeypatch, private, policy, allowed):
+    from types import SimpleNamespace
+    from autokaggle import lite_providers
+    module = SimpleNamespace(view=lambda item: {'model':{}}, propose=lambda state: None)
+    monkeypatch.setenv('AUTOKAGGLE_LITE_PROVIDER', 'deepseek')
+    monkeypatch.setenv('AUTOKAGGLE_LITE_ACCESS_POLICY', policy)
+    seen = []
+    monkeypatch.setattr(lite_providers, 'propose_deepseek', lambda module,state: seen.append(state) or {})
+    access = None if private is None else SimpleNamespace(enabled=private)
+    lite_providers.install(module, access=access)
+    state = {'_bold_os_read_allowed': not allowed, 'messages':[]}
+    module.propose(state)
+    assert seen[0]['_bold_os_read_allowed'] is allowed
+    assert state['_bold_os_read_allowed'] is not allowed
+    # Rebinding an application must not retain its previous access capability.
+    lite_providers.install(module, access=None)
+    module.propose(state)
+    assert seen[-1]['_bold_os_read_allowed'] is False
+
+
 def test_only_declared_read_tools_and_discovered_ids_are_callable():
     calls=[]
     def send(req):

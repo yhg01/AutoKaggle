@@ -561,6 +561,12 @@
       const v = release.validation || {};
       content.append(el("p", `Contract coverage: ${human(v.contract_coverage || "unassessed")}. Code review: ${human(v.code_review || "unassessed")}. Synthetic tests: ${human(v.synthetic || "unassessed")}. Declared research data: ${human(v.research_data || "not_run")}.`, "extraction-notes"));
       if (release.registry) content.append(el("p", "BOLD OS: " + human(release.registry.status) + ". " + (release.registry.reason || ""), "hint"));
+      const problemID = release.registry?.receipt?.problem_id;
+      if (release.registry?.status === "registered" && /^ak-[a-f0-9]{24}$/.test(problemID || "")) {
+        const link = el("a", "Open BOLD OS Problem Bank ↗", "text-link");
+        link.href = "https://bold-lab-ai.github.io/bold-os/problems.html?problem=" + encodeURIComponent(problemID);
+        link.target = "_blank"; link.rel = "noopener noreferrer"; content.append(link);
+      }
       if (release.review_invitation) content.append(el("p", "Build review email: " + human(release.review_invitation.status) + ". " + (release.review_invitation.reason || ""), "hint"));
       if (v.research_error) content.append(el("p", v.research_error, "extraction-notes"));
       if (v.research_evidence) content.append(el("p", `Research run: observed ${v.research_evidence.observed_fitness}; expected ${v.research_evidence.expected_fitness}. Basis: ${v.research_evidence.expected_basis}`, "hint"));
@@ -649,7 +655,7 @@
     const release = state.evaluator?.release, evidence = release?.validation?.research_evidence;
     if (!evidence) return;
     showDialog("release-approval", "Approve this validated version", "HUMAN REVIEW");
-    content.append(el("p", "Confirm that the scientific contract, evaluator code, declared reference data, and measured check meet your requirements. Approval applies only to this commit and research report. It makes this version eligible for the BOLD OS problem bank and benchmarks page."));
+    content.append(el("p", "Confirm that the scientific contract, evaluator code, declared reference data, and measured check meet your requirements. Approval applies only to this commit and research report. When the connection is enabled, this sends the problem definition, evaluator repository link, and validation record to the BOLD OS Problem Bank under its configured account. Lab members with access to the Problem Bank can read the record. It sends no messages or invitations. Raw data and private session access codes are not included."));
     const form = el("form"), note = field("Your review note", "release-review-note", "textarea"); note.input.required = true; note.input.minLength = 10;
     const submit = el("button", "Approve this version for BOLD OS", "button primary"); submit.type = "submit"; form.append(note.wrap, submit);
     form.addEventListener("submit", event => { event.preventDefault(); evaluatorAction("/approve", {build_id:release.id, research_report_sha256:evidence.report_sha256, approved:true, note:note.input.value.trim()}); });
