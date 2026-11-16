@@ -6,7 +6,6 @@ The public email-login service cannot enable these tools.
 from __future__ import annotations
 import json
 import os
-import re
 from pathlib import Path
 import httpx
 
@@ -77,6 +76,16 @@ class Client:
             value = json.loads(raw)
             if not isinstance(value, dict):
                 return {'error': 'BOLD OS returned an unsupported response.'}
+            if name == 'bold_read_rules':
+                # The live handbook is longer than the generic tool excerpt limit.
+                # Include every accepted part, not pending proposals or a cut-off rule.
+                parts = value.get('parts')
+                if not isinstance(parts, list) or not parts or any(
+                    not isinstance(part, dict) or not isinstance(part.get('body'), str)
+                    for part in parts
+                ):
+                    return {'error': 'BOLD OS did not return the complete rules. Do not claim they were read.'}
+                value = {k: value[k] for k in ('title', 'description', 'url', 'parts') if k in value}
             # Only useful project metadata enters the interview. No work-board or personal records.
             if name == 'bold_list_projects':
                 rows = value.get('projects', [])[:20]
@@ -91,6 +100,10 @@ class Client:
             text = json.dumps(value, ensure_ascii=False)
             if self._token in text:
                 return {'error': 'BOLD OS returned unsafe credential content.'}
+            if name == 'bold_read_rules':
+                if len(text) > 128000:
+                    return {'error': 'The complete BOLD OS rules exceed the reading limit. Ask the operator to review the connection.'}
+                return {'source': BASE + endpoint, 'untrusted_content': text, 'truncated': False}
             return {'source': BASE + endpoint, 'untrusted_content': text[:24000], 'truncated': len(text) > 24000}
         except (httpx.HTTPError, ValueError, TypeError, KeyError):
             # Never echo request headers, upstream bodies, or client exceptions.

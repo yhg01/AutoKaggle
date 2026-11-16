@@ -66,13 +66,32 @@ def test_skill_discovery_and_rule_source():
     def send(req):
         calls.append(req)
         if req.url.path.endswith('list_skills'):return httpx.Response(200,json={'skills':[{'name':'example','title':'Example'}]})
-        return httpx.Response(200,json={'body':'Untrusted site text'})
+        return httpx.Response(200,json={'parts':[{'title':'Rules','body':'Untrusted site text'}]})
     client=bold_os.Client('token',transport=httpx.MockTransport(send))
     assert 'error' in client.call('bold_get_skill',{'name':'example'})
     assert 'error' not in client.call('bold_list_skills',{})
     assert 'error' not in client.call('bold_get_skill',{'name':'example'})
     assert 'error' not in client.call('bold_read_rules',{})
     assert calls[-1].url.params['page']=='boldiquette'
+
+
+def test_complete_handbook_includes_agent_rules_after_generic_excerpt_limit():
+    value = {'title': 'BOLDiquette', 'parts': [
+        {'title': 'Earlier rules', 'body': 'x' * 26000},
+        {'title': 'Agentiquette', 'body': 'Confirm every external write.'}],
+        'open_proposals': [{'body': 'Unaccepted proposal must not be treated as policy.'}]}
+    client = bold_os.Client('private-token', transport=httpx.MockTransport(lambda req: httpx.Response(200, json=value)))
+    result = client.call('bold_read_rules', {})
+    assert result['truncated'] is False
+    content = json.loads(result['untrusted_content'])
+    assert content['parts'] == value['parts']
+    assert 'open_proposals' not in content
+
+
+@pytest.mark.parametrize('parts', [None, [], 'bad', [None], [{'body': 12}], [{'body': 'x'*128001}]])
+def test_incomplete_or_oversized_rules_return_explicit_failure(parts):
+    client = bold_os.Client('private-token', transport=httpx.MockTransport(lambda req: httpx.Response(200, json={'parts': parts})))
+    assert 'error' in client.call('bold_read_rules', {})
 
 
 def test_skill_is_in_deployed_bundle():
