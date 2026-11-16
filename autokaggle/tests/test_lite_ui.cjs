@@ -210,7 +210,17 @@ test('Research validation and human approval are distinct from a software releas
  await h.click('evaluator-button');assert.match(h.$('dialog-content').textContent,/Download research validation/);
  await h.clickText('Review and approve this version');
  assert.match(h.$('dialog-content').textContent,/exact|commit and research report/);
+ assert.match(h.$('dialog-content').textContent,/sends the problem definition, evaluator repository link, and validation record/);
+ assert.doesNotMatch(h.$('dialog-content').textContent,/benchmarks page/);
  assert.ok(!h.calls.some(c=>c.url.endsWith('/evaluator/approve')));
+});
+test('Registered releases link only to the fixed Problem Bank destination',async()=>{
+ const h=harness();await flush();let release=reviewedRelease({registry:{status:'registered',receipt:{problem_id:'ak-'+'a'.repeat(24)}}});
+ h.handler=async url=>url.includes('/lite/evaluator')?{ok:true,status:200,json:async()=>evaluatorView({status:'ready',release})}:null;
+ await h.click('evaluator-button');
+ assert.match(h.$('dialog-content').textContent,/Open BOLD OS Problem Bank/);
+ release=reviewedRelease({registry:{status:'registered',receipt:{problem_id:'https://untrusted.invalid'}}});
+ await h.click('evaluator-button');assert.doesNotMatch(h.$('dialog-content').textContent,/Open BOLD OS Problem Bank/);
 });
 test('A queued review email keeps the evaluator polling',async()=>{
  const h=harness();await flush();const release=reviewedRelease({review_invitation:{status:'queued'}});
