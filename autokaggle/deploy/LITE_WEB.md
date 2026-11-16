@@ -4,6 +4,8 @@ Lite uses a separate service on the existing AutoKaggle Civo cluster in London.
 It has its own source, administrator key, database, and 1 GiB persistent volume.
 Full keeps its existing deployment and data.
 
+For the current source, checks, and rollback record, see the [16 November release](../docs/DEPLOYMENT_2026-11-16.md). The dated sections below describe earlier deployments.
+
 - Cluster: `ecc962fa-2f4c-4a3f-96c4-179af273fb7a`, region `lon1`.
 - Namespace: `autokaggle-web`.
 - Deployment and Service: `lite`.
