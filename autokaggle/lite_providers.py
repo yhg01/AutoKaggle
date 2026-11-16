@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 from . import lite_diagnostics as diagnostics
+from . import lite_interview
 
 HERE = os.path.dirname(__file__)
 PROVIDERS = {
@@ -66,13 +67,15 @@ def agent_model(name, model_id, effort):
 
 
 def material(lite, state):
-    """The interview context. It must stay identical to the context lite.propose sends; a test compares them."""
+    """Shared scientific context, provenance, and current capabilities for both providers."""
     current = (state.get("proposal") or {}).get("contract", state["contract"])
     open_decisions = (state.get("proposal") or {}).get("open_decisions", state.get("open_decisions", []))
     return {"messages": state["messages"][-40:], "sources": state["sources"], "accepted_contract": state["contract"],
             "saved_result_summaries": lite.result_context(state), "current_contract_version": lite.version(state["contract"], state["sources"]),
             "current_proposal": current, "open_decisions": open_decisions, "missing": lite.checklist(current, open_decisions),
-            "contract_fields": sorted(lite.FIELDS), "field_help": lite.CONTRACT_HELP,
+            **lite_interview.context(state),
+            "contract_fields": sorted(lite.FIELDS), "field_help": {**lite.CONTRACT_HELP,
+                "adapter_entrypoint": "Use the supported gym_adapter:evaluate or propose adapter:evaluate for the coding agent to implement after acceptance. The researcher defines its scientific behavior."},
             "field_types": {**{field: {"type": "string"} for field in lite.STRINGS},
                             **{field: {"type": "string", "enum": sorted(values)} for field, values in lite.ENUMS.items()},
                             **{field: {"type": "integer or null" if field == "max_steps" else "integer", "minimum": bounds[0], "maximum": bounds[1]}
