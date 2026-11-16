@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fb"><title>BOLD AutoKaggle Lite</title>
   <link rel="icon" href="/static/bold-butterfly.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/lite.css?v=20261112-agent"><script src="/static/lite.js?v=20261112-agent" defer></script>
+  <link rel="stylesheet" href="/static/lite.css?v=20261116-qol"><script src="/static/lite.js?v=20261116-qol" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#message-input">Skip to conversation</a>
@@ -21,13 +21,14 @@
       <div id="transcript" class="transcript" tabindex="0" aria-label="Conversation">
         <div id="welcome" class="welcome"><img src="/static/bold-butterfly.svg" width="44" height="44" alt=""><h2>A clear experiment.<br>A reproducible result.</h2><p>I ask about your sources, research question, and BOLD OS project. I read what you have, propose a starting definition, and ask about the decisions that remain.</p><button id="welcome-start" class="button primary" type="button">Start a research session <span aria-hidden="true">→</span></button><p class="welcome-note">For lab research. Results stay labelled as researcher-reported until independently reproduced.</p></div>
         <div id="messages"></div>
-        <div id="proposal-banner" class="proposal-banner" hidden><div><strong>Review the imported definition</strong><p id="proposal-summary">Source material is a proposal until you accept it.</p></div><button id="review-proposals" class="button secondary" type="button">Review proposals</button></div>
+        <div id="proposal-banner" class="proposal-banner" hidden><div><strong>Review the proposed changes</strong><p id="proposal-summary">Changes become part of the contract when you accept them.</p></div><button id="review-proposals" class="button secondary" type="button">Review proposals</button></div>
         <div id="recovery-banner" class="proposal-banner" hidden><div><strong id="recovery-title">Your answers are saved</strong><p id="recovery-detail"></p></div><button id="retry-request" class="button secondary" type="button" hidden>Retry saved request</button><button id="continue-round" class="button secondary" type="button" hidden>Continue interview</button></div>
         <section id="next-action" class="proposal-banner" aria-label="Next step" hidden></section>
         <div id="thinking" class="thinking" role="status" hidden><span class="activity-dot"></span><span id="thinking-text">Reading your answer…</span></div>
       </div>
       <form id="message-form" class="composer">
         <div id="attachment-list" class="attachment-list" aria-live="polite"></div><label class="sr-only" for="message-input">Your reply or correction</label><textarea id="message-input" rows="2" maxlength="30000" placeholder="Describe your question, answer, or what you want to change…" disabled></textarea>
+        <div id="linked-source-option" class="linked-source-option" hidden><span>Send keeps these links in your reply.</span><button id="read-linked-sources" type="button" class="text-button">Read linked sources</button></div>
         <div class="composer-bottom"><span id="composer-hint">Create a session to start.</span><span class="composer-actions"><button id="attach-paper" class="button quiet" type="button" hidden>Attach</button><input id="paper-attach" type="file" multiple hidden><button id="send-message" class="button primary" type="submit" disabled>Send <span aria-hidden="true">↑</span></button></span></div>
       </form>
 
