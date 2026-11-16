@@ -36,7 +36,7 @@ def bundle():
     files = list(APP.glob("*.py"))
     for folder in ("core", "runner", "static"):
         files += [p for p in (APP / folder).rglob("*") if p.is_file() and p.suffix in {".py", ".js", ".css", ".html", ".svg"}]
-    files += list((APP / "prompts").glob("*.md"))
+    files += list((APP / "prompts").rglob("*.md"))
     files.append(APP / "deploy/web-requirements.lock")
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w") as archive:

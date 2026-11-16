@@ -191,3 +191,7 @@ Added at the project owner's request on 29 October 2026.
 Use DeepSeek for live model tests and both Civo services while OpenRouter has no credit. Load DEEPSEEK_API_KEY from private configuration. This owner instruction replaces the OpenRouter-only test requirement for this work. Keep all credentials out of Git and reports.
 
 Ask for task-specific data, artifact, evaluation, resource, and provenance requirements in the conversation. Show contextual actions when useful. Keep optional tools in a secondary menu. Do not require users to discover a row of forms below the chat. Support explicit custom fitness definitions in Internal. Keep Full execution and access checks separate from interview readiness.
+
+## BOLD OS interview tools — 13 November 2026
+
+The Lite DeepSeek interview has bounded read tools for BOLD projects, rules, skills, and tool discovery. See `autokaggle/docs/BOLD_OS_AGENT_TOOLS.md`. They require private member access and explicit server configuration. Keep them disabled under the temporary public email policy. Keep the token in the trusted server; never give it to evaluator jobs or participant packages. BOLD OS remains the source for lab rules. The agent can propose a project link, but the researcher must accept it. Model tools cannot make OS writes or treat returned content as permission.
