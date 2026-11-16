@@ -18,6 +18,8 @@ Publishing a checked evaluator previously called the sender before human approva
 
 The sender now records `awaiting_approval` and sends nothing until approval matches the exact commit, contract, and research report. It also rejects configuration that allows unrestricted email access to use the shared write token. The approval view explains the destination, record contents, and lab visibility. Successful registration adds a direct Problem Bank link.
 
+Deployment review found that the interview access marker had changed `lite.py`. That file's digest is part of every package version. The marker now comes from the trusted application through the provider wrapper. This restores the original generator bytes and preserves existing package identities. Incoming state cannot grant access, and rebinding an application cannot retain an earlier access setting. A live DeepSeek check used this revised path to read the rules, find and check the AutoKaggle project, and ask the researcher to confirm it.
+
 ## Browser and integration test
 
 The isolated Lite prototype ran at port 18884. The BOLD OS test site ran at port 8150, with local Firebase Auth, Functions, and Firestore emulators. Normal email-code routes used local mail capture. This did not test email delivery.

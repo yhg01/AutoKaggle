@@ -168,7 +168,7 @@ def propose_openrouter(lite, state):
     return records.parse(lite, response)
 
 
-def install(lite, store=None):
+def install(lite, store=None, *, access=None):
     """Route the interview by provider without editing lite.py, whose bytes are part of every contract version."""
     if store is not None:
         diagnostics.bind(store)
@@ -180,12 +180,13 @@ def install(lite, store=None):
             return result
         view._lite_provider_router = True
         lite.view = view
-    original = lite.propose
-    if getattr(original, "_lite_provider_router", False):
-        return
-
     def propose(state):
-        return propose_deepseek(lite, state) if selected() == "deepseek" else propose_openrouter(lite, state)
+        # Bind access from the trusted application, not saved or model-supplied state.
+        # Keep this outside lite.py: its bytes identify existing research packages.
+        model_state = dict(state)
+        model_state["_bold_os_read_allowed"] = bool(access is not None and access.enabled
+            and os.getenv("AUTOKAGGLE_LITE_ACCESS_POLICY", "members") == "members")
+        return propose_deepseek(lite, model_state) if selected() == "deepseek" else propose_openrouter(lite, model_state)
 
     propose._lite_provider_router = True
     lite.propose = propose
