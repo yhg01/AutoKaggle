@@ -39,3 +39,17 @@ BOLD OS PR #31 is still under review. Problem Bank registration remains pending 
 The focused test group passed 83 tests. Tests cover unknown actions, malformed arguments, undiscovered IDs, redirects, permission errors, oversized or invalid responses, credential filtering, call limits, deployment packaging, and denial under public email access.
 
 A live read-only call used the existing OS JSON endpoint successfully. A separate live DeepSeek V4 Pro interview used synthetic OS fixtures, called project search and project validation, and returned a proposal for human review. No internal OS records were used in that model test. No write was made to BOLD OS. These are connector and model-loop tests, not proof of a deployed Slack identity integration.
+
+## Prototype check — 16 November 2026
+
+The member-only prototype was tested through its browser interface at `http://127.0.0.1:18883/lite`. It used an isolated database, live DeepSeek V4 Pro responses, and the live BOLD OS read API. The test account used the normal email-code routes with local mail capture. This did not test email delivery.
+
+The first short interview request found the real AutoKaggle project, checked its record, showed its exact page link, and asked the researcher to confirm ownership. The agent did not treat the lookup as contract approval. The live tool trace also confirmed successful skills and tools discovery.
+
+This test found a connector defect. The generic 24,000-character excerpt cut the live handbook before the Agentiquette section. Rules now include all accepted parts, up to a separate 128,000-character limit. Pending proposals are excluded. Invalid or larger rule documents return an explicit error instead of a partial policy. The follow-up live read returned all 78,164 characters, without truncation. The agent also fetched the live `bold-interview-coach` skill without truncation.
+
+The focused regression group passed 90 tests. Seven new cases cover complete rule delivery, pending proposals, invalid rule data, and the size limit. Production access and BOLD OS writes remain outside this prototype test. PR #22 remains separate from the Civo release; BOLD OS PR #31 remains under review.
+
+The researcher then confirmed the project in chat, opened **Review proposals**, and selected **Save defined details**. The saved project link, objective, title, and checklist count survived a browser reload. Required scientific gaps stayed open. The private source list remained empty: OS tool records were not added as imported participant sources.
+
+Response speed remains a limitation. Project discovery took about 56 seconds end to end. The full-rules and interview-skill turn took about 97 seconds. OS reads each took less than one second; most time was in the model response. These are two measured turns, not a latency benchmark. The browser showed the working state and returned to an editable conversation after each turn.
