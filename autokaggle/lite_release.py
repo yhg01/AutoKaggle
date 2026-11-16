@@ -109,10 +109,12 @@ def queue_registration(item, build):
     old = build.get("registry") or {}
     if old.get("idempotency_key") == payload["idempotency_key"] and old.get("status") == "registered":
         return
+    approved = bool(payload["human_approval"])
     build["registry"] = {**(old if old.get("idempotency_key") == payload["idempotency_key"] else {}),
-                         "status": "pending_connection", "idempotency_key": payload["idempotency_key"],
+                         "status": "pending_connection" if approved else "awaiting_approval", "idempotency_key": payload["idempotency_key"],
                          "payload": payload, "queued_at": now(),
-                         "reason": "The BOLD OS Problem Bank write connection must be configured."}
+                         "reason": "The BOLD OS Problem Bank write connection must be configured." if approved else
+                         "Validate this release on the declared research data, then approve it before BOLD OS registration."}
 
 
 def deliver_registration(store, item, build, *, client=None):
@@ -125,12 +127,18 @@ def deliver_registration(store, item, build, *, client=None):
     import httpx
     queue_registration(item, build)
     queued = build["registry"]
-    if queued["status"] in {"not_eligible", "registered"}:
+    if queued["status"] in {"not_eligible", "registered", "awaiting_approval"}:
         store.save(item)
         return
     url = os.getenv("AUTOKAGGLE_BOLD_REGISTRY_URL", "")
     token = os.getenv("AUTOKAGGLE_BOLD_REGISTRY_TOKEN", "")
     if not url or not token:
+        store.save(item)
+        return
+    if (os.getenv("AUTOKAGGLE_PRIVATE_MODE", "0").lower() not in {"1", "true", "yes", "on"}
+            or os.getenv("AUTOKAGGLE_LITE_ACCESS_POLICY", "members") != "members"
+            or not os.getenv("AUTOKAGGLE_LITE_MEMBERS", "").strip()):
+        queued.update(status="pending_connection", reason="BOLD OS writes require private member access. Public email access cannot enable registration.")
         store.save(item)
         return
     try:

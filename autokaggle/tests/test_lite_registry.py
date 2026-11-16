@@ -43,6 +43,9 @@ def test_bold_registration_receipt_and_retry(monkeypatch, scenario):
     item, build = eligible()
     monkeypatch.setenv('AUTOKAGGLE_BOLD_REGISTRY_URL', 'https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/v1/register_benchmark')
     monkeypatch.setenv('AUTOKAGGLE_BOLD_REGISTRY_TOKEN', 'test-placeholder')
+    monkeypatch.setenv('AUTOKAGGLE_PRIVATE_MODE', '1')
+    monkeypatch.setenv('AUTOKAGGLE_LITE_ACCESS_POLICY', 'members')
+    monkeypatch.setenv('AUTOKAGGLE_LITE_MEMBERS', 'test@example.invalid')
     calls = []
     class Store:
         def save(self, value): pass
@@ -92,7 +95,7 @@ def test_registry_rejects_incomplete_or_reported_validation(field, value):
     assert build["registry"]["status"] == "not_eligible"
 
 
-def test_checked_releases_register_before_research_validation_and_approval():
+def test_checked_releases_prepare_a_payload_before_research_validation_and_approval():
     item, build = eligible()
     build.pop("human_approval")
     build["validation"].update(research_data="not_run", research_evidence={})
@@ -101,6 +104,42 @@ def test_checked_releases_register_before_research_validation_and_approval():
     assert payload["session"] == {"application": "lite"}
     assert payload["human_approval"] == {}
     assert payload["validation"]["research_data"] == "not_run"
+
+
+@pytest.mark.parametrize('research_validated', [False, True])
+def test_automatic_registration_waits_for_human_approval(monkeypatch, research_validated):
+    import httpx
+    item, build = eligible()
+    build.pop('human_approval')
+    if not research_validated:
+        build['validation'].update(research_data='not_run', research_evidence={})
+    monkeypatch.setenv('AUTOKAGGLE_BOLD_REGISTRY_URL', 'https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/v1/register_benchmark')
+    monkeypatch.setenv('AUTOKAGGLE_BOLD_REGISTRY_TOKEN', 'test-placeholder')
+    calls = []
+    class Store:
+        def save(self, value): pass
+    with httpx.Client(transport=httpx.MockTransport(lambda req: calls.append(req))) as client:
+        lite_release.deliver_registration(Store(), item, build, client=client)
+        lite_release.deliver_registration(Store(), item, build, client=client)
+    assert build['registry']['status'] == 'awaiting_approval'
+    assert calls == []
+
+
+@pytest.mark.parametrize('private,policy,members', [('0','members','test@example.invalid'), ('1','verified_email','test@example.invalid'), ('1','members','')])
+def test_registration_cannot_run_under_unrestricted_access(monkeypatch, private, policy, members):
+    import httpx
+    item, build = eligible()
+    for key, value in {'AUTOKAGGLE_PRIVATE_MODE':private, 'AUTOKAGGLE_LITE_ACCESS_POLICY':policy,
+        'AUTOKAGGLE_LITE_MEMBERS':members, 'AUTOKAGGLE_BOLD_REGISTRY_URL':'https://europe-west2-bold-d7ff2.cloudfunctions.net/boldApi/v1/register_benchmark',
+        'AUTOKAGGLE_BOLD_REGISTRY_TOKEN':'test-placeholder'}.items(): monkeypatch.setenv(key,value)
+    calls = []
+    class Store:
+        def save(self, value): pass
+    with httpx.Client(transport=httpx.MockTransport(lambda req: calls.append(req))) as client:
+        lite_release.deliver_registration(Store(), item, build, client=client)
+    assert build['registry']['status'] == 'pending_connection'
+    assert 'member access' in build['registry']['reason']
+    assert calls == []
 
 
 def test_registry_requires_project_link_even_for_old_releases():
