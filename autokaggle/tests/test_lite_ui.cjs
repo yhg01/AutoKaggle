@@ -37,7 +37,7 @@ test("Opening Lite does not create a project or alter the Full workflow",async()
 test("An existing Lite session loads saved messages and six coverage cards",async()=>{const h=harness();await flush();assert.equal(h.calls.filter(c=>c.options.method).length,0);assert.match(h.$("messages").textContent,/Ascension/);assert.equal(h.$("coverage").value,2);assert.equal(h.$("checklist").children.length,6);assert.equal(h.$("sources-button").disabled,false);});
 test("Checklist details preserve an explicit no-step-limit decision",async()=>{const h=harness();await flush();await h.click("check-evaluation");assert.match(h.$("dialog-content").textContent,/No step limit/);assert.doesNotMatch(h.$("dialog-content").textContent,/Not recorded/);});
 test("Source and model markup is displayed as literal text",async()=>{const f=fixture();f.messages=[{role:"assistant",content:'<img src=x onerror="steal()">'},{role:"user",content:"A reply."}];const h=harness(f);await flush();assert.match(h.$("messages").textContent,/<img src=x/);assert.equal(h.$("messages").children[0].children[1].children.length,0);});
-test("Proposal acceptance is explicit and carries the current proposal identity",async()=>{const f=fixture();f.proposal={id:"proposal-1",summary:"Proposed scope",contract:{max_steps:null,metric:"success_rate"},evidence:{metric:{basis:"suggestion",excerpt:"Please confirm."}}};const h=harness(f);await flush();assert.equal(h.$("proposal-banner").hidden,false);await h.click("review-proposals");assert.match(h.$("dialog-content").textContent,/Agent suggestion/);assert.equal(h.calls.filter(c=>c.options.method).length,0);await h.clickText("Accept this definition");const call=h.calls.find(c=>c.url.endsWith("/accept"));assert.deepEqual(JSON.parse(call.options.body),{proposal_id:"proposal-1"});});
+test("Proposal acceptance is explicit and carries the current proposal identity",async()=>{const f=fixture();f.proposal={id:"proposal-1",summary:"Proposed scope",contract:{max_steps:null,metric:"success_rate"},evidence:{metric:{basis:"suggestion",excerpt:"Please confirm."}}};const h=harness(f);await flush();assert.equal(h.$("proposal-banner").hidden,false);await h.click("review-proposals");assert.match(h.$("dialog-content").textContent,/Accepted agent suggestion/);assert.equal(h.calls.filter(c=>c.options.method).length,0);await h.clickText("Accept this definition");const call=h.calls.find(c=>c.url.endsWith("/accept"));assert.deepEqual(JSON.parse(call.options.body),{proposal_id:"proposal-1"});});
 test("A proposal can be discarded without changing accepted evidence",async()=>{const f=fixture();f.proposal={id:"proposal-2",contract:{objective:"Speculation"}};const h=harness(f);await flush();await h.click("review-proposals");await h.clickText("Discard proposal");assert.deepEqual(JSON.parse(h.calls.find(c=>c.url.endsWith("/discard")).options.body),{proposal_id:"proposal-2"});});
 test("Failed messages preserve the draft and reuse a stable request ID",async()=>{const h=harness();await flush();h.handler=async(url,options)=>{if(url.endsWith("/message"))throw new TypeError("Connection stopped");};await h.input("message-input","Use fixed evaluation seeds.");await h.click("send-message");assert.equal(h.$("message-input").value,"Use fixed evaluation seeds.");await h.click("send-message");const calls=h.calls.filter(c=>c.url.endsWith("/message"));assert.equal(calls.length,2);assert.equal(calls[0].options.body,calls[1].options.body);});
 test("Queued work disables duplicate messages and schedules state polling",async()=>{const h=harness();await flush();h.handler=async url=>url.endsWith("/message")?{ok:true,json:async()=>({...fixture(),status:"working",stage:"Reading your answer"})}:null;await h.input("message-input","Use an episode count of 100.");await h.click("send-message");assert.equal(h.$("message-input").value,"");assert.equal(h.$("send-message").disabled,true);assert.equal(h.$("thinking").hidden,false);assert.ok([...h.timers.values()].some(t=>t.ms===1500));});
@@ -172,13 +172,13 @@ test("A saved session with messages does not show the opening questions",async()
  await h.clickText("Retry publication");assert.match(h.$("dialog-content").textContent,/Download GitHub ZIP/);
  assert.doesNotMatch(h.$("dialog-content").textContent,/Retry publication/);
  });
-test("GitHub links inside a repository stay in the chat message; only repository roots are imported",async()=>{const h=harness();await flush();
+test("All links in ordinary replies stay in chat until the researcher chooses source import",async()=>{const h=harness();await flush();
  const archive="Compare with https://github.com/owner/repo/archive/0123456789abcdef0123456789abcdef01234567.tar.gz please.";
  await h.input("message-input",archive);await h.click("send-message");
  await h.input("message-input","See https://github.com/owner/repo/blob/main/train.py#L10");await h.click("send-message");
  await h.input("message-input","Code is at https://github.com/owner/repo/.");await h.click("send-message");
- const sent=posts(h);assert.deepEqual(sent.map(p=>p[0]),["message","message","import"]);
- assert.equal(sent[0][1].message,archive);assert.equal(sent[2][1].repository_url,"https://github.com/owner/repo/");});
+ const sent=posts(h);assert.deepEqual(sent.map(p=>p[0]),["message","message","message"]);
+ assert.equal(sent[0][1].message,archive);assert.equal(sent[2][1].message,"Code is at https://github.com/owner/repo/.");});
 test("Opening questions ask for the repository root when given a link inside a repository",async()=>{const f=blank(),h=harness(f);await flush();answered(h,f);
  await h.input("message-input","https://github.com/owner/repo/archive/0123456789abcdef0123456789abcdef01234567.tar.gz");await h.click("send-message");
  assert.match(h.$("messages").textContent,/points inside a repository\. Paste the repository's main link/);assert.match(h.$("messages").textContent,/Is this work based on a paper\?/);
@@ -268,4 +268,58 @@ test('Handoff creation blocks concurrent revocation until it finishes',async()=>
  await flush();const creating=h.clickText('Create handoff code');await flush();
  await h.clickText('Revoke unused code');assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,0);
  finish();await creating;await h.clickText('Revoke unused code');assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,1);
+});
+
+test("Source reading is explicit and keeps the complete reply",async()=>{
+ const h=harness();await flush();const text="Use these metrics. Source https://github.com/owner/repo and https://arxiv.org/abs/2502.09172";
+ await h.input("message-input",text);assert.equal(h.$("linked-source-option").hidden,false);
+ await h.click("read-linked-sources");assert.equal(posts(h).length,0);
+ assert.equal(h.$("repository-url").value,"https://github.com/owner/repo");
+ assert.equal(h.$("paper-url").value,"https://arxiv.org/abs/2502.09172");assert.equal(h.$("source-brief").value,text);
+ await h.submitFor("paper-url");assert.equal(posts(h)[0][0],"import");assert.equal(posts(h)[0][1].brief,text);
+ assert.equal(h.$("message-input").value,"");
+});
+test("A cancelled source read leaves the reply available for normal Send",async()=>{
+ const h=harness();await flush();const text="Do not use https://github.com/owner/repo.";
+ await h.input("message-input",text);await h.click("read-linked-sources");await h.click("close-dialog");
+ assert.equal(h.$("message-input").value,text);await h.click("send-message");
+ assert.equal(posts(h).length,1);assert.equal(posts(h)[0][0],"message");assert.equal(posts(h)[0][1].message,text);
+});
+test("Failed source import keeps the original reply and its retry identity",async()=>{
+ const h=harness();await flush();const text="Read https://github.com/owner/repo";
+ h.handler=async url=>url.endsWith("/import")?{ok:false,status:502,json:async()=>({detail:"Source unavailable"})}:null;
+ await h.input("message-input",text);await h.click("read-linked-sources");await h.submitFor("paper-url");
+ assert.equal(h.$("message-input").value,text);assert.match(h.$("dialog-error").textContent,/Source unavailable/);
+ await h.submitFor("paper-url");const calls=h.calls.filter(c=>c.url.endsWith("/import"));
+ assert.equal(calls[0].options.body,calls[1].options.body);
+});
+test("Ordinary paper references do not start source import",async()=>{
+ const h=harness();await flush();const text="Ignore https://arxiv.org/abs/2502.09172 for now.";
+ await h.input("message-input",text);await h.click("send-message");assert.equal(posts(h).length,1);assert.equal(posts(h)[0][0],"message");assert.equal(posts(h)[0][1].message,text);
+});
+
+test("Old evaluator releases explain why an application update does not repair their code",async()=>{
+ const h=harness();await flush();const view=evaluatorView({status:"stale",earlier_releases:[{evaluator_version:1,contract_version:"old",validation:{build:"legacy"}}]});
+ h.handler=async url=>url.endsWith("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;
+ await h.click("evaluator-button");const text=h.$("dialog-content").textContent;
+ assert.match(text,/older release needs the current checks/);assert.match(text,/Updating Lite does not change a repository/);
+ assert.match(text,/Research-data validation is a separate step/);assert.doesNotMatch(text,/Download release/);
+});
+
+test("Revision review separates changes, removals, and already accepted facts",async()=>{
+ const f=fixture();f.contract={objective:"Compare methods",metric:"accuracy",max_steps:null,baseline:"Old baseline"};
+ f.proposal={id:"p2",summary:"One metric change",contract:{objective:"Compare methods",metric:"mean_score",max_steps:null},
+  evidence:{objective:{basis:"researcher",excerpt:"Compare methods"},max_steps:{basis:"suggestion",excerpt:"No step cap"}},question:"Please accept the changes.",question_field:"",open_decisions:[]};
+ const h=harness(f);await flush();await h.click("review-proposals");const text=h.$("dialog-content").textContent;
+ assert.match(text,/2 proposed changes/);assert.match(text,/2 unchanged details — already accepted/);
+ assert.match(text,/Removed from this proposal/);assert.match(text,/Previously: Old baseline/);
+ assert.match(text,/Accepted agent suggestion/);assert.doesNotMatch(text,/Still to decide/);assert.match(text,/Next step/);
+ const details=h.$("dialog-content").children.find(n=>n.tag==="details");assert.ok(details);assert.notEqual(details.open,true);
+});
+
+test("A current checked release does not receive its predecessor's upgrade notice",async()=>{
+ const h=harness();await flush();const release={validation:{build:"passed"},evidence:{commit:"c".repeat(40),tag:"v2"},tests:[]};
+ const view=evaluatorView({status:"ready",release,earlier_releases:[{evaluator_version:1,contract_version:"old",validation:{build:"legacy"}}]});
+ h.handler=async url=>url.endsWith("/lite/evaluator")?{ok:true,status:200,json:async()=>structuredClone(view)}:null;
+ await h.click("evaluator-button");assert.doesNotMatch(h.$("dialog-content").textContent,/older release needs the current checks/);
 });

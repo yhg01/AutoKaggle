@@ -4,6 +4,8 @@ Lite is the internal ML research mode. Open `/lite`. On the separate Lite host, 
 
 One accepted contract produces a private website preview, README, research ZIP, fixed seed list, result schemas, local runner, and result record. Lite supports batch evaluation, interactive environments, optimization, forecasting, generation, and custom evaluation. It accepts the artifact defined by the contract. Researchers run their experiments locally. The service can prepare and test a small evaluator in a bounded build job; it does not rent nodes.
 
+The [16 November interview review](LITE_QOL_REVIEW.md) records the latest changes and tests. Normal replies with links stay in chat. Use **Read linked sources** to import them. Proposal review shows changed and removed fields first, with unchanged accepted facts folded away. The agent distinguishes scientific decisions from later coding, publishing, and research-data checks.
+
 ## Required workflow before merging Lite into main
 
 **One evaluator repository per problem.** Keep the Lite agent in the AutoKaggle application repository. Each onboarded problem gets a separate GitHub evaluator repository accessible to its collaborators. Include the versioned YAML config, implemented scoring adapter, pinned environment, input contract, and instructions for required assets. Generate the YAML and the runner's configuration from the same accepted contract. A collaborator clones a pinned release, supplies a compatible checkpoint, policy, or output, and runs one documented command locally. The command returns the defined fitness and a machine-readable result. Test it on a known sample from a clean clone before marking the benchmark ready. The current ZIP runner is a starting point. Its generic adapter still requires implementation for tasks that have no packaged adapter.
@@ -39,8 +41,8 @@ Limits of this version:
 
 - Expected scores are established by a separate calculation written in the same build job. This is a consistency check with a written basis, not an independent party. Review each example's basis. A researcher-supplied reference example is not yet supported.
 - The container is not a security boundary against a determined attacker, and its network is open. Builds are for trusted lab contracts.
-- Builds need Docker on the application host. The hosted Lite pod has no Docker, so the build control reports that builds are unavailable there. `AUTOKAGGLE_LITE_BUILD_RUNTIME=local` runs the agent as a host process for development only.
-- Dependencies install as wheels only unless `AUTOKAGGLE_LITE_BUILD_ALLOW_SDIST=1`. An artifact is one file. The five contract metrics are unchanged.
+- Local container builds need Docker. Hosted Internal builds use the configured Kubernetes runtime described in `deploy/LITE_WEB.md`. `AUTOKAGGLE_LITE_BUILD_RUNTIME=local` runs the agent as a host process for development only.
+- Dependencies install as wheels only unless `AUTOKAGGLE_LITE_BUILD_ALLOW_SDIST=1`. Artifacts can be files or directories. Five built-in fitness measures and custom fitness are supported. Required secondary metrics and durable outputs are checked separately.
 - Settings: `AUTOKAGGLE_LITE_BUILD_MODEL` (default: the selected provider's Lite model), `AUTOKAGGLE_LITE_BUILD_EFFORT` (`medium`), `AUTOKAGGLE_LITE_BUILD_MINUTES` (30), `AUTOKAGGLE_LITE_BUILD_REQUESTS` (150), `AUTOKAGGLE_LITE_BUILD_CPUS` (2), `AUTOKAGGLE_LITE_BUILD_MEMORY_GB` (4), `AUTOKAGGLE_LITE_BUILD_CONCURRENCY` (1).
 
 ## Publish to GitHub
@@ -67,7 +69,7 @@ For hosted Lite, the deployer reads the token from the private file `$HOME/.conf
 
 Limits of this version:
 
-- Release checks test the primary fitness and declared fixtures. They do not yet test every secondary output or reference-data provenance requirement in the scientific definition. Review generated adapters before treating a result as fully compliant with that definition. A missing required diagnostic or reference identity needs a corrected evaluator release.
+- Release checks use a frozen quality plan, requirement-to-test coverage, code review, and known-score and invalid-input cases. They check declared secondary metrics, saved outputs, and required reference identity. Human review is still needed to assess whether the plan and implementation capture the science. Software checks on synthetic data do not establish research-data validation. Older releases require rebuilding to gain the current checks.
 - Hosted builds require the Internal Kubernetes runtime described in `deploy/LITE_WEB.md`. Admission follows the configured Lite access policy. They do not run researcher training jobs.
 - Repository access follows GitHub organization and repository permissions. Lite does not add collaborators automatically. Email access to Lite does not grant access to a private GitHub repository.
 - The lab-approved repository template and its project-tracking files are not applied.

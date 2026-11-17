@@ -19,3 +19,6 @@
 .attachment-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .attachment-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; background: #edf3f8; border-radius: 8px; font-size: 12px; }
 .attachment-chip button { padding: 3px 6px; font-size: 11px; }
+/* Source reading is an explicit option shown only when a reply contains source links. */
+.linked-source-option{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:4px 2px 8px;color:var(--muted);font-size:12px}
+.linked-source-option[hidden]{display:none}

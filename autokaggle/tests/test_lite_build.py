@@ -239,6 +239,7 @@ def test_contract_change_requires_a_new_build_and_keeps_the_earlier_release(harn
         assert second["status"] == "ready" and second["release"]["evaluator_version"] == 2
         assert second["release"]["contract_version"] != first["contract_version"]
         assert [e["commit"] for e in second["earlier_releases"]] == [first["evidence"]["commit"]]
+        assert second["earlier_releases"][0]["validation"] == first["validation"]
         repo = Path(app.state.store.directory(identifier)) / "lite-evaluator" / "repo.git"
         tags = subprocess.run(["git", "tag"], env={**os.environ, "GIT_DIR": str(repo)}, capture_output=True, text=True).stdout.split()
         assert tags == ["v1", "v2"]
@@ -501,7 +502,7 @@ def test_deepseek_interview_sends_the_same_context_and_passes_the_same_validatio
     state = lite.initial()
     state["messages"].append({"id": "m1", "role": "user", "content": "Measure label accuracy on five fixed rows."})
     FakeModel.calls, FakeModel.replies = [], [REPLY, "   ", REPLY]
-    reference = lite.propose(state)
+    reference = lite_providers.propose_openrouter(lite, state)
     proposal = lite_providers.propose_deepseek(lite, state)
     first, blank, second = FakeModel.calls
     assert first["base_url"] == "https://openrouter.ai/api/v1" and first["api_key"] == "openrouter-key"

@@ -10,6 +10,7 @@ import uuid
 import weakref
 
 from . import observability as obs
+from . import lite_interview
 from .store import now
 
 _STORES = weakref.WeakValueDictionary()
@@ -114,7 +115,7 @@ def request(state, client, *, kind='lite interview', _record=None, **kwargs):
 def parse(lite, state, response, trace=None):
     status = 'rejected'
     try:
-        result = lite.parse_proposal(state, response)
+        result = lite_interview.parse(lite, state, response)
         status = 'accepted'
         return result
     finally:

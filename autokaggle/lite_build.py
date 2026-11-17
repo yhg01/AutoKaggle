@@ -933,7 +933,7 @@ def view(project, runtime, github=None):
                          "title": lite_view["contract"].get("title", project["title"])},
             "release": release, "latest": other, "publishing": publishing_view(state, github),
             "recoverable_draft": latest if latest and latest.get("draft_saved") and latest["status"] in {"failed", "blocked"} else None,
-            "earlier_releases": [{k: b[k] for k in ("evaluator_version", "contract_version", "finished_at")} | {"commit": b["evidence"]["commit"]} for b in earlier],
+            "earlier_releases": [{k: b[k] for k in ("evaluator_version", "contract_version", "finished_at", "validation")} | {"commit": b["evidence"]["commit"]} for b in earlier],
             "builds": len(builds), "settings": {k: settings()[k] for k in ("model", "effort", "minutes", "requests")} | {"runtime": runtime.kind, "provider": providers.label()}}
 
 
