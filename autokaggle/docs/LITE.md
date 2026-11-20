@@ -84,11 +84,11 @@ Limits of this version:
 6. Build the package. Open its website preview, download the ZIP, and download the evaluation config. The config is the same `contract.json` included in the ZIP. It includes every required seed.
 7. Run the package on the researcher's machine. Submit the generated `results.json` through the result control.
 
-The model can propose many fields in one turn. It does not need a separate question for each field. An invalid field leaves other valid proposals available and becomes an open decision. Nothing becomes an accepted fact until the organizer confirms the proposal. Corrections create a new contract version. Previous packages become stale; saved results retain their original version.
+The model can propose many fields in one turn. It does not need a separate question for each field. An invalid field leaves other valid proposals available and becomes an open decision. Nothing becomes an accepted fact until the organizer confirms the proposal. Corrections create a new contract version. Previous packages become stale. The package dialog removes obsolete download links when it receives the new state. Saved results retain their original version.
 
 A populated field can still contain an open decision. The model records each such decision and its reason. The proposal and checklist show these reasons. **Save defined details** records partial progress, but does not permit a package build. A model must supply a corrected field and an explicit resolution reason to close a saved gap. An organizer can also edit that field. Changes to unrelated fields do not clear it. The optional reference baseline never blocks a build. A new accepted review requires a package rebuild, even if the experiment values remain the same. Rebuilding unchanged values keeps the same seeds.
 
-Each round permits 30 model calls. A provider failure preserves messages, accepted facts, and retrieved sources. **Retry** does not duplicate a message. A restart marks active work interrupted and permits retry. Researchers can resume or delete sessions.
+Each round permits 30 model calls. A provider failure preserves messages, accepted facts, and retrieved sources. **Retry** uses the saved message. If the browser cannot confirm the retry, it checks the saved session for an active turn or a completed reply. A restart marks active work interrupted and permits retry. Researchers can resume or delete sessions.
 
 The revision agent receives the latest three saved result summaries, their versions, checks, and evidence limits. It can discuss failures and requested changes without repeating the initial interview. It does not receive raw artifacts or private artifact references through this result context.
 
@@ -186,7 +186,7 @@ Queued requests return immediately. Poll the state endpoint while status is `wor
 
 ## Server repository imports
 
-Public GitHub links create an immutable source snapshot on the server. The agent can read files and search that snapshot. It does not run repository code during import. The snapshot records the commit and each file digest. It excludes Git history, submodule downloads, and Git LFS downloads; missing assets remain explicit requirements.
+During the interview, **Send** keeps paper and GitHub links in the reply. Select **Read linked sources** and confirm to import the supported links. The opening paper and repository questions can also start an import. A repository import creates a fixed server snapshot. The agent can read and search its files. The snapshot records the commit and each file digest. It excludes Git history, submodules, and Git LFS downloads. Missing assets remain open requirements.
 
 Imports allow up to 256 MiB compressed, 1 GiB extracted, 40,000 files, and 128 MiB per file. Each session can store six revisions. The service checks free space before download. Unsafe archive paths are rejected. Links and special files are omitted. Failed imports clean their temporary files. Deleting a session removes its stored snapshots. Source excerpts in model prompts remain bounded; a local file-search tool supplies further details.
 
