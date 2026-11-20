@@ -10,7 +10,7 @@
     ["resources", "Resources", "Training and evaluation limits"],
     ["provenance", "Reproduction", "Commands, dependencies, and evidence"]
   ];
-  const state = { id: null, data: null, access: null, busy: false, loading: false, auth: false, generation: 0, poll: null, dialog: null, messageKey: "", pending: new Map() };
+  const state = { id: null, data: null, access: null, busy: false, loading: false, auth: false, generation: 0, readSequence: 0, poll: null, dialog: null, messageKey: "", pending: new Map() };
   const dialog = $("detail-dialog"), content = $("dialog-content");
   const path = (tail = "", id = state.id) => `/api/projects/${encodeURIComponent(id)}/lite${tail}`;
   const el = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined && text !== null) n.textContent = String(text); if (className) n.className = className; return n; };
@@ -72,11 +72,13 @@
     $("sign-in").hidden = false; $("sign-in").href = "/login?next=" + encodeURIComponent("/lite" + (state.id ? "?project=" + encodeURIComponent(state.id) : ""));
     notice("Your sign-in ended. Sign in again to reopen your saved session.", true);
   }
-  async function failure(error) {
+  async function failure(error, isCurrent = () => true) {
+    if (!isCurrent()) return;
     if (error.status === 401) { authFailure(); return; }
     if (error.status === 404 && state.access?.private_mode) {
-      try { const access = await api("/api/access"); if (access.auth_kind === "anonymous") { authFailure(); return; } } catch (_) {}
+      try { const access = await api("/api/access"); if (isCurrent() && access.auth_kind === "anonymous") { authFailure(); return; } } catch (_) {}
     }
+    if (!isCurrent()) return;
     const message = error.message || "The connection stopped. Try again.";
     if (dialog.open) modalError(message); else notice(message, true);
   }
@@ -98,16 +100,44 @@
     if (!saved || saved.fingerprint !== fingerprint) { saved = { fingerprint, id: crypto.randomUUID() }; stored(key, JSON.stringify(saved)); }
     return { id: saved.id, key };
   }
+  function beginSessionWrite() {
+    // A read already in flight may contain the state from before this write.
+    state.readSequence++;
+    state.busy = true;
+  }
+  async function reconcileRetry(error, generation, request) {
+    if (error.status && ![408, 409].includes(error.status) && error.status < 500) return false;
+    const previousCalls = state.data.model?.calls;
+    let data;
+    try { data = await api(path()); }
+    catch (readError) {
+      if ([401, 404].includes(readError.status)) {
+        await failure(readError, () => generation === state.generation);
+      }
+      return generation !== state.generation;
+    }
+    if (generation !== state.generation) return true;
+    // If the retry never reached the server, keep its ID for the next attempt.
+    if (data.status === "error" && data.model?.calls === previousCalls) return false;
+    if (request) stored(request.key, null);
+    state.data = data;
+    notice(); render(); schedule();
+    return true;
+  }
   async function mutate(tail, payload, { after, label, withID = true } = {}) {
     if (busy() || !ready()) return;
     const generation = state.generation, request = withID ? pendingID(tail, payload) : null;
-    state.busy = true; modalError(); notice(label || "Saving…"); controls();
+    beginSessionWrite(); modalError(); notice(label || "Saving…"); controls();
     try {
       const data = await api(path(tail), { method: "POST", body: JSON.stringify({ ...payload, ...(request ? { request_id: request.id } : {}) }) });
       if (generation !== state.generation) return;
       if (request) stored(request.key, null);
-      state.data = data; render(); notice(); if (after) after(data); schedule();
-    } catch (error) { if (generation === state.generation) await failure(error); }
+      state.data = data; notice(); render(); if (after) after(data); schedule();
+    } catch (error) {
+      if (generation !== state.generation) return;
+      if (tail === "/retry" && await reconcileRetry(error, generation, request)) return;
+      await failure(error, () => generation === state.generation);
+    }
     finally { if (generation === state.generation) { state.busy = false; controls(); } }
   }
   function renderChecklist() {
@@ -168,13 +198,21 @@
   }
   function schedule(delay = 1500) {
     clearTimeout(state.poll); if (state.data?.status !== "working" || state.auth) return;
-    const generation = state.generation; state.poll = setTimeout(async () => {
-      try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; render(); schedule(); }
-      catch (error) { if (generation === state.generation) { await failure(error); if (!state.auth) schedule(5000); } }
-    }, delay);
+    state.poll = setTimeout(reload, delay);
   }
   async function reload() {
-    const generation = state.generation; try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; notice(); render(); schedule(); } catch (error) { if (generation === state.generation) { await failure(error); if (!state.auth) schedule(5000); } }
+    if (!state.id || state.auth || state.loading) return;
+    if (state.busy) { schedule(); return; }
+    const generation = state.generation, sequence = ++state.readSequence;
+    const isCurrent = () => generation === state.generation && sequence === state.readSequence;
+    try {
+      const data = await api(path());
+      if (!isCurrent()) return;
+      state.data = data; notice(); render(); schedule();
+    } catch (error) {
+      await failure(error, isCurrent);
+      if (isCurrent()) schedule(5000);
+    }
   }
   async function openSession(id) {
     const arrival = new URLSearchParams(location.search);
@@ -308,7 +346,7 @@
       if (!paper.input.value.trim() && !repo.input.value.trim() && !file && !state.data.sources?.length) { modalError("Add a paper URL, a PDF, or a public GitHub repository."); return; }
       if (file && (!file.name.toLowerCase().endsWith(".pdf") || file.size > 16 * 1024 * 1024)) { modalError("Choose a PDF file of 16 MB or less."); return; }
       if (file) {
-        const generation = state.generation; state.busy = true; controls();
+        const generation = state.generation; beginSessionWrite(); controls();
         try { const formData = new FormData(); formData.append("file", file); const data = await api(path("/paper"), { method: "POST", body: formData }); if (generation !== state.generation) return; state.data = data; render(); }
         catch (error) { if (generation === state.generation) await failure(error); return; }
         finally { if (generation === state.generation) { state.busy = false; controls(); } }
@@ -414,7 +452,7 @@
   }
   async function uploadAttachments() {
     const generation = state.generation, opening = intake(), names = [];
-    state.busy = true; controls();
+    beginSessionWrite(); controls();
     try {
       while (pendingFiles.length) {
         const file = pendingFiles[0], form = new FormData(); form.append("file", file);
@@ -516,7 +554,7 @@
     saveIntake(); state.messageKey = ""; render();
     const generation = state.generation;
     if (it.file) {
-      state.busy = true; controls();
+      beginSessionWrite(); controls();
       try { const formData = new FormData(); formData.append("file", it.file); const data = await api(path("/paper"), { method: "POST", body: formData }); if (generation !== state.generation) return; state.data = data; it.file = null; }
       catch (error) { if (generation === state.generation) { await failure(error); restartIntake(it, "The PDF could not be read. "); } return; }
       finally { if (generation === state.generation) { state.busy = false; controls(); } }

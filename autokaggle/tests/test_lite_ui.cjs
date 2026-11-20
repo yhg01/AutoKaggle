@@ -41,7 +41,82 @@ test("Proposal acceptance is explicit and carries the current proposal identity"
 test("A proposal can be discarded without changing accepted evidence",async()=>{const f=fixture();f.proposal={id:"proposal-2",contract:{objective:"Speculation"}};const h=harness(f);await flush();await h.click("review-proposals");await h.clickText("Discard proposal");assert.deepEqual(JSON.parse(h.calls.find(c=>c.url.endsWith("/discard")).options.body),{proposal_id:"proposal-2"});});
 test("Failed messages preserve the draft and reuse a stable request ID",async()=>{const h=harness();await flush();h.handler=async(url,options)=>{if(url.endsWith("/message"))throw new TypeError("Connection stopped");};await h.input("message-input","Use fixed evaluation seeds.");await h.click("send-message");assert.equal(h.$("message-input").value,"Use fixed evaluation seeds.");await h.click("send-message");const calls=h.calls.filter(c=>c.url.endsWith("/message"));assert.equal(calls.length,2);assert.equal(calls[0].options.body,calls[1].options.body);});
 test("Queued work disables duplicate messages and schedules state polling",async()=>{const h=harness();await flush();h.handler=async url=>url.endsWith("/message")?{ok:true,json:async()=>({...fixture(),status:"working",stage:"Reading your answer"})}:null;await h.input("message-input","Use an episode count of 100.");await h.click("send-message");assert.equal(h.$("message-input").value,"");assert.equal(h.$("send-message").disabled,true);assert.equal(h.$("thinking").hidden,false);assert.ok([...h.timers.values()].some(t=>t.ms===1500));});
+test("A refresh started before Send cannot hide a saved reply or stop polling", async () => {
+ const initial = fixture(), h = harness(initial);
+ await flush();
+ const reply = "Use an episode count of 100.";
+ const working = {...initial, status:"working", messages:[...initial.messages, {role:"user", content:reply}]};
+ let finishEarlierRead, reads = 0;
+ h.handler = async (url, options) => {
+  if (url.endsWith("/message")) return {ok:true, json:async()=>working};
+  if (url.endsWith("/lite") && !options.method) {
+   if (++reads === 1) return new Promise(resolve => { finishEarlierRead = resolve; });
+   return {ok:true, json:async()=>({...working, status:"idle", messages:[...working.messages, {role:"assistant", content:"Use 100 episodes."}]})};
+  }
+ };
+ const refresh = h.click("refresh-session");
+ await flush();
+ await h.input("message-input", reply);
+ await h.click("send-message");
+ finishEarlierRead({ok:true, json:async()=>initial});
+ await refresh;
+ assert.match(h.$("messages").textContent, /episode count of 100/);
+ assert.equal(h.$("thinking").hidden, false);
+ const poll = [...h.timers.values()].find(timer => timer.ms === 1500);
+ assert.ok(poll, "Polling must continue for the saved request");
+ await poll.f();
+ assert.match(h.$("messages").textContent, /Use 100 episodes/);
+ assert.equal(h.$("thinking").hidden, true);
+});
+test("A later refresh wins when two read replies arrive out of order", async () => {
+ const initial = fixture(), h = harness(initial);
+ await flush();
+ let finishEarlierRead, reads = 0;
+ h.handler = async url => {
+  if (!url.endsWith("/lite")) return;
+  if (++reads === 1) return new Promise(resolve => { finishEarlierRead = resolve; });
+  return {ok:true, json:async()=>({...initial, title:"Latest title"})};
+ };
+ const refresh = h.click("refresh-session");
+ await flush();
+ await h.click("refresh-session");
+ finishEarlierRead({ok:true, json:async()=>initial});
+ await refresh;
+ assert.equal(h.$("challenge-title").textContent, "Latest title");
+});
 test("Provider errors expose retry without repeating the user message",async()=>{const f=fixture();f.status="error";f.error="Model temporarily unavailable";const h=harness(f);await flush();assert.equal(h.$("retry-request").hidden,false);await h.click("retry-request");assert.ok(h.calls.some(c=>c.url.endsWith("/retry")));assert.ok(!h.calls.some(c=>c.url.endsWith("/message")));});
+for (const [status, savedStatus] of [[503, "working"], [409, "idle"], [503, "error"]]) {
+ test(`Retry reconciles HTTP ${status} with saved ${savedStatus} state`, async () => {
+  const initial = {...fixture(), status:"error", error:"Original model failure"};
+  const h = harness(initial);
+  await flush();
+  const saved = {...initial, status:savedStatus, model:{...initial.model, calls:4},
+   error:"The second model request also failed",
+   messages:[...initial.messages, {role:"assistant", content:"The retry reached the server."}]};
+  h.handler = async (url, options) => {
+   if (url.endsWith("/retry")) return {ok:false, status, json:async()=>({detail:"The retry could not be confirmed"})};
+   if (url.endsWith("/lite") && !options.method) return {ok:true, json:async()=>saved};
+  };
+  await h.click("retry-request");
+  assert.equal(h.calls.filter(call => call.url.endsWith("/retry")).length, 1);
+  assert.match(h.$("messages").textContent, /retry reached the server/);
+  assert.equal(h.$("retry-request").hidden, savedStatus !== "error");
+  assert.equal(h.storage.has("autokaggle-lite-request:p1:/retry"), false);
+  if (savedStatus === "working") assert.ok([...h.timers.values()].some(timer => timer.ms === 1500));
+  if (savedStatus === "error") assert.match(h.$("notice").textContent, /second model request also failed/);
+ });
+}
+test("Retry keeps its request ID when the server has not started it", async () => {
+ const h = harness({...fixture(), status:"error", error:"Original model failure"});
+ await flush();
+ h.handler = async url => url.endsWith("/retry") ? {ok:false, status:503, json:async()=>({detail:"Connection lost"})} : null;
+ await h.click("retry-request");
+ assert.equal(h.$("retry-request").hidden, false);
+ await h.click("retry-request");
+ const retries = h.calls.filter(call => call.url.endsWith("/retry"));
+ assert.equal(retries.length, 2);
+ assert.equal(retries[0].options.body, retries[1].options.body);
+});
 test("Request limit offers another bounded round",async()=>{const f=fixture();f.model.round_calls=30;const h=harness(f);await flush();assert.equal(h.$("continue-round").hidden,false);assert.match(h.$("recovery-detail").textContent,/saved context/);await h.click("continue-round");assert.ok(h.calls.some(c=>c.url.endsWith("/continue")));});
 test("A stale package has no download or preview links",async()=>{const f=fixture();f.package.status="stale";const h=harness(f);await flush();await h.click("package-button");assert.match(h.$("dialog-content").textContent,/Prepare a new package/);assert.doesNotMatch(h.$("dialog-content").textContent,/Download ZIP/);});
 test("Artifact links are restricted to this session and origin",async()=>{const f=fixture();f.package.url="https://attacker.example/zip";f.package.config_url="https://attacker.example/config";f.package.preview_url="/api/projects/p2/lite/preview";f.package.readme_url="javascript:alert(1)";const h=harness(f);await flush();await h.click("package-button");assert.doesNotMatch(h.$("dialog-content").textContent,/Download ZIP|Download config|View challenge|Read README/);});
