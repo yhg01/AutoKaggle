@@ -41,9 +41,100 @@ test("Proposal acceptance is explicit and carries the current proposal identity"
 test("A proposal can be discarded without changing accepted evidence",async()=>{const f=fixture();f.proposal={id:"proposal-2",contract:{objective:"Speculation"}};const h=harness(f);await flush();await h.click("review-proposals");await h.clickText("Discard proposal");assert.deepEqual(JSON.parse(h.calls.find(c=>c.url.endsWith("/discard")).options.body),{proposal_id:"proposal-2"});});
 test("Failed messages preserve the draft and reuse a stable request ID",async()=>{const h=harness();await flush();h.handler=async(url,options)=>{if(url.endsWith("/message"))throw new TypeError("Connection stopped");};await h.input("message-input","Use fixed evaluation seeds.");await h.click("send-message");assert.equal(h.$("message-input").value,"Use fixed evaluation seeds.");await h.click("send-message");const calls=h.calls.filter(c=>c.url.endsWith("/message"));assert.equal(calls.length,2);assert.equal(calls[0].options.body,calls[1].options.body);});
 test("Queued work disables duplicate messages and schedules state polling",async()=>{const h=harness();await flush();h.handler=async url=>url.endsWith("/message")?{ok:true,json:async()=>({...fixture(),status:"working",stage:"Reading your answer"})}:null;await h.input("message-input","Use an episode count of 100.");await h.click("send-message");assert.equal(h.$("message-input").value,"");assert.equal(h.$("send-message").disabled,true);assert.equal(h.$("thinking").hidden,false);assert.ok([...h.timers.values()].some(t=>t.ms===1500));});
+test("A refresh started before Send cannot hide a saved reply or stop polling", async () => {
+ const initial = fixture(), h = harness(initial);
+ await flush();
+ const reply = "Use an episode count of 100.";
+ const working = {...initial, status:"working", messages:[...initial.messages, {role:"user", content:reply}]};
+ let finishEarlierRead, reads = 0;
+ h.handler = async (url, options) => {
+  if (url.endsWith("/message")) return {ok:true, json:async()=>working};
+  if (url.endsWith("/lite") && !options.method) {
+   if (++reads === 1) return new Promise(resolve => { finishEarlierRead = resolve; });
+   return {ok:true, json:async()=>({...working, status:"idle", messages:[...working.messages, {role:"assistant", content:"Use 100 episodes."}]})};
+  }
+ };
+ const refresh = h.click("refresh-session");
+ await flush();
+ await h.input("message-input", reply);
+ await h.click("send-message");
+ finishEarlierRead({ok:true, json:async()=>initial});
+ await refresh;
+ assert.match(h.$("messages").textContent, /episode count of 100/);
+ assert.equal(h.$("thinking").hidden, false);
+ const poll = [...h.timers.values()].find(timer => timer.ms === 1500);
+ assert.ok(poll, "Polling must continue for the saved request");
+ await poll.f();
+ assert.match(h.$("messages").textContent, /Use 100 episodes/);
+ assert.equal(h.$("thinking").hidden, true);
+});
+test("A later refresh wins when two read replies arrive out of order", async () => {
+ const initial = fixture(), h = harness(initial);
+ await flush();
+ let finishEarlierRead, reads = 0;
+ h.handler = async url => {
+  if (!url.endsWith("/lite")) return;
+  if (++reads === 1) return new Promise(resolve => { finishEarlierRead = resolve; });
+  return {ok:true, json:async()=>({...initial, title:"Latest title"})};
+ };
+ const refresh = h.click("refresh-session");
+ await flush();
+ await h.click("refresh-session");
+ finishEarlierRead({ok:true, json:async()=>initial});
+ await refresh;
+ assert.equal(h.$("challenge-title").textContent, "Latest title");
+});
 test("Provider errors expose retry without repeating the user message",async()=>{const f=fixture();f.status="error";f.error="Model temporarily unavailable";const h=harness(f);await flush();assert.equal(h.$("retry-request").hidden,false);await h.click("retry-request");assert.ok(h.calls.some(c=>c.url.endsWith("/retry")));assert.ok(!h.calls.some(c=>c.url.endsWith("/message")));});
+for (const [status, savedStatus] of [[503, "working"], [409, "idle"], [503, "error"]]) {
+ test(`Retry reconciles HTTP ${status} with saved ${savedStatus} state`, async () => {
+  const initial = {...fixture(), status:"error", error:"Original model failure"};
+  const h = harness(initial);
+  await flush();
+  const saved = {...initial, status:savedStatus, model:{...initial.model, calls:4},
+   error:"The second model request also failed",
+   messages:[...initial.messages, {role:"assistant", content:"The retry reached the server."}]};
+  h.handler = async (url, options) => {
+   if (url.endsWith("/retry")) return {ok:false, status, json:async()=>({detail:"The retry could not be confirmed"})};
+   if (url.endsWith("/lite") && !options.method) return {ok:true, json:async()=>saved};
+  };
+  await h.click("retry-request");
+  assert.equal(h.calls.filter(call => call.url.endsWith("/retry")).length, 1);
+  assert.match(h.$("messages").textContent, /retry reached the server/);
+  assert.equal(h.$("retry-request").hidden, savedStatus !== "error");
+  assert.equal(h.storage.has("autokaggle-lite-request:p1:/retry"), false);
+  if (savedStatus === "working") assert.ok([...h.timers.values()].some(timer => timer.ms === 1500));
+  if (savedStatus === "error") assert.match(h.$("notice").textContent, /second model request also failed/);
+ });
+}
+test("Retry keeps its request ID when the server has not started it", async () => {
+ const h = harness({...fixture(), status:"error", error:"Original model failure"});
+ await flush();
+ h.handler = async url => url.endsWith("/retry") ? {ok:false, status:503, json:async()=>({detail:"Connection lost"})} : null;
+ await h.click("retry-request");
+ assert.equal(h.$("retry-request").hidden, false);
+ await h.click("retry-request");
+ const retries = h.calls.filter(call => call.url.endsWith("/retry"));
+ assert.equal(retries.length, 2);
+ assert.equal(retries[0].options.body, retries[1].options.body);
+});
 test("Request limit offers another bounded round",async()=>{const f=fixture();f.model.round_calls=30;const h=harness(f);await flush();assert.equal(h.$("continue-round").hidden,false);assert.match(h.$("recovery-detail").textContent,/saved context/);await h.click("continue-round");assert.ok(h.calls.some(c=>c.url.endsWith("/continue")));});
 test("A stale package has no download or preview links",async()=>{const f=fixture();f.package.status="stale";const h=harness(f);await flush();await h.click("package-button");assert.match(h.$("dialog-content").textContent,/Prepare a new package/);assert.doesNotMatch(h.$("dialog-content").textContent,/Download ZIP/);});
+test("An open package dialog drops obsolete links when a refresh sees a new contract", async () => {
+ const initial = fixture(), h = harness(initial);
+ await flush();
+ await h.click("package-button");
+ assert.match(h.$("dialog-content").textContent, /Download ZIP/);
+ let current = {...initial, contract:{...initial.contract, max_steps:200}, package:{status:"stale", version:"v1"}};
+ h.handler = async (url, options) => url.endsWith("/lite") && !options.method ? {ok:true, json:async()=>current} : null;
+ await h.click("refresh-session");
+ assert.equal(h.$("detail-dialog").open, true);
+ assert.match(h.$("dialog-content").textContent, /Update research package/);
+ assert.doesNotMatch(h.$("dialog-content").textContent, /Download ZIP|Download config|View challenge|Read README/);
+ current = {...current, package:{...initial.package, version:"v2"}};
+ await h.click("refresh-session");
+ assert.match(h.$("dialog-content").textContent, /Version v2/);
+ assert.match(h.$("dialog-content").textContent, /Download ZIP/);
+});
 test("Artifact links are restricted to this session and origin",async()=>{const f=fixture();f.package.url="https://attacker.example/zip";f.package.config_url="https://attacker.example/config";f.package.preview_url="/api/projects/p2/lite/preview";f.package.readme_url="javascript:alert(1)";const h=harness(f);await flush();await h.click("package-button");assert.doesNotMatch(h.$("dialog-content").textContent,/Download ZIP|Download config|View challenge|Read README/);});
 test("Evidence checks never imply an independently reproduced result",async()=>{const f=fixture();f.results=[{evidence_level:"evidence_checked",summary:{score:.5,metric:"success_rate"},received_at:"2026-11-05T12:00:00Z",limitations:"The service did not run the model."}];const h=harness(f);await flush();await h.click("results-button");assert.match(h.$("dialog-content").textContent,/Evidence checked · researcher-run/);assert.match(h.$("dialog-content").textContent,/did not run the model/);assert.doesNotMatch(h.$("dialog-content").textContent,/Independently reproduced/);});
 test("Invalid result JSON receives an actionable error before submission",async()=>{const h=harness();await flush();await h.click("results-button");h.$("result-file").files=[{size:30,text:async()=>'{"summary":{}}'}];await h.$("result-file").events.change();await flush();assert.match(h.$("dialog-error").textContent,/manifest object and a results array/);assert.ok(!h.calls.some(c=>c.url.endsWith("/results")));});
@@ -172,13 +263,13 @@ test("A saved session with messages does not show the opening questions",async()
  await h.clickText("Retry publication");assert.match(h.$("dialog-content").textContent,/Download GitHub ZIP/);
  assert.doesNotMatch(h.$("dialog-content").textContent,/Retry publication/);
  });
-test("GitHub links inside a repository stay in the chat message; only repository roots are imported",async()=>{const h=harness();await flush();
+test("All links in ordinary replies stay in chat until the researcher chooses source import",async()=>{const h=harness();await flush();
  const archive="Compare with https://github.com/owner/repo/archive/0123456789abcdef0123456789abcdef01234567.tar.gz please.";
  await h.input("message-input",archive);await h.click("send-message");
  await h.input("message-input","See https://github.com/owner/repo/blob/main/train.py#L10");await h.click("send-message");
  await h.input("message-input","Code is at https://github.com/owner/repo/.");await h.click("send-message");
- const sent=posts(h);assert.deepEqual(sent.map(p=>p[0]),["message","message","import"]);
- assert.equal(sent[0][1].message,archive);assert.equal(sent[2][1].repository_url,"https://github.com/owner/repo/");});
+ const sent=posts(h);assert.deepEqual(sent.map(p=>p[0]),["message","message","message"]);
+ assert.equal(sent[0][1].message,archive);assert.equal(sent[2][1].message,"Code is at https://github.com/owner/repo/.");});
 test("Opening questions ask for the repository root when given a link inside a repository",async()=>{const f=blank(),h=harness(f);await flush();answered(h,f);
  await h.input("message-input","https://github.com/owner/repo/archive/0123456789abcdef0123456789abcdef01234567.tar.gz");await h.click("send-message");
  assert.match(h.$("messages").textContent,/points inside a repository\. Paste the repository's main link/);assert.match(h.$("messages").textContent,/Is this work based on a paper\?/);
@@ -268,4 +359,32 @@ test('Handoff creation blocks concurrent revocation until it finishes',async()=>
  await flush();const creating=h.clickText('Create handoff code');await flush();
  await h.clickText('Revoke unused code');assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,0);
  finish();await creating;await h.clickText('Revoke unused code');assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,1);
+});
+
+test("Source reading is explicit and keeps the complete reply",async()=>{
+ const h=harness();await flush();const text="Use these metrics. Source https://github.com/owner/repo and https://arxiv.org/abs/2502.09172";
+ await h.input("message-input",text);assert.equal(h.$("linked-source-option").hidden,false);
+ await h.click("read-linked-sources");assert.equal(posts(h).length,0);
+ assert.equal(h.$("repository-url").value,"https://github.com/owner/repo");
+ assert.equal(h.$("paper-url").value,"https://arxiv.org/abs/2502.09172");assert.equal(h.$("source-brief").value,text);
+ await h.submitFor("paper-url");assert.equal(posts(h)[0][0],"import");assert.equal(posts(h)[0][1].brief,text);
+ assert.equal(h.$("message-input").value,"");
+});
+test("A cancelled source read leaves the reply available for normal Send",async()=>{
+ const h=harness();await flush();const text="Do not use https://github.com/owner/repo.";
+ await h.input("message-input",text);await h.click("read-linked-sources");await h.click("close-dialog");
+ assert.equal(h.$("message-input").value,text);await h.click("send-message");
+ assert.equal(posts(h).length,1);assert.equal(posts(h)[0][0],"message");assert.equal(posts(h)[0][1].message,text);
+});
+test("Failed source import keeps the original reply and its retry identity",async()=>{
+ const h=harness();await flush();const text="Read https://github.com/owner/repo";
+ h.handler=async url=>url.endsWith("/import")?{ok:false,status:502,json:async()=>({detail:"Source unavailable"})}:null;
+ await h.input("message-input",text);await h.click("read-linked-sources");await h.submitFor("paper-url");
+ assert.equal(h.$("message-input").value,text);assert.match(h.$("dialog-error").textContent,/Source unavailable/);
+ await h.submitFor("paper-url");const calls=h.calls.filter(c=>c.url.endsWith("/import"));
+ assert.equal(calls[0].options.body,calls[1].options.body);
+});
+test("Ordinary paper references do not start source import",async()=>{
+ const h=harness();await flush();const text="Ignore https://arxiv.org/abs/2502.09172 for now.";
+ await h.input("message-input",text);await h.click("send-message");assert.equal(posts(h).length,1);assert.equal(posts(h)[0][0],"message");assert.equal(posts(h)[0][1].message,text);
 });

@@ -10,7 +10,7 @@
     ["resources", "Resources", "Training and evaluation limits"],
     ["provenance", "Reproduction", "Commands, dependencies, and evidence"]
   ];
-  const state = { id: null, data: null, access: null, busy: false, loading: false, auth: false, generation: 0, poll: null, dialog: null, messageKey: "", pending: new Map() };
+  const state = { id: null, data: null, access: null, busy: false, loading: false, auth: false, generation: 0, readSequence: 0, poll: null, dialog: null, messageKey: "", pending: new Map() };
   const dialog = $("detail-dialog"), content = $("dialog-content");
   const path = (tail = "", id = state.id) => `/api/projects/${encodeURIComponent(id)}/lite${tail}`;
   const el = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined && text !== null) n.textContent = String(text); if (className) n.className = className; return n; };
@@ -42,6 +42,8 @@
     for (const id of ["sources-button", "send-message", "build-package", "retry-request", "continue-round"]) $(id).disabled = !active || blocked;
     $("message-input").disabled = !active || blocked;
     const opening = active ? intake() : null;
+    $("linked-source-option").hidden = !active || !!opening || codingReview() || !!pendingFiles.length || !linkedSources($("message-input").value).length;
+    $("read-linked-sources").disabled = blocked || !active;
     $("attach-paper").hidden = !active; $("attach-paper").disabled = blocked;
     $("message-input").placeholder = codingReview() ? "What should change in the evaluator?" : opening ? "Paste a link, or answer in a sentence…" : "Describe your question, answer, or what you want to change…";
     $("send-message").disabled ||= !$("message-input").value.trim() && !pendingFiles.length;
@@ -72,11 +74,13 @@
     $("sign-in").hidden = false; $("sign-in").href = "/login?next=" + encodeURIComponent("/lite" + (state.id ? "?project=" + encodeURIComponent(state.id) : ""));
     notice("Your sign-in ended. Sign in again to reopen your saved session.", true);
   }
-  async function failure(error) {
+  async function failure(error, isCurrent = () => true) {
+    if (!isCurrent()) return;
     if (error.status === 401) { authFailure(); return; }
     if (error.status === 404 && state.access?.private_mode) {
-      try { const access = await api("/api/access"); if (access.auth_kind === "anonymous") { authFailure(); return; } } catch (_) {}
+      try { const access = await api("/api/access"); if (isCurrent() && access.auth_kind === "anonymous") { authFailure(); return; } } catch (_) {}
     }
+    if (!isCurrent()) return;
     const message = error.message || "The connection stopped. Try again.";
     if (dialog.open) modalError(message); else notice(message, true);
   }
@@ -98,16 +102,44 @@
     if (!saved || saved.fingerprint !== fingerprint) { saved = { fingerprint, id: crypto.randomUUID() }; stored(key, JSON.stringify(saved)); }
     return { id: saved.id, key };
   }
+  function beginSessionWrite() {
+    // A read already in flight may contain the state from before this write.
+    state.readSequence++;
+    state.busy = true;
+  }
+  async function reconcileRetry(error, generation, request) {
+    if (error.status && ![408, 409].includes(error.status) && error.status < 500) return false;
+    const previousCalls = state.data.model?.calls;
+    let data;
+    try { data = await api(path()); }
+    catch (readError) {
+      if ([401, 404].includes(readError.status)) {
+        await failure(readError, () => generation === state.generation);
+      }
+      return generation !== state.generation;
+    }
+    if (generation !== state.generation) return true;
+    // If the retry never reached the server, keep its ID for the next attempt.
+    if (data.status === "error" && data.model?.calls === previousCalls) return false;
+    if (request) stored(request.key, null);
+    state.data = data;
+    notice(); render(); schedule();
+    return true;
+  }
   async function mutate(tail, payload, { after, label, withID = true } = {}) {
     if (busy() || !ready()) return;
     const generation = state.generation, request = withID ? pendingID(tail, payload) : null;
-    state.busy = true; modalError(); notice(label || "Saving…"); controls();
+    beginSessionWrite(); modalError(); notice(label || "Saving…"); controls();
     try {
       const data = await api(path(tail), { method: "POST", body: JSON.stringify({ ...payload, ...(request ? { request_id: request.id } : {}) }) });
       if (generation !== state.generation) return;
       if (request) stored(request.key, null);
-      state.data = data; render(); notice(); if (after) after(data); schedule();
-    } catch (error) { if (generation === state.generation) await failure(error); }
+      state.data = data; notice(); render(); if (after) after(data); schedule();
+    } catch (error) {
+      if (generation !== state.generation) return;
+      if (tail === "/retry" && await reconcileRetry(error, generation, request)) return;
+      await failure(error, () => generation === state.generation);
+    }
     finally { if (generation === state.generation) { state.busy = false; controls(); } }
   }
   function renderChecklist() {
@@ -149,6 +181,7 @@
     $("recovery-title").textContent = limit ? "This interview round is complete" : "Your answers are saved";
     $("recovery-detail").textContent = limit ? "Continue with the saved context for another bounded round. Open decisions still need a recorded answer." : "The agent could not finish its last request. Retry it without adding your answer again.";
     $("result-count").textContent = data.results?.length ? `(${data.results.length})` : "";
+    if (dialog.open && state.dialog === "package" && state.packageKey !== packageKey()) renderPackage();
     renderChecklist(); renderNextAction(); controls();
     if (data.status === "error") notice(data.error || "The agent could not finish this request. Your saved definition is still available. Retry the request or add a correction.", true);
   }
@@ -168,13 +201,21 @@
   }
   function schedule(delay = 1500) {
     clearTimeout(state.poll); if (state.data?.status !== "working" || state.auth) return;
-    const generation = state.generation; state.poll = setTimeout(async () => {
-      try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; render(); schedule(); }
-      catch (error) { if (generation === state.generation) { await failure(error); if (!state.auth) schedule(5000); } }
-    }, delay);
+    state.poll = setTimeout(reload, delay);
   }
   async function reload() {
-    const generation = state.generation; try { const data = await api(path()); if (generation !== state.generation) return; state.data = data; notice(); render(); schedule(); } catch (error) { if (generation === state.generation) { await failure(error); if (!state.auth) schedule(5000); } }
+    if (!state.id || state.auth || state.loading) return;
+    if (state.busy) { schedule(); return; }
+    const generation = state.generation, sequence = ++state.readSequence;
+    const isCurrent = () => generation === state.generation && sequence === state.readSequence;
+    try {
+      const data = await api(path());
+      if (!isCurrent()) return;
+      state.data = data; notice(); render(); schedule();
+    } catch (error) {
+      await failure(error, isCurrent);
+      if (isCurrent()) schedule(5000);
+    }
   }
   async function openSession(id) {
     const arrival = new URLSearchParams(location.search);
@@ -295,11 +336,12 @@
       if (source.truncated) row.append(el("small", "Only a bounded excerpt was read.")); list.append(row);
     } return list;
   }
-  function showSources() {
+  function showSources(prefill = {}) {
     if (!ready()) return; showDialog("sources", "Sources", "PAPER AND REPOSITORY");
     content.append(el("p", "Add another paper or repository here. The agent reads the paper and selected repository files. Review its proposal before the extracted facts become part of your definition."));
     const form = el("form"), paper = field("Paper URL", "paper-url", "url", "A public paper, abstract, or direct PDF link."), repo = field("Public GitHub repository", "repository-url", "url", "The import records the exact commit it reads."), pdf = field("Or upload a paper PDF", "paper-file", "file", "PDF only, up to 16 MB. This is a reference paper, not a dataset."), brief = field("What do you want to investigate? (optional)", "source-brief", "textarea", "State what should change or improve beyond the source work.");
     pdf.input.accept = ".pdf,application/pdf"; brief.input.maxLength = 30000; paper.input.placeholder = "https://arxiv.org/abs/…"; repo.input.placeholder = "https://github.com/owner/repository";
+    paper.input.value = prefill.paper || ""; repo.input.value = prefill.repository || ""; brief.input.value = prefill.brief || "";
     form.append(paper.wrap, repo.wrap, pdf.wrap, brief.wrap);
     const submit = el("button", "Read sources and propose a definition →", "button primary"); submit.type = "submit"; submit.dataset.mutation = "true"; const actions = el("div", null, "dialog-actions"); actions.append(submit); form.append(actions); content.append(form);
     if (state.data.sources?.length) { content.append(el("h3", "Saved sources", "section-label"), sourceRecords()); }
@@ -308,12 +350,15 @@
       if (!paper.input.value.trim() && !repo.input.value.trim() && !file && !state.data.sources?.length) { modalError("Add a paper URL, a PDF, or a public GitHub repository."); return; }
       if (file && (!file.name.toLowerCase().endsWith(".pdf") || file.size > 16 * 1024 * 1024)) { modalError("Choose a PDF file of 16 MB or less."); return; }
       if (file) {
-        const generation = state.generation; state.busy = true; controls();
+        const generation = state.generation; beginSessionWrite(); controls();
         try { const formData = new FormData(); formData.append("file", file); const data = await api(path("/paper"), { method: "POST", body: formData }); if (generation !== state.generation) return; state.data = data; render(); }
         catch (error) { if (generation === state.generation) await failure(error); return; }
         finally { if (generation === state.generation) { state.busy = false; controls(); } }
       }
-      await mutate("/import", { paper_url: paper.input.value.trim(), repository_url: repo.input.value.trim(), brief: brief.input.value.trim() }, { label: "Reading the source material…", after: () => { dialog.close(); } });
+      await mutate("/import", { paper_url: paper.input.value.trim(), repository_url: repo.input.value.trim(), brief: brief.input.value.trim() }, { label: "Reading the source material…", after: () => {
+        if (prefill.composerText && $("message-input").value === prefill.composerText) { $("message-input").value = ""; stored(draftKey(), null); }
+        dialog.close();
+      } });
     }); controls();
   }
   function showOpenDecisions(decisions, description) {
@@ -354,6 +399,16 @@
   }
   function showPackage() {
     if (!ready()) return; showDialog("package", "Research package", "EVALUATION CONTRACT");
+    renderPackage();
+    controls();
+  }
+  function packageKey() {
+    const { package: pack, contract, ready, checklist } = state.data;
+    return JSON.stringify([pack, contract, ready, checklist]);
+  }
+  function renderPackage() {
+    state.packageKey = packageKey();
+    content.replaceChildren();
     const pack = state.data.package || {}, available = pack.status === "ready";
     const descriptions = { ready: "The package matches the current definition. Run it on your own approved resources and return the result report.", stale: "The definition has changed. Prepare a new package before running or reporting another attempt.", not_built: "Prepare a versioned package after the required experiment decisions are recorded." };
     content.append(el("div", descriptions[pack.status] || descriptions.not_built, "package-status"));
@@ -364,7 +419,6 @@
     actions.append(button(pack.status === "stale" ? "Update research package" : available ? "Rebuild package" : "Prepare research package", () => mutate("/build", {}, { label: "Preparing the research package…", after: showPackage }), true, true)); content.append(actions);
     content.append(el("h3", "Recorded contract", "section-label"), el("pre", JSON.stringify(state.data.contract || {}, null, 2), "contract"));
     if (!state.data.ready) { content.append(el("h3", "Required decisions are still open", "section-label")); const ul = el("ul"); for (const item of state.data.checklist || []) for (const missing of item.missing || []) ul.append(el("li", `${item.title}: ${human(missing)}`)); content.append(ul); }
-    controls();
   }
   function resultLevel(result) {
     const value = result.evidence_level || result.evidence_status || result.verification_status || result.status;
@@ -414,7 +468,7 @@
   }
   async function uploadAttachments() {
     const generation = state.generation, opening = intake(), names = [];
-    state.busy = true; controls();
+    beginSessionWrite(); controls();
     try {
       while (pendingFiles.length) {
         const file = pendingFiles[0], form = new FormData(); form.append("file", file);
@@ -445,18 +499,20 @@
       await buildEvaluator(message);
       return;
     }
-    const links = messageLinks(message);
-    const repository = links.find(repositoryRoot);
-    const paper = links.find(url => /^https:\/\/(arxiv\.org|doi\.org)\//i.test(url));
-    const tail = repository || paper ? "/import" : "/message";
-    const payload = repository || paper ? { paper_url: paper || "", repository_url: repository || "", brief: message } : { message };
-    await mutate(tail, payload, { label: "Reading your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
+    await mutate("/message", { message }, { label: "Reading your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
   }
   // Only a repository root link can be imported; the server accepts exactly https://github.com/owner/repository.
   // Other GitHub links, such as files, commits, or archives, stay in the message so the model can read them.
   const messageLinks = text => (text.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(link => link.replace(/[.,;:!?]+$/, ""));
   const githubLink = link => /^https?:\/\/(www\.)?github\.com\//i.test(link);
   const repositoryRoot = link => /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/i.test(link);
+  const paperLink = link => /^https:\/\/(arxiv\.org|doi\.org)\//i.test(link);
+  const linkedSources = text => messageLinks(text).filter(link => repositoryRoot(link) || paperLink(link));
+  function showLinkedSources() {
+    if (!ready() || busy()) return;
+    const composerText = $("message-input").value, links = linkedSources(composerText);
+    showSources({ paper: links.find(paperLink), repository: links.find(repositoryRoot), brief: composerText.trim(), composerText });
+  }
   const insideRepositoryNote = "That GitHub link points inside a repository. Paste the repository's main link, such as https://github.com/owner/repository. ";
   // Opening questions. A new session starts by asking, in the conversation, whether there is a paper and a repository.
   // The answers are kept in this browser tab until the first request is sent; the saved transcript then takes over.
@@ -516,7 +572,7 @@
     saveIntake(); state.messageKey = ""; render();
     const generation = state.generation;
     if (it.file) {
-      state.busy = true; controls();
+      beginSessionWrite(); controls();
       try { const formData = new FormData(); formData.append("file", it.file); const data = await api(path("/paper"), { method: "POST", body: formData }); if (generation !== state.generation) return; state.data = data; it.file = null; }
       catch (error) { if (generation === state.generation) { await failure(error); restartIntake(it, "The PDF could not be read. "); } return; }
       finally { if (generation === state.generation) { state.busy = false; controls(); } }
@@ -695,6 +751,7 @@
     finally { if (generation === state.generation) { state.busy = false; controls(); } }
   }
   $("attach-paper").addEventListener("click", () => $("paper-attach").click?.());
+  $("read-linked-sources").addEventListener("click", showLinkedSources);
   $("paper-attach").addEventListener("change", () => { addAttachments(Array.from($("paper-attach").files || [])); $("paper-attach").value = ""; });
   $("message-input").addEventListener("paste", event => {
     const files = Array.from(event.clipboardData?.files || []); if (files.length) { event.preventDefault(); addAttachments(files); }
