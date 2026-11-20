@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fb"><title>BOLD AutoKaggle Lite</title>
   <link rel="icon" href="/static/bold-butterfly.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/lite.css?v=20261112-agent"><script src="/static/lite.js?v=20261112-agent" defer></script>
+  <link rel="stylesheet" href="/static/lite.css?v=20261120-recovery"><script src="/static/lite.js?v=20261120-recovery" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#message-input">Skip to conversation</a>
@@ -28,6 +28,7 @@
       </div>
       <form id="message-form" class="composer">
         <div id="attachment-list" class="attachment-list" aria-live="polite"></div><label class="sr-only" for="message-input">Your reply or correction</label><textarea id="message-input" rows="2" maxlength="30000" placeholder="Describe your question, answer, or what you want to change…" disabled></textarea>
+        <div id="linked-source-option" class="linked-source-option" hidden><span>Send keeps these links in your reply.</span><button id="read-linked-sources" type="button" class="text-button">Read linked sources</button></div>
         <div class="composer-bottom"><span id="composer-hint">Create a session to start.</span><span class="composer-actions"><button id="attach-paper" class="button quiet" type="button" hidden>Attach</button><input id="paper-attach" type="file" multiple hidden><button id="send-message" class="button primary" type="submit" disabled>Send <span aria-hidden="true">↑</span></button></span></div>
       </form>
 

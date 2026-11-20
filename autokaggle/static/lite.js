@@ -42,6 +42,8 @@
     for (const id of ["sources-button", "send-message", "build-package", "retry-request", "continue-round"]) $(id).disabled = !active || blocked;
     $("message-input").disabled = !active || blocked;
     const opening = active ? intake() : null;
+    $("linked-source-option").hidden = !active || !!opening || codingReview() || !!pendingFiles.length || !linkedSources($("message-input").value).length;
+    $("read-linked-sources").disabled = blocked || !active;
     $("attach-paper").hidden = !active; $("attach-paper").disabled = blocked;
     $("message-input").placeholder = codingReview() ? "What should change in the evaluator?" : opening ? "Paste a link, or answer in a sentence…" : "Describe your question, answer, or what you want to change…";
     $("send-message").disabled ||= !$("message-input").value.trim() && !pendingFiles.length;
@@ -334,11 +336,12 @@
       if (source.truncated) row.append(el("small", "Only a bounded excerpt was read.")); list.append(row);
     } return list;
   }
-  function showSources() {
+  function showSources(prefill = {}) {
     if (!ready()) return; showDialog("sources", "Sources", "PAPER AND REPOSITORY");
     content.append(el("p", "Add another paper or repository here. The agent reads the paper and selected repository files. Review its proposal before the extracted facts become part of your definition."));
     const form = el("form"), paper = field("Paper URL", "paper-url", "url", "A public paper, abstract, or direct PDF link."), repo = field("Public GitHub repository", "repository-url", "url", "The import records the exact commit it reads."), pdf = field("Or upload a paper PDF", "paper-file", "file", "PDF only, up to 16 MB. This is a reference paper, not a dataset."), brief = field("What do you want to investigate? (optional)", "source-brief", "textarea", "State what should change or improve beyond the source work.");
     pdf.input.accept = ".pdf,application/pdf"; brief.input.maxLength = 30000; paper.input.placeholder = "https://arxiv.org/abs/…"; repo.input.placeholder = "https://github.com/owner/repository";
+    paper.input.value = prefill.paper || ""; repo.input.value = prefill.repository || ""; brief.input.value = prefill.brief || "";
     form.append(paper.wrap, repo.wrap, pdf.wrap, brief.wrap);
     const submit = el("button", "Read sources and propose a definition →", "button primary"); submit.type = "submit"; submit.dataset.mutation = "true"; const actions = el("div", null, "dialog-actions"); actions.append(submit); form.append(actions); content.append(form);
     if (state.data.sources?.length) { content.append(el("h3", "Saved sources", "section-label"), sourceRecords()); }
@@ -352,7 +355,10 @@
         catch (error) { if (generation === state.generation) await failure(error); return; }
         finally { if (generation === state.generation) { state.busy = false; controls(); } }
       }
-      await mutate("/import", { paper_url: paper.input.value.trim(), repository_url: repo.input.value.trim(), brief: brief.input.value.trim() }, { label: "Reading the source material…", after: () => { dialog.close(); } });
+      await mutate("/import", { paper_url: paper.input.value.trim(), repository_url: repo.input.value.trim(), brief: brief.input.value.trim() }, { label: "Reading the source material…", after: () => {
+        if (prefill.composerText && $("message-input").value === prefill.composerText) { $("message-input").value = ""; stored(draftKey(), null); }
+        dialog.close();
+      } });
     }); controls();
   }
   function showOpenDecisions(decisions, description) {
@@ -493,18 +499,20 @@
       await buildEvaluator(message);
       return;
     }
-    const links = messageLinks(message);
-    const repository = links.find(repositoryRoot);
-    const paper = links.find(url => /^https:\/\/(arxiv\.org|doi\.org)\//i.test(url));
-    const tail = repository || paper ? "/import" : "/message";
-    const payload = repository || paper ? { paper_url: paper || "", repository_url: repository || "", brief: message } : { message };
-    await mutate(tail, payload, { label: "Reading your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
+    await mutate("/message", { message }, { label: "Reading your answer…", after: () => { $("message-input").value = ""; stored(draftKey(), null); $("transcript").scrollTop = $("transcript").scrollHeight; } });
   }
   // Only a repository root link can be imported; the server accepts exactly https://github.com/owner/repository.
   // Other GitHub links, such as files, commits, or archives, stay in the message so the model can read them.
   const messageLinks = text => (text.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(link => link.replace(/[.,;:!?]+$/, ""));
   const githubLink = link => /^https?:\/\/(www\.)?github\.com\//i.test(link);
   const repositoryRoot = link => /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/i.test(link);
+  const paperLink = link => /^https:\/\/(arxiv\.org|doi\.org)\//i.test(link);
+  const linkedSources = text => messageLinks(text).filter(link => repositoryRoot(link) || paperLink(link));
+  function showLinkedSources() {
+    if (!ready() || busy()) return;
+    const composerText = $("message-input").value, links = linkedSources(composerText);
+    showSources({ paper: links.find(paperLink), repository: links.find(repositoryRoot), brief: composerText.trim(), composerText });
+  }
   const insideRepositoryNote = "That GitHub link points inside a repository. Paste the repository's main link, such as https://github.com/owner/repository. ";
   // Opening questions. A new session starts by asking, in the conversation, whether there is a paper and a repository.
   // The answers are kept in this browser tab until the first request is sent; the saved transcript then takes over.
@@ -743,6 +751,7 @@
     finally { if (generation === state.generation) { state.busy = false; controls(); } }
   }
   $("attach-paper").addEventListener("click", () => $("paper-attach").click?.());
+  $("read-linked-sources").addEventListener("click", showLinkedSources);
   $("paper-attach").addEventListener("change", () => { addAttachments(Array.from($("paper-attach").files || [])); $("paper-attach").value = ""; });
   $("message-input").addEventListener("paste", event => {
     const files = Array.from(event.clipboardData?.files || []); if (files.length) { event.preventDefault(); addAttachments(files); }

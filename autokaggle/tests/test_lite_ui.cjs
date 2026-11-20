@@ -263,13 +263,13 @@ test("A saved session with messages does not show the opening questions",async()
  await h.clickText("Retry publication");assert.match(h.$("dialog-content").textContent,/Download GitHub ZIP/);
  assert.doesNotMatch(h.$("dialog-content").textContent,/Retry publication/);
  });
-test("GitHub links inside a repository stay in the chat message; only repository roots are imported",async()=>{const h=harness();await flush();
+test("All links in ordinary replies stay in chat until the researcher chooses source import",async()=>{const h=harness();await flush();
  const archive="Compare with https://github.com/owner/repo/archive/0123456789abcdef0123456789abcdef01234567.tar.gz please.";
  await h.input("message-input",archive);await h.click("send-message");
  await h.input("message-input","See https://github.com/owner/repo/blob/main/train.py#L10");await h.click("send-message");
  await h.input("message-input","Code is at https://github.com/owner/repo/.");await h.click("send-message");
- const sent=posts(h);assert.deepEqual(sent.map(p=>p[0]),["message","message","import"]);
- assert.equal(sent[0][1].message,archive);assert.equal(sent[2][1].repository_url,"https://github.com/owner/repo/");});
+ const sent=posts(h);assert.deepEqual(sent.map(p=>p[0]),["message","message","message"]);
+ assert.equal(sent[0][1].message,archive);assert.equal(sent[2][1].message,"Code is at https://github.com/owner/repo/.");});
 test("Opening questions ask for the repository root when given a link inside a repository",async()=>{const f=blank(),h=harness(f);await flush();answered(h,f);
  await h.input("message-input","https://github.com/owner/repo/archive/0123456789abcdef0123456789abcdef01234567.tar.gz");await h.click("send-message");
  assert.match(h.$("messages").textContent,/points inside a repository\. Paste the repository's main link/);assert.match(h.$("messages").textContent,/Is this work based on a paper\?/);
@@ -359,4 +359,32 @@ test('Handoff creation blocks concurrent revocation until it finishes',async()=>
  await flush();const creating=h.clickText('Create handoff code');await flush();
  await h.clickText('Revoke unused code');assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,0);
  finish();await creating;await h.clickText('Revoke unused code');assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,1);
+});
+
+test("Source reading is explicit and keeps the complete reply",async()=>{
+ const h=harness();await flush();const text="Use these metrics. Source https://github.com/owner/repo and https://arxiv.org/abs/2502.09172";
+ await h.input("message-input",text);assert.equal(h.$("linked-source-option").hidden,false);
+ await h.click("read-linked-sources");assert.equal(posts(h).length,0);
+ assert.equal(h.$("repository-url").value,"https://github.com/owner/repo");
+ assert.equal(h.$("paper-url").value,"https://arxiv.org/abs/2502.09172");assert.equal(h.$("source-brief").value,text);
+ await h.submitFor("paper-url");assert.equal(posts(h)[0][0],"import");assert.equal(posts(h)[0][1].brief,text);
+ assert.equal(h.$("message-input").value,"");
+});
+test("A cancelled source read leaves the reply available for normal Send",async()=>{
+ const h=harness();await flush();const text="Do not use https://github.com/owner/repo.";
+ await h.input("message-input",text);await h.click("read-linked-sources");await h.click("close-dialog");
+ assert.equal(h.$("message-input").value,text);await h.click("send-message");
+ assert.equal(posts(h).length,1);assert.equal(posts(h)[0][0],"message");assert.equal(posts(h)[0][1].message,text);
+});
+test("Failed source import keeps the original reply and its retry identity",async()=>{
+ const h=harness();await flush();const text="Read https://github.com/owner/repo";
+ h.handler=async url=>url.endsWith("/import")?{ok:false,status:502,json:async()=>({detail:"Source unavailable"})}:null;
+ await h.input("message-input",text);await h.click("read-linked-sources");await h.submitFor("paper-url");
+ assert.equal(h.$("message-input").value,text);assert.match(h.$("dialog-error").textContent,/Source unavailable/);
+ await h.submitFor("paper-url");const calls=h.calls.filter(c=>c.url.endsWith("/import"));
+ assert.equal(calls[0].options.body,calls[1].options.body);
+});
+test("Ordinary paper references do not start source import",async()=>{
+ const h=harness();await flush();const text="Ignore https://arxiv.org/abs/2502.09172 for now.";
+ await h.input("message-input",text);await h.click("send-message");assert.equal(posts(h).length,1);assert.equal(posts(h)[0][0],"message");assert.equal(posts(h)[0][1].message,text);
 });
