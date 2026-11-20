@@ -119,6 +119,22 @@ test("Retry keeps its request ID when the server has not started it", async () =
 });
 test("Request limit offers another bounded round",async()=>{const f=fixture();f.model.round_calls=30;const h=harness(f);await flush();assert.equal(h.$("continue-round").hidden,false);assert.match(h.$("recovery-detail").textContent,/saved context/);await h.click("continue-round");assert.ok(h.calls.some(c=>c.url.endsWith("/continue")));});
 test("A stale package has no download or preview links",async()=>{const f=fixture();f.package.status="stale";const h=harness(f);await flush();await h.click("package-button");assert.match(h.$("dialog-content").textContent,/Prepare a new package/);assert.doesNotMatch(h.$("dialog-content").textContent,/Download ZIP/);});
+test("An open package dialog drops obsolete links when a refresh sees a new contract", async () => {
+ const initial = fixture(), h = harness(initial);
+ await flush();
+ await h.click("package-button");
+ assert.match(h.$("dialog-content").textContent, /Download ZIP/);
+ let current = {...initial, contract:{...initial.contract, max_steps:200}, package:{status:"stale", version:"v1"}};
+ h.handler = async (url, options) => url.endsWith("/lite") && !options.method ? {ok:true, json:async()=>current} : null;
+ await h.click("refresh-session");
+ assert.equal(h.$("detail-dialog").open, true);
+ assert.match(h.$("dialog-content").textContent, /Update research package/);
+ assert.doesNotMatch(h.$("dialog-content").textContent, /Download ZIP|Download config|View challenge|Read README/);
+ current = {...current, package:{...initial.package, version:"v2"}};
+ await h.click("refresh-session");
+ assert.match(h.$("dialog-content").textContent, /Version v2/);
+ assert.match(h.$("dialog-content").textContent, /Download ZIP/);
+});
 test("Artifact links are restricted to this session and origin",async()=>{const f=fixture();f.package.url="https://attacker.example/zip";f.package.config_url="https://attacker.example/config";f.package.preview_url="/api/projects/p2/lite/preview";f.package.readme_url="javascript:alert(1)";const h=harness(f);await flush();await h.click("package-button");assert.doesNotMatch(h.$("dialog-content").textContent,/Download ZIP|Download config|View challenge|Read README/);});
 test("Evidence checks never imply an independently reproduced result",async()=>{const f=fixture();f.results=[{evidence_level:"evidence_checked",summary:{score:.5,metric:"success_rate"},received_at:"2026-11-05T12:00:00Z",limitations:"The service did not run the model."}];const h=harness(f);await flush();await h.click("results-button");assert.match(h.$("dialog-content").textContent,/Evidence checked · researcher-run/);assert.match(h.$("dialog-content").textContent,/did not run the model/);assert.doesNotMatch(h.$("dialog-content").textContent,/Independently reproduced/);});
 test("Invalid result JSON receives an actionable error before submission",async()=>{const h=harness();await flush();await h.click("results-button");h.$("result-file").files=[{size:30,text:async()=>'{"summary":{}}'}];await h.$("result-file").events.change();await flush();assert.match(h.$("dialog-error").textContent,/manifest object and a results array/);assert.ok(!h.calls.some(c=>c.url.endsWith("/results")));});

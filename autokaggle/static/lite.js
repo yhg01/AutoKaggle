@@ -179,6 +179,7 @@
     $("recovery-title").textContent = limit ? "This interview round is complete" : "Your answers are saved";
     $("recovery-detail").textContent = limit ? "Continue with the saved context for another bounded round. Open decisions still need a recorded answer." : "The agent could not finish its last request. Retry it without adding your answer again.";
     $("result-count").textContent = data.results?.length ? `(${data.results.length})` : "";
+    if (dialog.open && state.dialog === "package" && state.packageKey !== packageKey()) renderPackage();
     renderChecklist(); renderNextAction(); controls();
     if (data.status === "error") notice(data.error || "The agent could not finish this request. Your saved definition is still available. Retry the request or add a correction.", true);
   }
@@ -392,6 +393,16 @@
   }
   function showPackage() {
     if (!ready()) return; showDialog("package", "Research package", "EVALUATION CONTRACT");
+    renderPackage();
+    controls();
+  }
+  function packageKey() {
+    const { package: pack, contract, ready, checklist } = state.data;
+    return JSON.stringify([pack, contract, ready, checklist]);
+  }
+  function renderPackage() {
+    state.packageKey = packageKey();
+    content.replaceChildren();
     const pack = state.data.package || {}, available = pack.status === "ready";
     const descriptions = { ready: "The package matches the current definition. Run it on your own approved resources and return the result report.", stale: "The definition has changed. Prepare a new package before running or reporting another attempt.", not_built: "Prepare a versioned package after the required experiment decisions are recorded." };
     content.append(el("div", descriptions[pack.status] || descriptions.not_built, "package-status"));
@@ -402,7 +413,6 @@
     actions.append(button(pack.status === "stale" ? "Update research package" : available ? "Rebuild package" : "Prepare research package", () => mutate("/build", {}, { label: "Preparing the research package…", after: showPackage }), true, true)); content.append(actions);
     content.append(el("h3", "Recorded contract", "section-label"), el("pre", JSON.stringify(state.data.contract || {}, null, 2), "contract"));
     if (!state.data.ready) { content.append(el("h3", "Required decisions are still open", "section-label")); const ul = el("ul"); for (const item of state.data.checklist || []) for (const missing of item.missing || []) ul.append(el("li", `${item.title}: ${human(missing)}`)); content.append(ul); }
-    controls();
   }
   function resultLevel(result) {
     const value = result.evidence_level || result.evidence_status || result.verification_status || result.status;
